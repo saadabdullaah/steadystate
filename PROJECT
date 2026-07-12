@@ -1,0 +1,6 @@
+domain: steadystate.dev
+layout:
+- go.kubebuilder.io/v4
+projectName: steadystate
+repo: github.com/saadabdullaah/steadystate
+version: "3"

@@ -1,3 +1,40 @@
 # Private planning material — never commit or publish.
 m-plan.md
 
+# Local toolchain and generated artifacts
+.tools/
+.artifacts/
+bin/
+dist/
+cover.out
+coverage.*
+*.test
+
+# Local Kubernetes state and credentials
+.kube/
+kubeconfig*
+*.kubeconfig
+*.key
+*.pem
+*.age
+age-key.txt
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.secret
+secrets.local.*
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local logs and temporary files
+*.log
+*.tmp
+tmp/
