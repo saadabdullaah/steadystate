@@ -173,13 +173,18 @@ function Invoke-NetworkPolicyProof {
     if ($LASTEXITCODE -ne 0) { throw 'Failed to apply NetworkPolicy proof workloads' }
     Invoke-External kubectl wait -n steadystate-network-test --for=condition=Available deployment/server --timeout=180s
     Invoke-External kubectl wait -n steadystate-network-test --for=condition=Ready pod/client --timeout=180s
-    Invoke-External kubectl exec -n steadystate-network-test client -- curl --fail --silent --max-time 5 http://server/healthz
+    $curlArguments = @('exec', '-n', 'steadystate-network-test', 'client', '--', 'curl', '--fail', '--silent', '--max-time', '5', 'http://server/healthz')
+    Invoke-External -Executable kubectl -Arguments $curlArguments
     $policy | & kubectl apply -f -
     if ($LASTEXITCODE -ne 0) { throw 'Failed to apply deny policy' }
     Start-Sleep -Seconds 5
-    & kubectl exec -n steadystate-network-test client -- curl --fail --silent --max-time 5 http://server/healthz *> $null
-    if ($LASTEXITCODE -eq 0) { throw 'NetworkPolicy did not block ingress; CNI enforcement is not working' }
-    Invoke-External kubectl exec -n steadystate-network-test client -- nslookup kubernetes.default.svc.cluster.local
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & kubectl @curlArguments *> $null
+    $curlExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($curlExitCode -eq 0) { throw 'NetworkPolicy did not block ingress; CNI enforcement is not working' }
+    Invoke-External -Executable kubectl -Arguments @('exec', '-n', 'steadystate-network-test', 'client', '--', 'nslookup', 'kubernetes.default.svc.cluster.local')
     Write-Host 'NetworkPolicy proof passed: allowed before policy, denied after policy, DNS remained available.'
 }
 
