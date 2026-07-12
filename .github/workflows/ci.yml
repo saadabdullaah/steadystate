@@ -41,7 +41,7 @@ jobs:
         run: |
           source scripts/versions.env
           go install github.com/rhysd/actionlint/cmd/actionlint@v${ACTIONLINT_VERSION}
-          actionlint
+          "$(go env GOPATH)/bin/actionlint"
           python -m pip install --disable-pip-version-check "yamllint==${YAMLLINT_VERSION}"
           yamllint .
           npx --yes "markdownlint-cli2@${MARKDOWNLINT_CLI2_VERSION}" "**/*.md" "#m-plan.md"

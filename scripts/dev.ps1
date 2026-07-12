@@ -37,9 +37,9 @@ function Read-Versions {
 }
 
 function Invoke-External {
-    param([Parameter(Mandatory)][string]$File, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
-    & $File @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "$File exited with code $LASTEXITCODE" }
+    param([Parameter(Mandatory)][string]$Executable, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    & $Executable @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "$Executable exited with code $LASTEXITCODE" }
 }
 
 function Test-CommandAvailable([string]$Name) {
