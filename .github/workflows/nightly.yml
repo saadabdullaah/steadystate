@@ -1,0 +1,44 @@
+name: Nightly integration
+
+on:
+  schedule:
+    - cron: "41 20 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  round-trip:
+    name: standard-round-trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install pinned tools
+        shell: pwsh
+        run: ./scripts/install-tools.ps1
+      - name: Bootstrap standard profile
+        shell: pwsh
+        run: ./scripts/dev.ps1 bootstrap -Profile standard
+      - name: Destroy and bootstrap again
+        shell: pwsh
+        run: |
+          ./scripts/dev.ps1 destroy
+          ./scripts/dev.ps1 bootstrap -Profile standard
+      - name: Capture diagnostics
+        if: failure()
+        shell: pwsh
+        run: ./scripts/dev.ps1 diagnostics
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: standard-round-trip-diagnostics
+          path: .artifacts/diagnostics/
+          retention-days: 7
+      - name: Destroy cluster
+        if: always()
+        shell: pwsh
+        run: ./scripts/dev.ps1 destroy
