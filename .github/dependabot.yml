@@ -1,0 +1,35 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Karachi
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+    labels: ["dependencies", "go"]
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: Asia/Karachi
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: ["dependencies", "github-actions"]
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Asia/Karachi
+    labels: ["dependencies", "containers"]
+    open-pull-requests-limit: 3
