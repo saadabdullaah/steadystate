@@ -103,12 +103,26 @@ spec:
   provider:
     type: Kubernetes
     kubernetes:
+      envoyDeployment:
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              template:
+                spec:
+                  nodeSelector:
+                    ingress-ready: "true"
+                  tolerations:
+                    - key: node-role.kubernetes.io/control-plane
+                      operator: Exists
+                      effect: NoSchedule
       envoyService:
         patch:
           type: StrategicMerge
           value:
             spec:
               type: NodePort
+              externalTrafficPolicy: Cluster
               ports:
                 - name: http-80
                   port: 80
