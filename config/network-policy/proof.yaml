@@ -20,7 +20,9 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
+        runAsGroup: 65532
         runAsNonRoot: true
+        runAsUser: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -33,6 +35,10 @@ spec:
             httpGet:
               path: /healthz
               port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
           resources:
             requests: {cpu: 10m, memory: 16Mi}
             limits: {cpu: 100m, memory: 64Mi}
@@ -41,6 +47,7 @@ spec:
             capabilities:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
+            runAsUser: 65532
 ---
 apiVersion: v1
 kind: Service
@@ -62,13 +69,21 @@ metadata:
 spec:
   automountServiceAccountToken: false
   securityContext:
+    runAsGroup: 65532
     runAsNonRoot: true
+    runAsUser: 65532
     seccompProfile:
       type: RuntimeDefault
   containers:
     - name: client
       image: curlimages/curl@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6
       command: ["sleep", "3600"]
+      readinessProbe:
+        exec:
+          command: ["sh", "-c", "true"]
+      livenessProbe:
+        exec:
+          command: ["sh", "-c", "true"]
       resources:
         requests: {cpu: 10m, memory: 16Mi}
         limits: {cpu: 100m, memory: 64Mi}
@@ -77,6 +92,7 @@ spec:
         capabilities:
           drop: ["ALL"]
         readOnlyRootFilesystem: true
+        runAsUser: 65532
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

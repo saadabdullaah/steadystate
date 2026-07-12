@@ -22,7 +22,9 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
+        runAsGroup: 65532
         runAsNonRoot: true
+        runAsUser: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -33,6 +35,10 @@ spec:
             - name: http
               containerPort: 8080
           readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
             httpGet:
               path: /healthz
               port: http
@@ -49,6 +55,7 @@ spec:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            runAsUser: 65532
             seccompProfile:
               type: RuntimeDefault
 ---
@@ -64,6 +71,28 @@ spec:
     - name: http
       port: 80
       targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-envoy-to-echo
+  namespace: steadystate-smoke
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: echo
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: ["envoy-gateway-system", "steadystate-smoke"]
+      ports:
+        - protocol: TCP
+          port: 8080
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy

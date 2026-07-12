@@ -46,6 +46,24 @@ function Test-CommandAvailable([string]$Name) {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Wait-KubernetesResource {
+    param(
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [int]$TimeoutSeconds = 300
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & kubectl get @Arguments *> $null
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($exitCode -eq 0) { return }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw "Timed out waiting for Kubernetes resource: $($Arguments -join ' ')"
+}
+
 function Assert-Tools {
     $missing = @('go','kind','kubectl','helm') | Where-Object { -not (Test-CommandAvailable $_) }
     if ($missing) { throw "Missing tools: $($missing -join ', '). Run '.\scripts\dev.ps1 tools'." }
@@ -190,6 +208,7 @@ function Invoke-Bootstrap {
         Invoke-External kubectl apply --server-side -f "https://raw.githubusercontent.com/projectcalico/calico/v$($v.CALICO_VERSION)/manifests/tigera-operator.yaml"
         Invoke-External kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/v$($v.CALICO_VERSION)/manifests/custom-resources.yaml"
         Invoke-External kubectl wait --for=condition=Available deployment/tigera-operator -n tigera-operator --timeout=300s
+        Wait-KubernetesResource -Arguments @('daemonset/calico-node', '-n', 'calico-system')
         Invoke-External kubectl rollout status daemonset/calico-node -n calico-system --timeout=300s
         Invoke-External kubectl wait nodes --all --for=condition=Ready --timeout=300s
 
@@ -200,7 +219,7 @@ function Invoke-Bootstrap {
         $elapsed = (Get-Date) - $started
         Write-Host ("SteadyState {0} profile is ready in {1:n1} minutes." -f $Profile, $elapsed.TotalMinutes)
     } catch {
-        Write-Error $_
+        Write-Warning $_.Exception.Message
         if ($ClusterName -in (Get-ClusterNames)) { Invoke-Diagnostics }
         else { Write-Warning 'Cluster creation failed before diagnostics could be collected.' }
         throw
