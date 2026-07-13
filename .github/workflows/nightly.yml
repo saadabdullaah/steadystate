@@ -74,7 +74,7 @@ jobs:
           curl --fail --location --retry 3 --output "$vhs_archive" \
             "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
           echo "${VHS_LINUX_X86_64_SHA256}  ${vhs_archive}" | sha256sum --check --strict
-          tar --extract --gzip --file "$vhs_archive" --directory "$install_dir"
+          tar --extract --gzip --strip-components=1 --file "$vhs_archive" --directory "$install_dir"
 
           curl --fail --location --retry 3 --output "$install_dir/ttyd" \
             "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
