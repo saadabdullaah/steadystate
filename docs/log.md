@@ -33,3 +33,22 @@
 - Reproved Gateway API ingress and Calico NetworkPolicy enforcement on Windows.
 - Hardened the positive-connectivity proof against transient Service endpoint programming.
 - Converged the existing cluster in 1.2 minutes, then proved destroy is safe both when present and absent.
+
+## 2026-07-13 — Phase 1 Application API and reconciliation
+
+### Done
+
+- Added the namespaced `Application` API, defaults, CEL validation, printer columns, generated CRD, and least-privileged RBAC in PR #6.
+- Added deterministic builders and watch-driven reconciliation for Deployment, Service, ConfigMap, and HTTPRoute in PR #8.
+- Added controller owner references, finalizer handling, truthful observed status, conflict retry, unsupported-capability reporting, and zero-write idempotency coverage.
+- Added the in-cluster operator runtime, hardened demo application, shared Gateway integration, and destructive self-heal harness in PR #9.
+- Recovered and audited all GitHub PR refs after the local environment loss; no unmerged Phase 1 feature branch remained.
+- Passed the hosted standard-profile round trip and destructive acceptance test in [Nightly Integration run 29260395935](https://github.com/saadabdullaah/steadystate/actions/runs/29260395935).
+- Recreated Deployment, Service, ConfigMap, and HTTPRoute with new UIDs; Deployment recreation completed in 0.300 seconds and replica drift repair in 0.435 seconds.
+- Proved HTTP 200 through Envoy Gateway after repair, truthful `Ready=True`, finalizer release, and garbage collection of every owned child.
+- Generated the checksum-verified VHS recording and schema-versioned JSON evidence for the Phase 1 closeout.
+
+### Next
+
+- Validate the diagnostics-inclusive acceptance artifact on the final PR revision.
+- Require final branch and post-merge CodeQL/Nightly success, then release `v0.1.0` before beginning Phase 2.

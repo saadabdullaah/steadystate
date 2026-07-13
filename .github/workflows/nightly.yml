@@ -37,8 +37,101 @@ jobs:
         run: |
           ./scripts/dev.ps1 deploy-operator
           ./scripts/dev.ps1 test-operator
-          ./scripts/dev.ps1 demo-self-heal
-          ./scripts/dev.ps1 undeploy-operator
+      - name: Load pinned recording versions
+        shell: pwsh
+        run: |
+          $required = @(
+            'VHS_VERSION',
+            'TTYD_VERSION',
+            'VHS_LINUX_X86_64_SHA256',
+            'TTYD_LINUX_X86_64_SHA256'
+          )
+          $entries = @{}
+          Get-Content -LiteralPath scripts/versions.env | ForEach-Object {
+            if ($_ -match '^([^#=]+)=(.+)$') { $entries[$Matches[1]] = $Matches[2] }
+          }
+          foreach ($name in $required) {
+            if (-not $entries[$name]) { throw "$name is missing from scripts/versions.env." }
+            "$name=$($entries[$name])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+      # vhs-action v2.1.0 searches for an FFmpeg 5.1 release asset that no
+      # longer exists. Install the same official VHS release directly so every
+      # downloaded binary remains version- and checksum-locked.
+      - name: Install pinned recording tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version | head -n 1
+
+          install_dir="$RUNNER_TEMP/steadystate-recording/bin"
+          mkdir -p "$install_dir"
+
+          vhs_archive="$RUNNER_TEMP/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          curl --fail --location --retry 3 --output "$vhs_archive" \
+            "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          echo "${VHS_LINUX_X86_64_SHA256}  ${vhs_archive}" | sha256sum --check --strict
+          tar --extract --gzip --strip-components=1 --file "$vhs_archive" --directory "$install_dir"
+
+          curl --fail --location --retry 3 --output "$install_dir/ttyd" \
+            "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
+          echo "${TTYD_LINUX_X86_64_SHA256}  ${install_dir}/ttyd" | sha256sum --check --strict
+          chmod 0755 "$install_dir/vhs" "$install_dir/ttyd"
+
+          "$install_dir/vhs" --version
+          "$install_dir/ttyd" --version
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Record and run the Phase 1 self-heal acceptance test
+        shell: bash
+        env:
+          CI: ""
+          COLORTERM: truecolor
+        run: vhs docs/demonstrations/phase1-self-heal.tape
+      - name: Verify Phase 1 acceptance evidence
+        shell: pwsh
+        run: |
+          $gif = Get-Item -LiteralPath docs/demonstrations/phase1-self-heal.gif
+          if ($gif.Length -le 0) { throw 'The Phase 1 GIF is empty.' }
+          $evidence = Get-Content -Raw -LiteralPath .artifacts/phase1/acceptance.json | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed') {
+            throw 'The Phase 1 evidence document is invalid or did not pass.'
+          }
+          $required = @(
+            'application-ready',
+            'deployment-recreated',
+            'service-recreated',
+            'configmap-recreated',
+            'httproute-recreated',
+            'deployment-drift-repaired',
+            'gateway-reachable',
+            'application-garbage-collected'
+          )
+          $actual = @($evidence.checks | Where-Object status -eq 'passed' | ForEach-Object name)
+          foreach ($name in $required) {
+            if ($name -notin $actual) { throw "Missing passed acceptance check: $name" }
+          }
+          foreach ($timed in @('deployment-recreated', 'deployment-drift-repaired')) {
+            $check = $evidence.checks | Where-Object name -eq $timed
+            if ([double]$check.elapsedSeconds -ge 10) { throw "$timed exceeded the 10-second Phase 1 limit." }
+          }
+          Write-Host "Verified $($required.Count) Phase 1 acceptance checks and $($gif.Length) bytes of GIF evidence."
+      - name: Capture Phase 1 acceptance diagnostics
+        shell: pwsh
+        run: ./scripts/dev.ps1 diagnostics
+      - name: Upload Phase 1 acceptance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase1-acceptance-${{ github.sha }}
+          path: |
+            docs/demonstrations/phase1-self-heal.gif
+            .artifacts/phase1/acceptance.json
+            .artifacts/diagnostics/
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
       - name: Capture diagnostics
         if: failure()
         shell: pwsh
@@ -50,6 +143,12 @@ jobs:
           name: standard-round-trip-diagnostics
           path: .artifacts/diagnostics/
           retention-days: 7
+          include-hidden-files: true
+      - name: Undeploy the Application operator
+        if: always()
+        shell: pwsh
+        run: |
+          ./scripts/dev.ps1 undeploy-operator
       - name: Destroy cluster
         if: always()
         shell: pwsh
