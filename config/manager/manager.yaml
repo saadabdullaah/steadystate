@@ -3,11 +3,17 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: controller-manager
+  namespace: steadystate-system
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: controller-manager
+  namespace: steadystate-system
+  annotations:
+    checkov.io/skip1: CKV_K8S_43=Phase 1 images are built and loaded into kind locally; registry publishing and immutable runtime digests begin in Phase 3.
+    checkov.io/skip2: CKV_K8S_15=IfNotPresent is required so kind uses the locally loaded Phase 1 image instead of contacting an unpublished registry tag.
+    checkov.io/skip3: CKV_K8S_38=The controller requires its dedicated least-privileged service-account token to reconcile Kubernetes resources.
   labels:
     app.kubernetes.io/component: controller
 spec:
@@ -21,9 +27,12 @@ spec:
         control-plane: controller-manager
     spec:
       serviceAccountName: controller-manager
+      automountServiceAccountToken: true
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
