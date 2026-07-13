@@ -61,7 +61,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          command -v ffmpeg >/dev/null 2>&1 || { echo 'The hosted runner does not provide FFmpeg.' >&2; exit 1; }
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version | head -n 1
 
           install_dir="$RUNNER_TEMP/steadystate-recording/bin"
           mkdir -p "$install_dir"
