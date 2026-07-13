@@ -15,7 +15,13 @@ try {
             }
         }
     }
-    Write-Host 'Privacy guard passed: no private planning material is tracked.'
+    $dockerIgnore = @(Get-Content -LiteralPath '.dockerignore' -Encoding UTF8)
+    foreach ($requiredPattern in @('.git','.tools','.artifacts','m-plan.md','**/m-plan.md','MASTER_PLAN.md','**/MASTER_PLAN.md')) {
+        if ($requiredPattern -notin $dockerIgnore) {
+            throw "Docker build context can expose private or local material; .dockerignore is missing: $requiredPattern"
+        }
+    }
+    Write-Host 'Privacy guard passed: private planning material is absent from Git and Docker build contexts.'
 } finally {
     Pop-Location
 }

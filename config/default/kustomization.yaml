@@ -4,6 +4,7 @@ namePrefix: steadystate-
 
 resources:
 - ../crd
+- ../manager
 - ../rbac
 
 labels:

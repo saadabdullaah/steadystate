@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','undeploy-operator','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -43,6 +43,10 @@ function Read-Versions {
     return $values
 }
 
+$VersionLock = Read-Versions
+$OperatorImage = $VersionLock.OPERATOR_IMAGE
+$DemoImage = $VersionLock.DEMO_IMAGE
+
 function Invoke-External {
     param([Parameter(Mandatory)][string]$Executable, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
     & $Executable @Arguments
@@ -82,6 +86,21 @@ function Assert-CodegenTools {
     if ($missing) { throw "Missing code-generation tools: $($missing -join ', '). Run '.\scripts\dev.ps1 tools'." }
 }
 
+function Assert-Docker {
+    if (-not (Test-CommandAvailable 'docker')) { throw "Docker is missing. Run '.\scripts\dev.ps1 doctor'." }
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & docker info *> $null
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($exitCode -ne 0) { throw 'Docker engine is not running.' }
+}
+
+function Assert-Cluster {
+    Assert-Tools
+    if ($ClusterName -notin (Get-ClusterNames)) { throw "kind cluster '$ClusterName' is absent. Run '.\scripts\dev.ps1 bootstrap'." }
+}
+
 function Invoke-Generate {
     Assert-CodegenTools
     # Explicit package paths avoid controller-gen's recursive-pattern expansion bug on Windows.
@@ -119,6 +138,73 @@ function Invoke-Envtest {
         "XDG_CACHE_HOME=$wslRoot/.tools/cache/xdg/linux-amd64" `
         "$wslRoot/.tools/go/linux-amd64/bin/go" -C $wslRoot test -tags=envtest ./internal/controller/...
     if ($LASTEXITCODE -ne 0) { throw "WSL envtest exited with code $LASTEXITCODE" }
+}
+
+function Invoke-BuildImages {
+    Assert-Docker
+    $v = Read-Versions
+    Invoke-External docker build --platform linux/amd64 --pull --build-arg "GO_BUILDER=$($v.GO_BUILDER_IMAGE)" --file Dockerfile --tag $OperatorImage .
+    Invoke-External docker build --platform linux/amd64 --pull --build-arg "GO_BUILDER=$($v.GO_BUILDER_IMAGE)" --file apps/demo-app/Dockerfile --tag $DemoImage .
+    Write-Host "Built $OperatorImage and $DemoImage"
+}
+
+function Invoke-LoadImages {
+    Assert-Cluster
+    Assert-Docker
+    Invoke-External docker image inspect $OperatorImage
+    Invoke-External docker image inspect $DemoImage
+    Invoke-External kind load docker-image $OperatorImage $DemoImage --name $ClusterName
+    Write-Host "Loaded operator and demo images into kind cluster '$ClusterName'."
+}
+
+function Invoke-DeployOperator {
+    Assert-Cluster
+    Invoke-External kubectl apply -k (Join-Path $Root 'config/default')
+    Invoke-External kubectl rollout status deployment/steadystate-controller-manager -n steadystate-system --timeout=180s
+    Write-Host 'SteadyState Application controller is available.'
+}
+
+function Wait-ApplicationReady {
+    param([string]$Name = 'demo', [string]$Namespace = 'steadystate-demo', [int]$TimeoutSeconds = 60)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $ready = & kubectl get application $Name -n $Namespace -o "jsonpath={.status.conditions[?(@.type=='Ready')].status}" 2>$null
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($exitCode -eq 0 -and $ready -eq 'True') { return }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+    throw "Application $Namespace/$Name did not reach Ready=True within $TimeoutSeconds seconds."
+}
+
+function Invoke-TestOperator {
+    Assert-Cluster
+    Invoke-External kubectl apply -k (Join-Path $Root 'config/samples')
+    Wait-ApplicationReady -TimeoutSeconds 60
+    $deadline = (Get-Date).AddSeconds(60)
+    do {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/" -Headers @{ Host = 'demo.steadystate-demo.steadystate.localtest.me' } -TimeoutSec 5
+            if ($response.StatusCode -eq 200) {
+                $body = $response.Content | ConvertFrom-Json
+                if ($body.application -eq 'demo' -and $body.version -eq 'v0.1.0') {
+                    Write-Host 'Application operator test passed through the shared Gateway.'
+                    return
+                }
+            }
+        } catch { Start-Sleep -Seconds 2 }
+    } while ((Get-Date) -lt $deadline)
+    throw 'Application reached Ready=True but did not return the expected response through Envoy Gateway.'
+}
+
+function Invoke-UndeployOperator {
+    Assert-Cluster
+    Invoke-External kubectl delete application demo -n steadystate-demo --ignore-not-found=true --wait=true --timeout=120s
+    Invoke-External kubectl delete namespace steadystate-demo --ignore-not-found=true --wait=true --timeout=120s
+    Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true
+    Write-Host 'SteadyState Application controller is undeployed.'
 }
 
 function Invoke-Doctor {
@@ -211,22 +297,31 @@ function Invoke-Diagnostics {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $directory = Join-Path $Root ".artifacts/diagnostics/$stamp"
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
-    & kubectl get nodes -o wide *> (Join-Path $directory 'nodes.txt')
-    & kubectl get pods -A -o wide *> (Join-Path $directory 'pods.txt')
-    & kubectl get gatewayclass,gateway,httproute -A -o yaml *> (Join-Path $directory 'gateway-api.yaml')
-    & kubectl get events -A --sort-by=.lastTimestamp *> (Join-Path $directory 'events.txt')
-    & kind export logs (Join-Path $directory 'kind') --name $ClusterName *> (Join-Path $directory 'kind-export.txt')
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & kubectl get nodes -o wide *> (Join-Path $directory 'nodes.txt')
+        & kubectl get pods -A -o wide *> (Join-Path $directory 'pods.txt')
+        & kubectl get gatewayclass,gateway,httproute -A -o yaml *> (Join-Path $directory 'gateway-api.yaml')
+        & kubectl get applications.platform.steadystate.dev -A -o yaml *> (Join-Path $directory 'applications.yaml')
+        & kubectl get deployment,service,configmap -A -l app.kubernetes.io/managed-by=steadystate -o yaml *> (Join-Path $directory 'application-children.yaml')
+        & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=500 *> (Join-Path $directory 'operator.log')
+        & kubectl get events -A --sort-by=.lastTimestamp *> (Join-Path $directory 'events.txt')
+        & kind export logs (Join-Path $directory 'kind') --name $ClusterName *> (Join-Path $directory 'kind-export.txt')
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
     Write-Host "Diagnostics written to $directory"
 }
 
 function Invoke-Smoke {
     Assert-Tools
     Invoke-External kubectl wait -n steadystate-smoke --for=condition=Available deployment/echo --timeout=180s
-    Invoke-External kubectl wait -n steadystate-smoke --for=condition=Programmed gateway/steadystate --timeout=180s
+    Invoke-External kubectl wait -n steadystate-system --for=condition=Programmed gateway/steadystate --timeout=180s
     $deadline = (Get-Date).AddMinutes(2)
     do {
         try {
-            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/healthz" -TimeoutSec 5
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/healthz" -Headers @{ Host = 'smoke.steadystate.localtest.me' } -TimeoutSec 5
             if ($response.StatusCode -eq 200) { Write-Host "Smoke test passed at http://127.0.0.1:$HttpPort"; return }
         } catch { Start-Sleep -Seconds 3 }
     } while ((Get-Date) -lt $deadline)
@@ -302,6 +397,9 @@ function Invoke-Bootstrap {
         Invoke-External kubectl wait nodes --all --for=condition=Ready --timeout=300s
 
         Invoke-External helm upgrade --install envoy-gateway oci://docker.io/envoyproxy/gateway-helm --version "v$($v.ENVOY_GATEWAY_VERSION)" --namespace envoy-gateway-system --create-namespace --wait --timeout 5m
+        Invoke-External kubectl delete gateway steadystate -n steadystate-smoke --ignore-not-found=true --wait=true
+        Invoke-External kubectl delete envoyproxy steadystate-proxy -n steadystate-smoke --ignore-not-found=true --wait=true
+        Invoke-External kubectl apply -k (Join-Path $Root 'config/gateway')
         Invoke-External kubectl apply -f (Join-Path $Root 'config/smoke/smoke.yaml')
         Invoke-Smoke
         Invoke-NetworkPolicyProof
@@ -342,11 +440,26 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'gofmt failed' }
             if ($unformatted) { throw "Go files require formatting: $($unformatted -join ', ')" }
             Invoke-External go vet ./...
+            if (-not (Test-CommandAvailable 'kustomize')) { throw "kustomize is missing. Run '.\scripts\dev.ps1 tools'." }
+            foreach ($overlay in @('config/default','config/gateway','config/samples')) {
+                & kustomize build $overlay *> $null
+                if ($LASTEXITCODE -ne 0) { throw "Kustomize rendering failed for $overlay" }
+            }
             if (-not (Test-CommandAvailable 'golangci-lint')) { throw "golangci-lint is missing. Run '.\scripts\dev.ps1 tools'." }
             Invoke-External golangci-lint run ./...
         }
         'test' { Assert-Tools; Invoke-External go test ./... }
         'test-envtest' { Invoke-Envtest }
+        'run' { Assert-Tools; Invoke-External go run ./cmd }
+        'build-images' { Invoke-BuildImages }
+        'load-images' { Invoke-LoadImages }
+        'deploy-operator' { Invoke-DeployOperator }
+        'test-operator' { Invoke-TestOperator }
+        'demo-self-heal' {
+            Assert-Cluster
+            & (Join-Path $PSScriptRoot 'demo-self-heal.ps1') -HttpPort $HttpPort
+        }
+        'undeploy-operator' { Invoke-UndeployOperator }
         'bootstrap' { Invoke-Bootstrap }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }
