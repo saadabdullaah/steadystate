@@ -146,6 +146,9 @@ do {
 } while ((Get-Date) -lt $deadline)
 if ([int]$replicas -ne 1) { throw 'Deployment replica drift was not repaired within 10 seconds.' }
 $repairTime = ((Get-Date) - $started).TotalSeconds
+if ($repairTime -ge 10) {
+    throw "Deployment replica drift repair took $([Math]::Round($repairTime, 2)) seconds; Phase 1 requires less than 10 seconds."
+}
 Add-PassedCheck -Name 'deployment-drift-repaired' -ElapsedSeconds $repairTime -Details 'Manual replica drift was restored to the Application minimum.'
 Write-Host ("[PASS] Deployment replica drift repaired in {0:n2} seconds" -f $repairTime) -ForegroundColor Green
 

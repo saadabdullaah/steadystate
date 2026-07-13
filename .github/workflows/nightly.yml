@@ -37,33 +37,55 @@ jobs:
         run: |
           ./scripts/dev.ps1 deploy-operator
           ./scripts/dev.ps1 test-operator
-      - name: Load the pinned VHS version
+      - name: Load pinned recording versions
         shell: pwsh
         run: |
-          $entry = Get-Content -LiteralPath scripts/versions.env | Where-Object { $_ -like 'VHS_VERSION=*' }
-          if (-not $entry) { throw 'VHS_VERSION is missing from scripts/versions.env.' }
-          $version = $entry.Split('=', 2)[1]
-          "VHS_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      # vhs-action v2.1.0 looks for a removed FFmpeg 5.1 release asset instead
-      # of using the hosted runner's FFmpeg. Seed the cache key it expects so
-      # the exact action revision and VHS release can remain pinned.
-      - name: Prepare FFmpeg for the pinned VHS action
+          $required = @(
+            'VHS_VERSION',
+            'TTYD_VERSION',
+            'VHS_LINUX_X86_64_SHA256',
+            'TTYD_LINUX_X86_64_SHA256'
+          )
+          $entries = @{}
+          Get-Content -LiteralPath scripts/versions.env | ForEach-Object {
+            if ($_ -match '^([^#=]+)=(.+)$') { $entries[$Matches[1]] = $Matches[2] }
+          }
+          foreach ($name in $required) {
+            if (-not $entries[$name]) { throw "$name is missing from scripts/versions.env." }
+            "$name=$($entries[$name])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+      # vhs-action v2.1.0 searches for an FFmpeg 5.1 release asset that no
+      # longer exists. Install the same official VHS release directly so every
+      # downloaded binary remains version- and checksum-locked.
+      - name: Install pinned recording tools
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install --yes ffmpeg
-          fi
-          cache_dir="$RUNNER_TOOL_CACHE/ffmpeg/latest/x64"
-          mkdir -p "$cache_dir"
-          cp "$(command -v ffmpeg)" "$cache_dir/ffmpeg"
-          touch "$RUNNER_TOOL_CACHE/ffmpeg/latest/x64.complete"
+          command -v ffmpeg >/dev/null 2>&1 || { echo 'The hosted runner does not provide FFmpeg.' >&2; exit 1; }
+
+          install_dir="$RUNNER_TEMP/steadystate-recording/bin"
+          mkdir -p "$install_dir"
+
+          vhs_archive="$RUNNER_TEMP/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          curl --fail --location --retry 3 --output "$vhs_archive" \
+            "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          echo "${VHS_LINUX_X86_64_SHA256}  ${vhs_archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "$vhs_archive" --directory "$install_dir"
+
+          curl --fail --location --retry 3 --output "$install_dir/ttyd" \
+            "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
+          echo "${TTYD_LINUX_X86_64_SHA256}  ${install_dir}/ttyd" | sha256sum --check --strict
+          chmod 0755 "$install_dir/vhs" "$install_dir/ttyd"
+
+          "$install_dir/vhs" --version
+          "$install_dir/ttyd" --version
+          echo "$install_dir" >> "$GITHUB_PATH"
       - name: Record and run the Phase 1 self-heal acceptance test
-        uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3 # v2.1.0
-        with:
-          path: docs/demonstrations/phase1-self-heal.tape
-          version: v${{ env.VHS_VERSION }}
+        shell: bash
+        env:
+          CI: ""
+          COLORTERM: truecolor
+        run: vhs docs/demonstrations/phase1-self-heal.tape
       - name: Verify Phase 1 acceptance evidence
         shell: pwsh
         run: |
