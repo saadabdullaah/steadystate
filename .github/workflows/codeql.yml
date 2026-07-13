@@ -18,9 +18,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
+        uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
           languages: go
       - name: Install and build
@@ -29,4 +29,4 @@ jobs:
           ./scripts/install-tools.ps1 -BaseOnly
           ./scripts/dev.ps1 test
       - name: Analyze
-        uses: github/codeql-action/analyze@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
+        uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
