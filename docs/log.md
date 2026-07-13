@@ -48,7 +48,21 @@
 - Proved HTTP 200 through Envoy Gateway after repair, truthful `Ready=True`, finalizer release, and garbage collection of every owned child.
 - Generated the checksum-verified VHS recording and schema-versioned JSON evidence for the Phase 1 closeout.
 
+### Release outcome
+
+- Merged the diagnostics-inclusive Phase 1 closeout in PR #10 at `8229c7b`.
+- Passed the required post-merge CI, Nightly Integration, and CodeQL gates on the exact release commit.
+- Published the annotated `v0.1.0` tag and GitHub release with the hosted GIF and JSON acceptance evidence.
+
+## 2026-07-14 — Phase 2 tenancy design
+
+### Done
+
+- Froze `v0.1.0` as the immutable Phase 1 baseline.
+- Merged the fully green GitHub Actions dependency update in PR #3 at `2d7ebfd`, closed stale Go dependency PR #7, and froze the resulting dependency baseline for Phase 2.
+- Approved the cluster-scoped `Team` API, managed Namespace lifecycle, label-and-UID ownership model, protected tenant RBAC, default-deny networking, Envoy Gateway ingress selector, repository glob contract, and Application tenancy guard.
+- Split Phase 2 into bounded API, controller, Application integration, and hosted acceptance closeout pull requests.
+
 ### Next
 
-- Validate the diagnostics-inclusive acceptance artifact on the final PR revision.
-- Require final branch and post-merge CodeQL/Nightly success, then release `v0.1.0` before beginning Phase 2.
+- Implement the Team API and deterministic tenant-resource builders.

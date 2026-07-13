@@ -2,6 +2,9 @@ resources:
 - application_admin_role.yaml
 - application_editor_role.yaml
 - application_viewer_role.yaml
+- team_admin_role.yaml
+- team_editor_role.yaml
+- team_viewer_role.yaml
 - leader_election_role.yaml
 - leader_election_role_binding.yaml
 - manager_role_binding.yaml

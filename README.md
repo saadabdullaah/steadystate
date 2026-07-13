@@ -2,9 +2,9 @@
 
 SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, and tested recovery without requiring a cloud account.
 
-Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute.
+Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization.
 
-> Status: Phase 1 implementation and hosted functional acceptance are complete. Release closeout remains in PR #10; `v0.1.0` is created only after the diagnostics-inclusive acceptance artifact, Nightly Integration, and CodeQL pass on merged `main`.
+> Status: Phase 0 and Phase 1 are complete. PR #10 was merged at `8229c7b`, post-merge Nightly Integration and CodeQL passed, and the annotated `v0.1.0` release is published. Phase 2 tenancy implementation is now beginning from that immutable baseline.
 
 ## Architecture
 

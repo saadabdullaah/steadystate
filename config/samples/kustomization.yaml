@@ -2,4 +2,5 @@
 resources:
 - namespace.yaml
 - platform_v1alpha1_application.yaml
+- platform_v1alpha1_team.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
