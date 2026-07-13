@@ -1,0 +1,13 @@
+namespace: steadystate-system
+
+namePrefix: steadystate-
+
+resources:
+- ../crd
+- ../rbac
+
+labels:
+- includeSelectors: false
+  pairs:
+    app.kubernetes.io/name: steadystate
+    app.kubernetes.io/managed-by: kustomize
