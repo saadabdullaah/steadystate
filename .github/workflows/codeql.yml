@@ -26,7 +26,7 @@ jobs:
       - name: Install and build
         shell: pwsh
         run: |
-          ./scripts/install-tools.ps1
+          ./scripts/install-tools.ps1 -BaseOnly
           ./scripts/dev.ps1 test
       - name: Analyze
         uses: github/codeql-action/analyze@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4

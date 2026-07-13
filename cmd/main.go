@@ -1,16 +1,30 @@
 // Package main starts the SteadyState Kubernetes controller manager.
-// Controllers are introduced in Phase 1; Phase 0 keeps the manager minimal.
 package main
 
 import (
 	"flag"
 	"os"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
+	"github.com/saadabdullaah/steadystate/internal/controller"
 )
+
+var managerScheme = runtime.NewScheme()
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(managerScheme))
+	utilruntime.Must(platformv1alpha1.AddToScheme(managerScheme))
+	utilruntime.Must(gatewayv1.Install(managerScheme))
+}
 
 func main() {
 	var metricsAddr string
@@ -27,6 +41,7 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOptions)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme:                 managerScheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
@@ -34,6 +49,14 @@ func main() {
 	})
 	if err != nil {
 		ctrl.Log.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	if err := (&controller.ApplicationReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.Error(err, "unable to create controller", "controller", "Application")
 		os.Exit(1)
 	}
 

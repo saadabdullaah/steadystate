@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','lint','test','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -16,11 +16,18 @@ $IsWindowsHost = $env:OS -eq 'Windows_NT'
 $Platform = if ($IsWindowsHost) { 'windows-amd64' } else { 'linux-amd64' }
 $Exe = if ($IsWindowsHost) { '.exe' } else { '' }
 $BinDir = Join-Path $Root ".tools/bin/$Platform"
-$GoBinDir = Join-Path $Root '.tools/go/bin'
+$GoBinDir = Join-Path $Root ".tools/go/$Platform/bin"
 $env:PATH = "$GoBinDir$([IO.Path]::PathSeparator)$BinDir$([IO.Path]::PathSeparator)$env:PATH"
 $env:GOCACHE = Join-Path $Root '.tools/cache/go-build'
+$env:GOMODCACHE = Join-Path $Root ".tools/cache/go-mod/$Platform"
+$env:GOPATH = Join-Path $Root ".tools/gopath/$Platform"
 $env:GOTMPDIR = Join-Path $Root '.tools/tmp'
-New-Item -ItemType Directory -Force -Path $env:GOCACHE, $env:GOTMPDIR | Out-Null
+if ($IsWindowsHost) {
+    $env:LOCALAPPDATA = Join-Path $Root ".tools/cache/localappdata/$Platform"
+}
+$cacheDirectories = @($env:GOCACHE, $env:GOMODCACHE, $env:GOPATH, $env:GOTMPDIR)
+if ($IsWindowsHost) { $cacheDirectories += $env:LOCALAPPDATA }
+New-Item -ItemType Directory -Force -Path $cacheDirectories | Out-Null
 if ($IsWindowsHost -and -not $env:DOCKER_CONTEXT) {
     $env:DOCKER_CONTEXT = 'desktop-linux'
 }
@@ -67,6 +74,51 @@ function Wait-KubernetesResource {
 function Assert-Tools {
     $missing = @('go','kind','kubectl','helm') | Where-Object { -not (Test-CommandAvailable $_) }
     if ($missing) { throw "Missing tools: $($missing -join ', '). Run '.\scripts\dev.ps1 tools'." }
+}
+
+function Assert-CodegenTools {
+    Assert-Tools
+    $missing = @('controller-gen','kustomize') | Where-Object { -not (Test-CommandAvailable $_) }
+    if ($missing) { throw "Missing code-generation tools: $($missing -join ', '). Run '.\scripts\dev.ps1 tools'." }
+}
+
+function Invoke-Generate {
+    Assert-CodegenTools
+    # Explicit package paths avoid controller-gen's recursive-pattern expansion bug on Windows.
+    Invoke-External controller-gen object:headerFile=hack/boilerplate.go.txt paths=./api/v1alpha1
+}
+
+function Invoke-Manifests {
+    Assert-CodegenTools
+    Invoke-External controller-gen "rbac:roleName=manager-role" crd:maxDescLen=0 webhook paths=./api/v1alpha1 paths=./internal/controller output:crd:artifacts:config=config/crd/bases
+}
+
+function Invoke-Envtest {
+    if (-not $IsWindowsHost) {
+        if (-not (Test-CommandAvailable 'setup-envtest')) { throw "setup-envtest is missing. Run './scripts/install-tools.sh'." }
+        $v = Read-Versions
+        $env:KUBEBUILDER_ASSETS = (& setup-envtest use $v.ENVTEST_K8S_VERSION -p path).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to provision envtest assets' }
+        Invoke-External go test -tags=envtest ./internal/controller/...
+        return
+    }
+
+    if (-not (Test-CommandAvailable 'wsl.exe')) { throw 'WSL is required for envtest on Windows.' }
+    $v = Read-Versions
+    if ($Root -notmatch '^([A-Za-z]):\\(.*)$') { throw "Cannot map repository path '$Root' into WSL." }
+    $drive = $Matches[1].ToLowerInvariant()
+    $relativePath = $Matches[2].Replace('\', '/')
+    $wslRoot = "/mnt/$drive/$relativePath"
+    $assets = (& wsl.exe -d Ubuntu -- "$wslRoot/.tools/bin/linux-amd64/setup-envtest" use $v.ENVTEST_K8S_VERSION -p path).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $assets) { throw 'Failed to provision envtest assets in WSL Ubuntu.' }
+    & wsl.exe -d Ubuntu -- env `
+        "KUBEBUILDER_ASSETS=$assets" `
+        "GOCACHE=$wslRoot/.tools/cache/go-build/linux-amd64" `
+        "GOMODCACHE=$wslRoot/.tools/cache/go-mod/linux-amd64" `
+        "GOPATH=$wslRoot/.tools/gopath/linux-amd64" `
+        "XDG_CACHE_HOME=$wslRoot/.tools/cache/xdg/linux-amd64" `
+        "$wslRoot/.tools/go/linux-amd64/bin/go" -C $wslRoot test -tags=envtest ./internal/controller/...
+    if ($LASTEXITCODE -ne 0) { throw "WSL envtest exited with code $LASTEXITCODE" }
 }
 
 function Invoke-Doctor {
@@ -121,6 +173,26 @@ function Invoke-CheckVersions {
     foreach ($name in $expected.Keys) {
         if ($actual[$name] -ne $expected[$name]) { throw "$name version mismatch: expected $($expected[$name]), got $($actual[$name])" }
         Write-Host "[PASS] $name $($actual[$name])"
+    }
+    $developmentTools = @{
+        'controller-gen' = $v.CONTROLLER_TOOLS_VERSION
+        'kustomize' = $v.KUSTOMIZE_VERSION
+        'setup-envtest' = $v.SETUP_ENVTEST_VERSION
+        'golangci-lint' = $v.GOLANGCI_LINT_VERSION
+    }
+    foreach ($name in $developmentTools.Keys) {
+        $marker = Join-Path $BinDir "$name.version"
+        if (-not (Test-Path -LiteralPath $marker)) { continue }
+        $actualVersion = (Get-Content -Raw -LiteralPath $marker).Trim()
+        if ($actualVersion -ne $developmentTools[$name]) { throw "$name version mismatch: expected $($developmentTools[$name]), got $actualVersion" }
+        Write-Host "[PASS] $name $actualVersion"
+    }
+    if (-not $IsWindowsHost -and (Test-CommandAvailable 'kubebuilder')) {
+        $kubebuilderVersion = ((& kubebuilder version) -join "`n")
+        if ($LASTEXITCODE -ne 0 -or $kubebuilderVersion -notmatch [regex]::Escape("v$($v.KUBEBUILDER_VERSION)")) {
+            throw "kubebuilder version mismatch: expected v$($v.KUBEBUILDER_VERSION), got $kubebuilderVersion"
+        }
+        Write-Host "[PASS] kubebuilder $($v.KUBEBUILDER_VERSION)"
     }
 }
 
@@ -249,9 +321,18 @@ try {
         'doctor' { Invoke-Doctor }
         'tools' { & (Join-Path $PSScriptRoot 'install-tools.ps1'); if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
         'check-versions' { Invoke-CheckVersions }
+        'generate' { Invoke-Generate }
+        'manifests' { Invoke-Manifests }
+        'verify-generated' {
+            Invoke-Generate
+            Invoke-Manifests
+            & (Join-Path $PSScriptRoot 'check-vendored.ps1')
+            Invoke-External git diff --exit-code -- api config/crd config/rbac
+        }
         'lint' {
             & (Join-Path $PSScriptRoot 'check-private-files.ps1')
             & (Join-Path $PSScriptRoot 'check-text.ps1')
+            & (Join-Path $PSScriptRoot 'check-vendored.ps1')
             Assert-Tools
             $goFiles = @(Get-ChildItem -Path $Root -Recurse -File -Filter '*.go' | Where-Object {
                 $_.FullName -notlike "$(Join-Path $Root '.tools')*" -and
@@ -261,8 +342,11 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'gofmt failed' }
             if ($unformatted) { throw "Go files require formatting: $($unformatted -join ', ')" }
             Invoke-External go vet ./...
+            if (-not (Test-CommandAvailable 'golangci-lint')) { throw "golangci-lint is missing. Run '.\scripts\dev.ps1 tools'." }
+            Invoke-External golangci-lint run ./...
         }
         'test' { Assert-Tools; Invoke-External go test ./... }
+        'test-envtest' { Invoke-Envtest }
         'bootstrap' { Invoke-Bootstrap }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }

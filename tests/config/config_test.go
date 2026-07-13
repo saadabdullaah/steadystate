@@ -54,7 +54,7 @@ func TestRepositoryYAMLParses(t *testing.T) {
 	}
 }
 
-func TestVersionLockContainsPhaseZeroPins(t *testing.T) {
+func TestVersionLockContainsRequiredPins(t *testing.T) {
 	root := repositoryRoot(t)
 	content, err := os.ReadFile(filepath.Join(root, "scripts", "versions.env"))
 	if err != nil {
@@ -65,6 +65,9 @@ func TestVersionLockContainsPhaseZeroPins(t *testing.T) {
 		"GO_VERSION", "KUBEBUILDER_VERSION", "KIND_VERSION", "KUBERNETES_VERSION",
 		"KIND_NODE_IMAGE", "HELM_VERSION", "CALICO_VERSION", "ENVOY_GATEWAY_VERSION",
 		"MIN_DOCKER_VERSION", "REQUIRED_CGROUP_VERSION",
+		"CONTROLLER_TOOLS_VERSION", "CONTROLLER_RUNTIME_VERSION", "ENVTEST_K8S_VERSION",
+		"SETUP_ENVTEST_VERSION", "KUSTOMIZE_VERSION", "GOLANGCI_LINT_VERSION",
+		"GATEWAYCLASS_CRD_SHA256", "GATEWAY_CRD_SHA256", "HTTPROUTE_CRD_SHA256",
 	} {
 		if !strings.Contains(text, key+"=") {
 			t.Errorf("versions.env is missing %s", key)

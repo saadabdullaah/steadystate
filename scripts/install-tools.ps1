@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [switch]$Force
+    [switch]$Force,
+    [switch]$BaseOnly,
+    [switch]$SkipLint
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,6 +13,13 @@ $Platform = if ($IsWindowsHost) { 'windows-amd64' } else { 'linux-amd64' }
 $ToolsRoot = Join-Path $Root '.tools'
 $BinDir = Join-Path $ToolsRoot "bin/$Platform"
 $DownloadDir = Join-Path $ToolsRoot 'downloads'
+$env:GOCACHE = Join-Path $ToolsRoot "cache/go-build/$Platform"
+$env:GOMODCACHE = Join-Path $ToolsRoot "cache/go-mod/$Platform"
+$env:GOPATH = Join-Path $ToolsRoot "gopath/$Platform"
+if ($IsWindowsHost) { $env:LOCALAPPDATA = Join-Path $ToolsRoot "cache/localappdata/$Platform" }
+$cacheDirectories = @($env:GOCACHE, $env:GOMODCACHE, $env:GOPATH)
+if ($IsWindowsHost) { $cacheDirectories += $env:LOCALAPPDATA }
+New-Item -ItemType Directory -Force -Path $cacheDirectories | Out-Null
 
 function Read-Versions {
     $values = @{}
@@ -63,11 +72,38 @@ function Get-VerifiedFile {
 }
 
 function Install-DirectBinary {
-    param([string]$Name, [string]$Url, [string]$ChecksumUrl)
+    param([string]$Name, [string]$Url, [string]$ChecksumUrl, [string]$ExpectedSha256)
     $extension = if ($IsWindowsHost) { '.exe' } else { '' }
     $destination = Join-Path $BinDir "$Name$extension"
-    Get-VerifiedFile -Url $Url -Destination $destination -ChecksumUrl $ChecksumUrl
+    Get-VerifiedFile -Url $Url -Destination $destination -ChecksumUrl $ChecksumUrl -ExpectedSha256 $ExpectedSha256
     if (-not $IsWindowsHost) { & chmod +x $destination }
+}
+
+function Install-GoTool {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Package,
+        [Parameter(Mandatory)][string]$Version
+    )
+    $extension = if ($IsWindowsHost) { '.exe' } else { '' }
+    $binary = Join-Path $BinDir "$Name$extension"
+    $marker = Join-Path $BinDir "$Name.version"
+    if (-not $Force -and (Test-Path -LiteralPath $binary) -and (Test-Path -LiteralPath $marker) -and
+        ((Get-Content -Raw -LiteralPath $marker).Trim() -eq $Version)) { return }
+
+    Write-Host "Installing $Name $Version"
+    $previousGoBin = $env:GOBIN
+    $previousPath = $env:PATH
+    try {
+        $env:GOBIN = $BinDir
+        $env:PATH = "$(Join-Path $goRoot 'bin')$([IO.Path]::PathSeparator)$env:PATH"
+        & $goBinary install "$Package@v$Version"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to install $Name $Version" }
+        [IO.File]::WriteAllText($marker, "$Version`n", [Text.UTF8Encoding]::new($false))
+    } finally {
+        $env:GOBIN = $previousGoBin
+        $env:PATH = $previousPath
+    }
 }
 
 $v = Read-Versions
@@ -76,7 +112,7 @@ New-Item -ItemType Directory -Force -Path $BinDir, $DownloadDir | Out-Null
 if ($IsWindowsHost) {
     $goArchive = Join-Path $DownloadDir "go$($v.GO_VERSION).windows-amd64.zip"
     Get-VerifiedFile -Url "https://go.dev/dl/go$($v.GO_VERSION).windows-amd64.zip" -Destination $goArchive -ExpectedSha256 $v.GO_WINDOWS_AMD64_SHA256
-    $goRoot = Join-Path $ToolsRoot 'go'
+    $goRoot = Join-Path $ToolsRoot "go/$Platform"
     $goBinary = Join-Path $goRoot 'bin/go.exe'
     if (Test-Path $goBinary) {
         $installedGo = ((& $goBinary version) -split ' ')[2].TrimStart('go')
@@ -84,8 +120,14 @@ if ($IsWindowsHost) {
     }
     if ($Force -and (Test-Path $goRoot)) { Remove-Item -Recurse -Force $goRoot }
     if (-not (Test-Path $goBinary)) {
-        & tar -xf $goArchive -C $ToolsRoot
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $goRoot) | Out-Null
+        $extractRoot = Join-Path $ToolsRoot 'go-extract'
+        if (Test-Path -LiteralPath $extractRoot) { Remove-Item -Recurse -Force $extractRoot }
+        New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+        & tar -xf $goArchive -C $extractRoot
         if ($LASTEXITCODE -ne 0) { throw 'Failed to extract the Go SDK' }
+        Move-Item -LiteralPath (Join-Path $extractRoot 'go') -Destination $goRoot
+        Remove-Item -Recurse -Force $extractRoot
     }
 
     Install-DirectBinary -Name 'kubectl' -Url "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/windows/amd64/kubectl.exe" -ChecksumUrl "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/windows/amd64/kubectl.exe.sha256"
@@ -99,7 +141,7 @@ if ($IsWindowsHost) {
 } else {
     $goArchive = Join-Path $DownloadDir "go$($v.GO_VERSION).linux-amd64.tar.gz"
     Get-VerifiedFile -Url "https://go.dev/dl/go$($v.GO_VERSION).linux-amd64.tar.gz" -Destination $goArchive -ExpectedSha256 $v.GO_LINUX_AMD64_SHA256
-    $goRoot = Join-Path $ToolsRoot 'go'
+    $goRoot = Join-Path $ToolsRoot "go/$Platform"
     $goBinary = Join-Path $goRoot 'bin/go'
     if (Test-Path $goBinary) {
         $installedGo = ((& $goBinary version) -split ' ')[2].TrimStart('go')
@@ -107,17 +149,28 @@ if ($IsWindowsHost) {
     }
     if ($Force -and (Test-Path $goRoot)) { Remove-Item -Recurse -Force $goRoot }
     if (-not (Test-Path $goBinary)) {
-        & tar -xzf $goArchive -C $ToolsRoot
+        New-Item -ItemType Directory -Force -Path $goRoot | Out-Null
+        & tar -xzf $goArchive --strip-components=1 -C $goRoot
     }
 
     Install-DirectBinary -Name 'kubectl' -Url "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/linux/amd64/kubectl" -ChecksumUrl "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/linux/amd64/kubectl.sha256"
     Install-DirectBinary -Name 'kind' -Url "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-linux-amd64" -ChecksumUrl "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-linux-amd64.sha256sum"
+    Install-DirectBinary -Name 'kubebuilder' -Url "https://github.com/kubernetes-sigs/kubebuilder/releases/download/v$($v.KUBEBUILDER_VERSION)/kubebuilder_linux_amd64" -ExpectedSha256 $v.KUBEBUILDER_LINUX_AMD64_SHA256
 
     $helmArchive = Join-Path $DownloadDir "helm-v$($v.HELM_VERSION)-linux-amd64.tar.gz"
     Get-VerifiedFile -Url "https://get.helm.sh/helm-v$($v.HELM_VERSION)-linux-amd64.tar.gz" -Destination $helmArchive -ChecksumUrl "https://get.helm.sh/helm-v$($v.HELM_VERSION)-linux-amd64.tar.gz.sha256sum"
     & tar -xzf $helmArchive -C $ToolsRoot
     Copy-Item -Force (Join-Path $ToolsRoot 'linux-amd64/helm') (Join-Path $BinDir 'helm')
     & chmod +x (Join-Path $BinDir 'helm')
+}
+
+if (-not $BaseOnly) {
+    Install-GoTool -Name 'controller-gen' -Package 'sigs.k8s.io/controller-tools/cmd/controller-gen' -Version $v.CONTROLLER_TOOLS_VERSION
+    Install-GoTool -Name 'kustomize' -Package 'sigs.k8s.io/kustomize/kustomize/v5' -Version $v.KUSTOMIZE_VERSION
+    Install-GoTool -Name 'setup-envtest' -Package 'sigs.k8s.io/controller-runtime/tools/setup-envtest' -Version $v.SETUP_ENVTEST_VERSION
+    if (-not $SkipLint) {
+        Install-GoTool -Name 'golangci-lint' -Package 'github.com/golangci/golangci-lint/v2/cmd/golangci-lint' -Version $v.GOLANGCI_LINT_VERSION
+    }
 }
 
 Write-Host "Verified tools installed under $BinDir"

@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Install pinned tools
         shell: pwsh
-        run: ./scripts/install-tools.ps1
+        run: ./scripts/install-tools.ps1 -BaseOnly
       - name: Bootstrap standard profile
         shell: pwsh
         run: ./scripts/dev.ps1 bootstrap -Profile standard

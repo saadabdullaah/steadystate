@@ -1,7 +1,15 @@
 extends: default
 
+ignore: |
+  .artifacts/
+  .tools/
+  config/gateway-api/crds/gateway.networking.k8s.io_gatewayclasses.yaml
+  config/gateway-api/crds/gateway.networking.k8s.io_gateways.yaml
+  config/gateway-api/crds/gateway.networking.k8s.io_httproutes.yaml
+
 rules:
   document-start: disable
+  indentation: disable
   line-length:
     max: 160
     level: warning

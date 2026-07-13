@@ -2,6 +2,6 @@ package main
 
 import "testing"
 
-func TestPhaseZeroScaffold(t *testing.T) {
+func TestManagerPackage(t *testing.T) {
 	t.Helper()
 }

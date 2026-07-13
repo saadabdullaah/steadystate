@@ -1,0 +1,324 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: applications.platform.steadystate.dev
+spec:
+  group: platform.steadystate.dev
+  names:
+    kind: Application
+    listKind: ApplicationList
+    plural: applications
+    shortNames:
+    - app
+    singular: application
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.activeVersion
+      name: ActiveVersion
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              deployment:
+                default:
+                  automaticRollback: true
+                  strategy: rolling
+                properties:
+                  automaticRollback:
+                    default: true
+                    type: boolean
+                  steps:
+                    items:
+                      properties:
+                        pause:
+                          type: string
+                          x-kubernetes-validations:
+                          - message: pause must be positive
+                            rule: duration(self) > duration('0s')
+                        weight:
+                          format: int32
+                          maximum: 100
+                          minimum: 1
+                          type: integer
+                      required:
+                      - pause
+                      - weight
+                      type: object
+                    maxItems: 10
+                    type: array
+                  strategy:
+                    default: rolling
+                    enum:
+                    - rolling
+                    - canary
+                    type: string
+                required:
+                - automaticRollback
+                - strategy
+                type: object
+                x-kubernetes-validations:
+                - message: rolling strategy cannot have canary steps and canary strategy
+                    requires steps
+                  rule: 'self.strategy == ''rolling'' ? !has(self.steps) || size(self.steps)
+                    == 0 : has(self.steps) && size(self.steps) > 0'
+                - message: canary weights must be non-decreasing
+                  rule: '!has(self.steps) || self.steps.map(s, s.weight).isSorted()'
+                - message: canary weights must be unique
+                  rule: '!has(self.steps) || self.steps.all(s, self.steps.filter(t,
+                    t.weight == s.weight).size() == 1)'
+              image:
+                properties:
+                  repository:
+                    minLength: 1
+                    pattern: ^[^@[:space:]]+$
+                    type: string
+                  tag:
+                    pattern: ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: latest is not an allowed image tag
+                      rule: self.lowerAscii() != 'latest'
+                required:
+                - repository
+                - tag
+                type: object
+              observability:
+                default:
+                  logs: false
+                  metrics: false
+                  traces: false
+                properties:
+                  logs:
+                    default: false
+                    type: boolean
+                  metrics:
+                    default: false
+                    type: boolean
+                  traces:
+                    default: false
+                    type: boolean
+                required:
+                - logs
+                - metrics
+                - traces
+                type: object
+              owner:
+                minLength: 1
+                type: string
+              reliability:
+                properties:
+                  availabilityTarget:
+                    pattern: ^(100(?:\.0+)?|(?:[1-9][0-9]?)(?:\.[0-9]+)?|0\.(?:0*[1-9][0-9]*))%$
+                    type: string
+                  maximumErrorRate:
+                    pattern: ^(100(?:\.0+)?|[0-9]{1,2}(?:\.[0-9]+)?)%$
+                    type: string
+                  maximumP95Latency:
+                    type: string
+                    x-kubernetes-validations:
+                    - message: maximum P95 latency must be positive
+                      rule: duration(self) > duration('0s')
+                required:
+                - availabilityTarget
+                - maximumErrorRate
+                - maximumP95Latency
+                type: object
+              resources:
+                properties:
+                  limits:
+                    properties:
+                      cpu:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      memory:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    required:
+                    - cpu
+                    - memory
+                    type: object
+                  requests:
+                    properties:
+                      cpu:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      memory:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    required:
+                    - cpu
+                    - memory
+                    type: object
+                required:
+                - limits
+                - requests
+                type: object
+                x-kubernetes-validations:
+                - message: CPU request cannot exceed CPU limit
+                  rule: quantity(self.requests.cpu).compareTo(quantity(self.limits.cpu))
+                    <= 0
+                - message: memory request cannot exceed memory limit
+                  rule: quantity(self.requests.memory).compareTo(quantity(self.limits.memory))
+                    <= 0
+              runtime:
+                default:
+                  port: 8080
+                  replicas:
+                    max: 3
+                    min: 1
+                properties:
+                  port:
+                    default: 8080
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  replicas:
+                    properties:
+                      max:
+                        default: 3
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      min:
+                        default: 1
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                    required:
+                    - max
+                    - min
+                    type: object
+                    x-kubernetes-validations:
+                    - message: minimum replicas cannot exceed maximum replicas
+                      rule: self.min <= self.max
+                required:
+                - port
+                - replicas
+                type: object
+              security:
+                default:
+                  networkIsolation: false
+                  requireSignedImage: false
+                  runAsNonRoot: true
+                properties:
+                  networkIsolation:
+                    default: false
+                    type: boolean
+                  requireSignedImage:
+                    default: false
+                    type: boolean
+                  runAsNonRoot:
+                    default: true
+                    type: boolean
+                required:
+                - networkIsolation
+                - requireSignedImage
+                - runAsNonRoot
+                type: object
+            required:
+            - image
+            - owner
+            - reliability
+            - resources
+            type: object
+          status:
+            properties:
+              activeVersion:
+                type: string
+              candidateVersion:
+                type: string
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                enum:
+                - Pending
+                - Progressing
+                - Healthy
+                - Degraded
+                - RollingBack
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: Application names must contain at most 63 characters
+          rule: size(self.metadata.name) <= 63
+    served: true
+    storage: true
+    subresources:
+      status: {}
