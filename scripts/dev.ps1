@@ -7,7 +7,8 @@ param(
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
     [string]$ClusterName = $(if ($env:CLUSTER_NAME) { $env:CLUSTER_NAME } else { 'steadystate' }),
     [int]$HttpPort = $(if ($env:HTTP_PORT) { [int]$env:HTTP_PORT } else { 8080 }),
-    [int]$HttpsPort = $(if ($env:HTTPS_PORT) { [int]$env:HTTPS_PORT } else { 8443 })
+    [int]$HttpsPort = $(if ($env:HTTPS_PORT) { [int]$env:HTTPS_PORT } else { 8443 }),
+    [string]$EvidencePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -457,7 +458,7 @@ try {
         'test-operator' { Invoke-TestOperator }
         'demo-self-heal' {
             Assert-Cluster
-            & (Join-Path $PSScriptRoot 'demo-self-heal.ps1') -HttpPort $HttpPort
+            & (Join-Path $PSScriptRoot 'demo-self-heal.ps1') -HttpPort $HttpPort -EvidencePath $EvidencePath
         }
         'undeploy-operator' { Invoke-UndeployOperator }
         'bootstrap' { Invoke-Bootstrap }

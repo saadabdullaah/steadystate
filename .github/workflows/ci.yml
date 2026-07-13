@@ -134,6 +134,7 @@ jobs:
           name: kind-diagnostics
           path: .artifacts/diagnostics/
           retention-days: 7
+          include-hidden-files: true
       - name: Destroy cluster
         if: always()
         shell: pwsh

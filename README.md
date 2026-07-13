@@ -2,9 +2,9 @@
 
 SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, and tested recovery without requiring a cloud account.
 
-Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced.
+Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute.
 
-> Status: Phase 0 is under active validation. This README describes committed capabilities only; later features are documented after their acceptance tests pass.
+> Status: Phase 1 implementation is complete and its hosted acceptance closeout is in progress. The `v0.1.0` release is created only after the standard-profile round trip, self-heal evidence, and CodeQL gate pass on `main`.
 
 ## Architecture
 
@@ -14,8 +14,11 @@ flowchart LR
     PS --> Tools["Pinned repository-local tools"]
     PS --> Kind["kind cluster"]
     Kind --> Calico["Calico CNI and NetworkPolicy"]
-    Kind --> Gateway["Gateway API and Envoy Gateway"]
-    Gateway --> Smoke["Smoke HTTPRoute"]
+    PS --> CR["Application CR"]
+    CR --> Operator["SteadyState operator"]
+    Operator --> Children["Deployment / Service / ConfigMap / HTTPRoute"]
+    Children --> Gateway["Gateway API and Envoy Gateway"]
+    Gateway --> App["Reachable application"]
     CI["GitHub Actions"] --> PS
 ```
 
@@ -53,6 +56,20 @@ Invoke-WebRequest http://127.0.0.1:8080/healthz
 .\scripts\dev.ps1 destroy
 ```
 
+To run the Phase 1 operator path on an existing standard-profile cluster:
+
+```powershell
+.\scripts\dev.ps1 build-images
+.\scripts\dev.ps1 load-images
+.\scripts\dev.ps1 deploy-operator
+.\scripts\dev.ps1 test-operator
+.\scripts\dev.ps1 demo-self-heal
+```
+
+The hosted integration workflow records the same destructive self-heal test against a disposable cluster:
+
+![Phase 1 Application self-heal demonstration](docs/demonstrations/phase1-self-heal.gif)
+
 Use `-Profile standard` for one worker or `-Profile full` for two workers. Override ports consistently when the defaults are occupied:
 
 ```powershell
@@ -82,6 +99,10 @@ make destroy
 | `bootstrap` | Reconcile a cluster and validate networking and routing |
 | `smoke` | Verify the Gateway API route through the host port |
 | `test-network-policy` | Prove traffic succeeds before and fails after deny policy |
+| `build-images` / `load-images` | Build the operator and demo app, then load them into kind |
+| `deploy-operator` / `undeploy-operator` | Reconcile or remove the in-cluster operator runtime |
+| `test-operator` | Create the sample Application and verify it through Envoy Gateway |
+| `demo-self-heal` | Delete and drift owned resources, then prove repair and garbage collection |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |
 

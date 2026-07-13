@@ -37,7 +37,59 @@ jobs:
         run: |
           ./scripts/dev.ps1 deploy-operator
           ./scripts/dev.ps1 test-operator
-          ./scripts/dev.ps1 demo-self-heal
+      - name: Load the pinned VHS version
+        shell: pwsh
+        run: |
+          $entry = Get-Content -LiteralPath scripts/versions.env | Where-Object { $_ -like 'VHS_VERSION=*' }
+          if (-not $entry) { throw 'VHS_VERSION is missing from scripts/versions.env.' }
+          $version = $entry.Split('=', 2)[1]
+          "VHS_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Record and run the Phase 1 self-heal acceptance test
+        uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3 # v2.1.0
+        with:
+          path: docs/demonstrations/phase1-self-heal.tape
+          version: v${{ env.VHS_VERSION }}
+      - name: Verify Phase 1 acceptance evidence
+        shell: pwsh
+        run: |
+          $gif = Get-Item -LiteralPath docs/demonstrations/phase1-self-heal.gif
+          if ($gif.Length -le 0) { throw 'The Phase 1 GIF is empty.' }
+          $evidence = Get-Content -Raw -LiteralPath .artifacts/phase1/acceptance.json | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed') {
+            throw 'The Phase 1 evidence document is invalid or did not pass.'
+          }
+          $required = @(
+            'application-ready',
+            'deployment-recreated',
+            'service-recreated',
+            'configmap-recreated',
+            'httproute-recreated',
+            'deployment-drift-repaired',
+            'gateway-reachable',
+            'application-garbage-collected'
+          )
+          $actual = @($evidence.checks | Where-Object status -eq 'passed' | ForEach-Object name)
+          foreach ($name in $required) {
+            if ($name -notin $actual) { throw "Missing passed acceptance check: $name" }
+          }
+          foreach ($timed in @('deployment-recreated', 'deployment-drift-repaired')) {
+            $check = $evidence.checks | Where-Object name -eq $timed
+            if ([double]$check.elapsedSeconds -ge 10) { throw "$timed exceeded the 10-second Phase 1 limit." }
+          }
+          Write-Host "Verified $($required.Count) Phase 1 acceptance checks and $($gif.Length) bytes of GIF evidence."
+      - name: Upload Phase 1 acceptance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase1-acceptance-${{ github.sha }}
+          path: |
+            docs/demonstrations/phase1-self-heal.gif
+            .artifacts/phase1/acceptance.json
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
+      - name: Undeploy the Application operator
+        shell: pwsh
+        run: |
           ./scripts/dev.ps1 undeploy-operator
       - name: Capture diagnostics
         if: failure()
@@ -50,6 +102,7 @@ jobs:
           name: standard-round-trip-diagnostics
           path: .artifacts/diagnostics/
           retention-days: 7
+          include-hidden-files: true
       - name: Destroy cluster
         if: always()
         shell: pwsh

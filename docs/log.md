@@ -33,3 +33,18 @@
 - Reproved Gateway API ingress and Calico NetworkPolicy enforcement on Windows.
 - Hardened the positive-connectivity proof against transient Service endpoint programming.
 - Converged the existing cluster in 1.2 minutes, then proved destroy is safe both when present and absent.
+
+## 2026-07-13 — Phase 1 Application API and reconciliation
+
+### Done
+
+- Added the namespaced `Application` API, defaults, CEL validation, printer columns, generated CRD, and least-privileged RBAC in PR #6.
+- Added deterministic builders and watch-driven reconciliation for Deployment, Service, ConfigMap, and HTTPRoute in PR #8.
+- Added controller owner references, finalizer handling, truthful observed status, conflict retry, unsupported-capability reporting, and zero-write idempotency coverage.
+- Added the in-cluster operator runtime, hardened demo application, shared Gateway integration, and destructive self-heal harness in PR #9.
+- Recovered and audited all GitHub PR refs after the local environment loss; no unmerged Phase 1 feature branch remained.
+
+### Next
+
+- Run the standard-profile hosted round trip and generate the Phase 1 acceptance evidence and self-heal GIF.
+- Require a successful CodeQL analysis, merge the closeout PR, and release `v0.1.0` before beginning Phase 2.
