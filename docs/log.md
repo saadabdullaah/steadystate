@@ -43,8 +43,12 @@
 - Added controller owner references, finalizer handling, truthful observed status, conflict retry, unsupported-capability reporting, and zero-write idempotency coverage.
 - Added the in-cluster operator runtime, hardened demo application, shared Gateway integration, and destructive self-heal harness in PR #9.
 - Recovered and audited all GitHub PR refs after the local environment loss; no unmerged Phase 1 feature branch remained.
+- Passed the hosted standard-profile round trip and destructive acceptance test in [Nightly Integration run 29260395935](https://github.com/saadabdullaah/steadystate/actions/runs/29260395935).
+- Recreated Deployment, Service, ConfigMap, and HTTPRoute with new UIDs; Deployment recreation completed in 0.300 seconds and replica drift repair in 0.435 seconds.
+- Proved HTTP 200 through Envoy Gateway after repair, truthful `Ready=True`, finalizer release, and garbage collection of every owned child.
+- Generated the checksum-verified VHS recording and schema-versioned JSON evidence for the Phase 1 closeout.
 
 ### Next
 
-- Run the standard-profile hosted round trip and generate the Phase 1 acceptance evidence and self-heal GIF.
-- Require a successful CodeQL analysis, merge the closeout PR, and release `v0.1.0` before beginning Phase 2.
+- Validate the diagnostics-inclusive acceptance artifact on the final PR revision.
+- Require final branch and post-merge CodeQL/Nightly success, then release `v0.1.0` before beginning Phase 2.

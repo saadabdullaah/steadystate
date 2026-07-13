@@ -4,7 +4,7 @@ SteadyState is a laptop-scale internal developer platform built around a Kuberne
 
 Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute.
 
-> Status: Phase 1 implementation is complete and its hosted acceptance closeout is in progress. The `v0.1.0` release is created only after the standard-profile round trip, self-heal evidence, and CodeQL gate pass on `main`.
+> Status: Phase 1 implementation and hosted functional acceptance are complete. Release closeout remains in PR #10; `v0.1.0` is created only after the diagnostics-inclusive acceptance artifact, Nightly Integration, and CodeQL pass on merged `main`.
 
 ## Architecture
 
@@ -69,6 +69,8 @@ To run the Phase 1 operator path on an existing standard-profile cluster:
 The hosted integration workflow records the same destructive self-heal test against a disposable cluster:
 
 ![Phase 1 Application self-heal demonstration](docs/demonstrations/phase1-self-heal.gif)
+
+[Hosted acceptance run 29260395935](https://github.com/saadabdullaah/steadystate/actions/runs/29260395935) recreated the Deployment in 0.300 seconds, repaired replica drift in 0.435 seconds, preserved Gateway reachability, and garbage-collected every owned child after releasing the finalizer.
 
 Use `-Profile standard` for one worker or `-Profile full` for two workers. Override ports consistently when the defaults are occupied:
 

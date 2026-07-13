@@ -118,6 +118,9 @@ jobs:
             if ([double]$check.elapsedSeconds -ge 10) { throw "$timed exceeded the 10-second Phase 1 limit." }
           }
           Write-Host "Verified $($required.Count) Phase 1 acceptance checks and $($gif.Length) bytes of GIF evidence."
+      - name: Capture Phase 1 acceptance diagnostics
+        shell: pwsh
+        run: ./scripts/dev.ps1 diagnostics
       - name: Upload Phase 1 acceptance evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -125,6 +128,7 @@ jobs:
           path: |
             docs/demonstrations/phase1-self-heal.gif
             .artifacts/phase1/acceptance.json
+            .artifacts/diagnostics/
           retention-days: 30
           if-no-files-found: error
           include-hidden-files: true
