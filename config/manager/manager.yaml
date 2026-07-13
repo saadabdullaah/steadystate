@@ -1,0 +1,71 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: controller-manager
+  namespace: steadystate-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: steadystate-system
+  annotations:
+    checkov.io/skip1: CKV_K8S_43=Phase 1 images are built and loaded into kind locally; registry publishing and immutable runtime digests begin in Phase 3.
+    checkov.io/skip2: CKV_K8S_15=IfNotPresent is required so kind uses the locally loaded Phase 1 image instead of contacting an unpublished registry tag.
+    checkov.io/skip3: CKV_K8S_38=The controller requires its dedicated least-privileged service-account token to reconcile Kubernetes resources.
+  labels:
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+    spec:
+      serviceAccountName: controller-manager
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: ghcr.io/saadabdullaah/steadystate-operator:v0.1.0
+          imagePullPolicy: IfNotPresent
+          command: ["/manager"]
+          args:
+            - --leader-elect
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=0
+          ports:
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true

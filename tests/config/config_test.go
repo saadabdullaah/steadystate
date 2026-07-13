@@ -68,6 +68,7 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 		"CONTROLLER_TOOLS_VERSION", "CONTROLLER_RUNTIME_VERSION", "ENVTEST_K8S_VERSION",
 		"SETUP_ENVTEST_VERSION", "KUSTOMIZE_VERSION", "GOLANGCI_LINT_VERSION",
 		"GATEWAYCLASS_CRD_SHA256", "GATEWAY_CRD_SHA256", "HTTPROUTE_CRD_SHA256",
+		"GO_BUILDER_IMAGE", "OPERATOR_IMAGE", "DEMO_IMAGE",
 	} {
 		if !strings.Contains(text, key+"=") {
 			t.Errorf("versions.env is missing %s", key)
