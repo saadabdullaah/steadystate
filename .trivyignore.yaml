@@ -1,0 +1,10 @@
+---
+misconfigurations:
+  - id: KSV-0056
+    paths:
+      - config/rbac/role.yaml
+    statement: >-
+      The namespaced Application controller must create and self-heal only the
+      Services it owns. Owner references, controller watches, and tests bound
+      this permission to the documented operator contract.
+    expired_at: 2027-07-13
