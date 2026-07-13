@@ -44,6 +44,21 @@ jobs:
           if (-not $entry) { throw 'VHS_VERSION is missing from scripts/versions.env.' }
           $version = $entry.Split('=', 2)[1]
           "VHS_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      # vhs-action v2.1.0 looks for a removed FFmpeg 5.1 release asset instead
+      # of using the hosted runner's FFmpeg. Seed the cache key it expects so
+      # the exact action revision and VHS release can remain pinned.
+      - name: Prepare FFmpeg for the pinned VHS action
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes ffmpeg
+          fi
+          cache_dir="$RUNNER_TOOL_CACHE/ffmpeg/latest/x64"
+          mkdir -p "$cache_dir"
+          cp "$(command -v ffmpeg)" "$cache_dir/ffmpeg"
+          touch "$RUNNER_TOOL_CACHE/ffmpeg/latest/x64.complete"
       - name: Record and run the Phase 1 self-heal acceptance test
         uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3 # v2.1.0
         with:
@@ -87,10 +102,6 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           include-hidden-files: true
-      - name: Undeploy the Application operator
-        shell: pwsh
-        run: |
-          ./scripts/dev.ps1 undeploy-operator
       - name: Capture diagnostics
         if: failure()
         shell: pwsh
@@ -103,6 +114,11 @@ jobs:
           path: .artifacts/diagnostics/
           retention-days: 7
           include-hidden-files: true
+      - name: Undeploy the Application operator
+        if: always()
+        shell: pwsh
+        run: |
+          ./scripts/dev.ps1 undeploy-operator
       - name: Destroy cluster
         if: always()
         shell: pwsh
