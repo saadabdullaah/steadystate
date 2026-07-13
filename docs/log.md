@@ -11,14 +11,9 @@
 - Enabled protected-branch governance, security scanning, dependency updates, and immutable required checks.
 - Proved the minimal profile and all required quality, security, Windows, CodeQL, and cluster checks in GitHub Actions.
 
-### Blocked
-
-- Full local cluster verification requires upgrading the current Docker Desktop 20.10/cgroup-v1 engine; the Kubernetes 1.36 node image correctly fails the compatibility gate.
-
 ### Next
 
-- Upgrade the local Docker Desktop engine to a cgroup-v2-capable release.
-- Repeat the clean standard-profile acceptance test on the Windows workstation.
+- Begin Phase 1 API and controller design on top of the validated foundation.
 
 ## 2026-07-13 — Standard-profile topology correction
 
@@ -28,3 +23,13 @@
 - Preserved cross-node service routing with `externalTrafficPolicy: Cluster`.
 - Revalidated the complete required-check suite in GitHub Actions.
 - Proved a standard-profile bootstrap, destroy, clean re-bootstrap, and final idempotent cleanup.
+
+## 2026-07-13 — Windows acceptance
+
+### Done
+
+- Validated Docker Engine 29.6.1 with Linux containers and cgroup v2 through `doctor`.
+- Completed a cold standard-profile bootstrap locally in 8.9 minutes.
+- Reproved Gateway API ingress and Calico NetworkPolicy enforcement on Windows.
+- Hardened the positive-connectivity proof against transient Service endpoint programming.
+- Converged the existing cluster in 1.2 minutes, then proved destroy is safe both when present and absent.

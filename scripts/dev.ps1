@@ -174,7 +174,19 @@ function Invoke-NetworkPolicyProof {
     Invoke-External kubectl wait -n steadystate-network-test --for=condition=Available deployment/server --timeout=180s
     Invoke-External kubectl wait -n steadystate-network-test --for=condition=Ready pod/client --timeout=180s
     $curlArguments = @('exec', '-n', 'steadystate-network-test', 'client', '--', 'curl', '--fail', '--silent', '--max-time', '5', 'http://server/healthz')
-    Invoke-External -Executable kubectl -Arguments $curlArguments
+    $connectivityDeadline = (Get-Date).AddSeconds(60)
+    do {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & kubectl @curlArguments *> $null
+        $curlExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($curlExitCode -eq 0) { break }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $connectivityDeadline)
+    if ($curlExitCode -ne 0) {
+        throw 'Positive connectivity was not established before applying the deny policy'
+    }
     $policy | & kubectl apply -f -
     if ($LASTEXITCODE -ne 0) { throw 'Failed to apply deny policy' }
     Start-Sleep -Seconds 5
