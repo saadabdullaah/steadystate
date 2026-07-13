@@ -17,4 +17,13 @@ resources:
   kind: Application
   path: github.com/saadabdullaah/steadystate/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: false
+  controller: true
+  domain: steadystate.dev
+  group: platform
+  kind: Team
+  path: github.com/saadabdullaah/steadystate/api/v1alpha1
+  version: v1alpha1
 version: "3"

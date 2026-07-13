@@ -6,3 +6,4 @@
 | [0002](0002-kubebuilder-for-operator-development.md) | Use Kubebuilder for operator development |
 | [0003](0003-envoy-gateway-and-gateway-api.md) | Use Envoy Gateway and Gateway API |
 | [0004](0004-deterministic-application-reconciliation.md) | Use deterministic, watch-driven Application reconciliation |
+| [0005](0005-label-based-team-tenancy.md) | Use label-based Team tenancy and finalizer-controlled Namespace deletion |

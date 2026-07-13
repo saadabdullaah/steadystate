@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/platform.steadystate.dev_applications.yaml
+- bases/platform.steadystate.dev_teams.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

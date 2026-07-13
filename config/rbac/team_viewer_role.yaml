@@ -1,0 +1,25 @@
+# This rule is not used by the project steadystate itself.
+# It delegates read-only Team API visibility.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: steadystate
+    app.kubernetes.io/managed-by: kustomize
+  name: team-viewer-role
+rules:
+- apiGroups:
+  - platform.steadystate.dev
+  resources:
+  - teams
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.steadystate.dev
+  resources:
+  - teams/status
+  verbs:
+  - get

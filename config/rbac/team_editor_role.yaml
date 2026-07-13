@@ -1,0 +1,29 @@
+# This rule is not used by the project steadystate itself.
+# It delegates Team API editing without granting RBAC administration.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: steadystate
+    app.kubernetes.io/managed-by: kustomize
+  name: team-editor-role
+rules:
+- apiGroups:
+  - platform.steadystate.dev
+  resources:
+  - teams
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.steadystate.dev
+  resources:
+  - teams/status
+  verbs:
+  - get
