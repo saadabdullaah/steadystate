@@ -166,7 +166,7 @@ function Invoke-DeployOperator {
 }
 
 function Wait-ApplicationReady {
-    param([string]$Name = 'demo', [string]$Namespace = 'steadystate-demo', [int]$TimeoutSeconds = 60)
+    param([string]$Name = 'demo', [string]$Namespace = 'team-payments', [int]$TimeoutSeconds = 60)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         $previousPreference = $ErrorActionPreference
@@ -180,14 +180,31 @@ function Wait-ApplicationReady {
     throw "Application $Namespace/$Name did not reach Ready=True within $TimeoutSeconds seconds."
 }
 
+function Wait-TeamReady {
+    param([string]$Name = 'payments', [int]$TimeoutSeconds = 60)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $ready = & kubectl get team $Name -o "jsonpath={.status.conditions[?(@.type=='Ready')].status}" 2>$null
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($exitCode -eq 0 -and $ready -eq 'True') { return }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+    throw "Team $Name did not reach Ready=True within $TimeoutSeconds seconds."
+}
+
 function Invoke-TestOperator {
     Assert-Cluster
-    Invoke-External kubectl apply -k (Join-Path $Root 'config/samples')
-    Wait-ApplicationReady -TimeoutSeconds 60
+    Invoke-External kubectl apply -f (Join-Path $Root 'config/samples/platform_v1alpha1_team.yaml')
+    Wait-TeamReady -Name payments -TimeoutSeconds 60
+    Invoke-External kubectl apply -f (Join-Path $Root 'config/samples/platform_v1alpha1_application.yaml')
+    Wait-ApplicationReady -Name demo -Namespace team-payments -TimeoutSeconds 60
     $deadline = (Get-Date).AddSeconds(60)
     do {
         try {
-            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/" -Headers @{ Host = 'demo.steadystate-demo.steadystate.localtest.me' } -TimeoutSec 5
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/" -Headers @{ Host = 'demo.team-payments.steadystate.localtest.me' } -TimeoutSec 5
             if ($response.StatusCode -eq 200) {
                 $body = $response.Content | ConvertFrom-Json
                 if ($body.application -eq 'demo' -and $body.version -eq 'v0.1.0') {
@@ -202,8 +219,8 @@ function Invoke-TestOperator {
 
 function Invoke-UndeployOperator {
     Assert-Cluster
-    Invoke-External kubectl delete application demo -n steadystate-demo --ignore-not-found=true --wait=true --timeout=120s
-    Invoke-External kubectl delete namespace steadystate-demo --ignore-not-found=true --wait=true --timeout=120s
+    Invoke-External kubectl delete application demo -n team-payments --ignore-not-found=true --wait=true --timeout=120s
+    Invoke-External kubectl delete team payments --ignore-not-found=true --wait=true --timeout=120s
     Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true
     Write-Host 'SteadyState Application controller is undeployed.'
 }
@@ -304,6 +321,9 @@ function Invoke-Diagnostics {
         & kubectl get nodes -o wide *> (Join-Path $directory 'nodes.txt')
         & kubectl get pods -A -o wide *> (Join-Path $directory 'pods.txt')
         & kubectl get gatewayclass,gateway,httproute -A -o yaml *> (Join-Path $directory 'gateway-api.yaml')
+        & kubectl get teams.platform.steadystate.dev -o yaml *> (Join-Path $directory 'teams.yaml')
+        & kubectl get namespace,resourcequota,limitrange,serviceaccount,role.rbac.authorization.k8s.io,rolebinding.rbac.authorization.k8s.io,networkpolicy -A -l steadystate.dev/team -o yaml *> (Join-Path $directory 'team-boundaries.yaml')
+        & kubectl get clusterrole steadystate-team-owner -o yaml *> (Join-Path $directory 'team-owner-clusterrole.yaml')
         & kubectl get applications.platform.steadystate.dev -A -o yaml *> (Join-Path $directory 'applications.yaml')
         & kubectl get deployment,service,configmap -A -l app.kubernetes.io/managed-by=steadystate -o yaml *> (Join-Path $directory 'application-children.yaml')
         & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=500 *> (Join-Path $directory 'operator.log')

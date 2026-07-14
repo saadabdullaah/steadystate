@@ -57,26 +57,38 @@ kubectl auth can-i --as system:serviceaccount:steadystate-system:controller-mana
 
 Confirm both Phase 1 images were built and loaded into the named kind cluster before deploying the operator. Phase 1 intentionally uses local `IfNotPresent` images; registry publication starts later.
 
+If a Team stops at `RBACReady=False`, confirm the install-time `steadystate-team-owner` ClusterRole exists and inspect the operator log for Kubernetes binding prevention. The manager must have resource-name-scoped `bind` permission for only that ClusterRole. It must not have `escalate` permission or receive the Team owner's Secret and Pod execution permissions cluster-wide.
+
 ## Application remains Progressing
 
 ```powershell
-kubectl get application -n steadystate-demo demo -o yaml
-kubectl get deployment,service,configmap,httproute -n steadystate-demo
-kubectl describe deployment -n steadystate-demo demo
-kubectl describe httproute -n steadystate-demo demo
+kubectl get application -n team-payments demo -o yaml
+kubectl get deployment,service,configmap,httproute -n team-payments
+kubectl describe deployment -n team-payments demo
+kubectl describe httproute -n team-payments demo
 ```
 
 `Ready=True` requires the Deployment to report its current generation available and the HTTPRoute to report both `Accepted=True` and `ResolvedRefs=True` for the shared Gateway.
+
+## Application reports RepositoryNotAllowed or NamespaceNotManaged
+
+```powershell
+kubectl get team payments -o yaml
+kubectl get namespace team-payments -o yaml
+kubectl get application -n team-payments demo -o jsonpath='{.spec.image.repository}'
+```
+
+The Namespace must be named `team-<team>`, carry `steadystate.dev/team=<team>`, and contain the exact current Team UID annotation. The image repository must match one of `spec.allowedRepositories`; matching is anchored, case-sensitive, and uses Go path-style globs. Do not bypass the guard by editing Namespace ownership metadata. Correct the Team or Application specification and the dependency watches will reconcile the Application.
 
 ## HTTPRoute is rejected
 
 Inspect the route's parent conditions, the shared Gateway, and namespace permissions:
 
 ```powershell
-kubectl get httproute -n steadystate-demo demo -o yaml
+kubectl get httproute -n team-payments demo -o yaml
 kubectl get gateway -n steadystate-system steadystate -o yaml
 kubectl get referencegrant -A
-kubectl get events -n steadystate-demo --sort-by=.lastTimestamp
+kubectl get events -n team-payments --sort-by=.lastTimestamp
 ```
 
 The expected parent is `steadystate-system/steadystate`. The operator reports rejected or unresolved references as `Ready=False` rather than treating object creation as success.
@@ -84,9 +96,9 @@ The expected parent is `steadystate-system/steadystate`. The operator reports re
 ## Application deletion is stuck
 
 ```powershell
-kubectl get application -n steadystate-demo demo -o jsonpath='{.metadata.finalizers}'
+kubectl get application -n team-payments demo -o jsonpath='{.metadata.finalizers}'
 kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=200
-kubectl get deployment,service,configmap,httproute -n steadystate-demo -l app.kubernetes.io/managed-by=steadystate
+kubectl get deployment,service,configmap,httproute -n team-payments -l app.kubernetes.io/managed-by=steadystate
 ```
 
 Do not remove the finalizer manually until controller logs have been captured. Phase 1 has no external cleanup; a healthy controller releases the finalizer and Kubernetes garbage collection removes all owned children.

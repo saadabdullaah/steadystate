@@ -107,8 +107,23 @@ rules:
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
+  - clusterroles
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - steadystate-team-owner
+  resources:
+  - clusterroles
+  verbs:
+  - bind
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
   - rolebindings
-  - roles
   verbs:
   - create
   - delete

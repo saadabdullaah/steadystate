@@ -8,3 +8,31 @@ misconfigurations:
       Services it owns. Owner references, controller watches, and tests bound
       this permission to the documented operator contract.
     expired_at: 2027-07-13
+  - id: KSV-0050
+    paths:
+      - config/rbac/role.yaml
+    statement: >-
+      The Team controller may bind only the install-time
+      steadystate-team-owner ClusterRole. The resourceNames restriction,
+      immutable RoleBinding roleRef, protected deterministic builder, and
+      tests prevent binding any other role; the controller has no escalate
+      permission and never receives the delegated tenant permissions itself.
+    expired_at: 2027-07-14
+  - id: KSV-0041
+    paths:
+      - config/rbac/team_owner_role.yaml
+    statement: >-
+      Team owners must manage application Secrets inside their own managed
+      Namespace. This install-time ClusterRole is never used by a
+      ClusterRoleBinding; the controller can bind it only through a
+      namespaced RoleBinding, and tests protect that exact delegation model.
+    expired_at: 2027-07-14
+  - id: KSV-0053
+    paths:
+      - config/rbac/team_owner_role.yaml
+    statement: >-
+      Team owners require pod exec for workload diagnostics inside their own
+      managed Namespace. This install-time ClusterRole is never used by a
+      ClusterRoleBinding; the controller can bind it only through a
+      namespaced RoleBinding, and tests protect that exact delegation model.
+    expired_at: 2027-07-14

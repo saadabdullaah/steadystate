@@ -39,7 +39,6 @@ var _ = Describe("Team reconciler", Ordered, func() {
 			&corev1.ResourceQuota{ObjectMeta: metav1.ObjectMeta{Name: resources.TeamQuotaName, Namespace: resources.TeamNamespaceName(team)}},
 			&corev1.LimitRange{ObjectMeta: metav1.ObjectMeta{Name: resources.TeamLimitRangeName, Namespace: resources.TeamNamespaceName(team)}},
 			&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: resources.TeamOwnerName, Namespace: resources.TeamNamespaceName(team)}},
-			&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: resources.TeamOwnerName, Namespace: resources.TeamNamespaceName(team)}},
 			&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: resources.TeamOwnerName, Namespace: resources.TeamNamespaceName(team)}},
 			&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: resources.DefaultDenyPolicyName, Namespace: resources.TeamNamespaceName(team)}},
 			&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: resources.AllowDNSPolicyName, Namespace: resources.TeamNamespaceName(team)}},

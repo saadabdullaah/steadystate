@@ -11,6 +11,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -20,6 +22,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
+	"github.com/saadabdullaah/steadystate/internal/resources"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -69,6 +72,10 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+	Expect(k8sClient.Create(ctx, &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: resources.TeamOwnerName},
+		Rules:      resources.TeamOwnerRules(),
+	})).To(Succeed())
 })
 
 var _ = AfterSuite(func() {

@@ -1,8 +1,0 @@
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: steadystate-demo
-  labels:
-    app.kubernetes.io/part-of: steadystate
-    steadystate.dev/gateway-access: "true"

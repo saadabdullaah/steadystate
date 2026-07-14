@@ -25,12 +25,16 @@ import (
 )
 
 var _ = Describe("Application reconciler", Ordered, func() {
-	const namespace = "application-reconciler"
+	const (
+		teamName  = "application-reconciler"
+		namespace = "team-application-reconciler"
+	)
 
 	BeforeAll(func(ctx SpecContext) {
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-		err := k8sClient.Create(ctx, ns)
+		team := validSchemaTeam(teamName)
+		err := k8sClient.Create(ctx, team)
 		Expect(err == nil || apierrors.IsAlreadyExists(err)).To(BeTrue())
+		reconcileTeam(ctx, k8sClient, teamName)
 	})
 
 	It("creates and updates all owned resources", func(ctx SpecContext) {
@@ -102,6 +106,89 @@ var _ = Describe("Application reconciler", Ordered, func() {
 		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
 		Expect(app.Status.Phase).To(Equal(platformv1alpha1.ApplicationPhaseDegraded))
 		Expect(meta.FindStatusCondition(app.Status.Conditions, conditionReady).Reason).To(Equal("UnsupportedFeature"))
+	})
+
+	It("rejects a disallowed repository and recovers after the Team allowlist changes", func(ctx SpecContext) {
+		app := validApplication("repository-guard", namespace)
+		app.Spec.Image.Repository = "ghcr.io/saadabdullaah/payments-api"
+		Expect(k8sClient.Create(ctx, app)).To(Succeed())
+		reconcile(ctx, k8sClient, app)
+
+		key := types.NamespacedName{Name: app.Name, Namespace: namespace}
+		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
+		configuration := meta.FindStatusCondition(app.Status.Conditions, conditionConfigurationReady)
+		Expect(configuration).NotTo(BeNil())
+		Expect(configuration.Status).To(Equal(metav1.ConditionFalse))
+		Expect(configuration.Reason).To(Equal("RepositoryNotAllowed"))
+		err := k8sClient.Get(ctx, key, &appsv1.Deployment{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+		team := &platformv1alpha1.Team{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: teamName}, team)).To(Succeed())
+		team.Spec.AllowedRepositories = append(team.Spec.AllowedRepositories, "ghcr.io/saadabdullaah/payments-*")
+		Expect(k8sClient.Update(ctx, team)).To(Succeed())
+		reconcile(ctx, k8sClient, app)
+		Expect(k8sClient.Get(ctx, key, &appsv1.Deployment{})).To(Succeed())
+	})
+
+	It("retains known-good children when a repository becomes unauthorized", func(ctx SpecContext) {
+		app := validApplication("repository-drift", namespace)
+		Expect(k8sClient.Create(ctx, app)).To(Succeed())
+		reconcile(ctx, k8sClient, app)
+		key := types.NamespacedName{Name: app.Name, Namespace: namespace}
+		deployment := &appsv1.Deployment{}
+		service := &corev1.Service{}
+		configMap := &corev1.ConfigMap{}
+		route := &gatewayv1.HTTPRoute{}
+		Expect(k8sClient.Get(ctx, key, deployment)).To(Succeed())
+		Expect(k8sClient.Get(ctx, key, service)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app.Name + "-config", Namespace: namespace}, configMap)).To(Succeed())
+		Expect(k8sClient.Get(ctx, key, route)).To(Succeed())
+		resourceVersions := []string{deployment.ResourceVersion, service.ResourceVersion, configMap.ResourceVersion, route.ResourceVersion}
+		image := deployment.Spec.Template.Spec.Containers[0].Image
+
+		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
+		app.Spec.Image.Repository = "registry.example.test/not-authorized"
+		app.Spec.Image.Tag = "v9.9.9"
+		Expect(k8sClient.Update(ctx, app)).To(Succeed())
+		reconcile(ctx, k8sClient, app)
+
+		Expect(k8sClient.Get(ctx, key, deployment)).To(Succeed())
+		Expect(k8sClient.Get(ctx, key, service)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app.Name + "-config", Namespace: namespace}, configMap)).To(Succeed())
+		Expect(k8sClient.Get(ctx, key, route)).To(Succeed())
+		Expect([]string{deployment.ResourceVersion, service.ResourceVersion, configMap.ResourceVersion, route.ResourceVersion}).To(Equal(resourceVersions))
+		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal(image))
+		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
+		Expect(meta.FindStatusCondition(app.Status.Conditions, conditionConfigurationReady).Reason).To(Equal("RepositoryNotAllowed"))
+	})
+
+	It("rejects Applications outside Team-managed namespaces", func(ctx SpecContext) {
+		const unmanagedNamespace = "application-unmanaged"
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: unmanagedNamespace}}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		app := validApplication("unmanaged", unmanagedNamespace)
+		Expect(k8sClient.Create(ctx, app)).To(Succeed())
+		reconcile(ctx, k8sClient, app)
+
+		key := types.NamespacedName{Name: app.Name, Namespace: unmanagedNamespace}
+		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
+		Expect(meta.FindStatusCondition(app.Status.Conditions, conditionConfigurationReady).Reason).To(Equal("NamespaceNotManaged"))
+		err := k8sClient.Get(ctx, key, &appsv1.Deployment{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("maps Team and Namespace changes to dependent Applications", func(ctx SpecContext) {
+		reconciler := &ApplicationReconciler{Client: k8sClient}
+		team := &platformv1alpha1.Team{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: teamName}, team)).To(Succeed())
+		teamRequests := reconciler.applicationsForTeam(ctx, team)
+		Expect(teamRequests).To(ContainElement(ctrl.Request{NamespacedName: types.NamespacedName{Name: "repository-guard", Namespace: namespace}}))
+
+		ns := &corev1.Namespace{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namespace}, ns)).To(Succeed())
+		namespaceRequests := reconciler.applicationsForNamespace(ctx, ns)
+		Expect(namespaceRequests).To(ContainElement(ctrl.Request{NamespacedName: types.NamespacedName{Name: "repository-drift", Namespace: namespace}}))
 	})
 
 	It("derives Healthy status only from Deployment and HTTPRoute status", func(ctx SpecContext) {

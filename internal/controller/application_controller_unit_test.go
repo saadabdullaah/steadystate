@@ -9,9 +9,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
+	"github.com/saadabdullaah/steadystate/internal/resources"
 )
 
 func TestWorkloadStatusTransitions(t *testing.T) {
@@ -64,6 +66,44 @@ func TestUnsupportedStatusPreservesActiveVersion(t *testing.T) {
 	}
 	if condition := meta.FindStatusCondition(status.Conditions, conditionSecurityPolicyReady); condition == nil || condition.Status != metav1.ConditionFalse {
 		t.Fatalf("security condition does not expose unsupported capability: %#v", condition)
+	}
+}
+
+func TestValidateApplicationTenancy(t *testing.T) {
+	t.Parallel()
+
+	app := unitApplication()
+	team := unitTeam()
+	namespace := resources.TeamNamespace(team)
+	app.Namespace = namespace.Name
+	app.Spec.Image.Repository = "example.test/apps/demo"
+	if failure := validateApplicationTenancy(app, namespace, team); failure != nil {
+		t.Fatalf("valid tenancy was rejected: %#v", failure)
+	}
+
+	app.Spec.Image.Repository = "example.test/blocked"
+	if failure := validateApplicationTenancy(app, namespace, team); failure == nil || failure.reason != "RepositoryNotAllowed" {
+		t.Fatalf("disallowed repository failure=%#v", failure)
+	}
+
+	app.Spec.Image.Repository = "example.test/apps/demo"
+	namespace.Annotations[resources.TeamUIDAnnotationKey] = "different-uid"
+	if failure := validateApplicationTenancy(app, namespace, team); failure == nil || failure.reason != "NamespaceOwnershipMismatch" {
+		t.Fatalf("namespace ownership failure=%#v", failure)
+	}
+}
+
+func unitTeam() *platformv1alpha1.Team {
+	return &platformv1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "apps", UID: types.UID("team-uid")},
+		Spec: platformv1alpha1.TeamSpec{
+			Owners: []platformv1alpha1.TeamOwner{"apps-owner"},
+			Quota: platformv1alpha1.TeamQuota{
+				CPU:    resource.MustParse("2"),
+				Memory: resource.MustParse("2Gi"),
+			},
+			AllowedRepositories: []platformv1alpha1.RepositoryPattern{"example.test/apps/*"},
+		},
 	}
 }
 
