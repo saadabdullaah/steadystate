@@ -2,6 +2,7 @@ package resources
 
 import (
 	"encoding/json"
+	"os"
 	"slices"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/yaml"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
 )
@@ -64,24 +66,86 @@ func TestTeamRBACIsSortedAndProtectsPlatformGuardrails(t *testing.T) {
 	if len(binding.Subjects) != 3 || binding.Subjects[0].Kind != rbacv1.ServiceAccountKind || binding.Subjects[1].Name != "alice" || binding.Subjects[2].Name != "zoe" {
 		t.Fatalf("RoleBinding subjects are not deterministic: %#v", binding.Subjects)
 	}
-	if binding.RoleRef.Name != TeamOwnerName || binding.RoleRef.Kind != "Role" {
+	if binding.Namespace != TeamNamespaceName(team) {
+		t.Fatalf("Team owner RoleBinding escaped its namespace: %q", binding.Namespace)
+	}
+	if binding.RoleRef.APIGroup != rbacv1.GroupName || binding.RoleRef.Name != TeamOwnerName || binding.RoleRef.Kind != "ClusterRole" {
 		t.Fatalf("unexpected RoleRef: %#v", binding.RoleRef)
 	}
 
-	role := TeamRole(team)
+	role := &rbacv1.Role{Rules: TeamOwnerRules()}
 	for _, rule := range role.Rules {
-		for _, protected := range []string{"limitranges", "namespaces", "networkpolicies", "resourcequotas", "rolebindings", "roles", "serviceaccounts"} {
+		for _, protected := range []string{"clusterrolebindings", "clusterroles", "limitranges", "namespaces", "networkpolicies", "resourcequotas", "rolebindings", "roles", "serviceaccounts"} {
 			if slices.Contains(rule.Resources, protected) {
-				t.Fatalf("Team owner Role grants access to protected resource %q", protected)
+				t.Fatalf("Team owner ClusterRole grants access to protected resource %q", protected)
 			}
 		}
 	}
 	if !roleAllows(role, "", "secrets", "get") || !roleAllows(role, "platform.steadystate.dev", "applications", "create") {
-		t.Fatal("Team owner Role is missing required own-namespace permissions")
+		t.Fatal("Team owner ClusterRole is missing required own-namespace permissions")
 	}
 	if *TeamServiceAccount(team).AutomountServiceAccountToken {
 		t.Fatal("Team ServiceAccount must not automount credentials")
 	}
+}
+
+func TestInstalledTeamOwnerClusterRoleMatchesBuilder(t *testing.T) {
+	t.Parallel()
+
+	installed := readClusterRole(t, "../../config/rbac/team_owner_role.yaml")
+	if installed.Name != "team-owner" {
+		t.Fatalf("install-time ClusterRole name=%q", installed.Name)
+	}
+	want, err := json.Marshal(TeamOwnerRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(installed.Rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("install-time ClusterRole rules differ from the deterministic builder:\ngot  %s\nwant %s", got, want)
+	}
+}
+
+func TestManagerCanOnlyBindInstalledTeamOwnerClusterRole(t *testing.T) {
+	t.Parallel()
+
+	manager := readClusterRole(t, "../../config/rbac/role.yaml")
+	foundBind := false
+	for _, rule := range manager.Rules {
+		if slices.Contains(rule.Verbs, "escalate") {
+			t.Fatal("manager ClusterRole must never grant escalate")
+		}
+		if slices.Contains(rule.Resources, "clusterrolebindings") {
+			t.Fatal("manager ClusterRole must never grant ClusterRoleBinding access")
+		}
+		if !slices.Contains(rule.Verbs, "bind") {
+			continue
+		}
+		foundBind = true
+		if len(rule.APIGroups) != 1 || rule.APIGroups[0] != rbacv1.GroupName || len(rule.Resources) != 1 || rule.Resources[0] != "clusterroles" || len(rule.ResourceNames) != 1 || rule.ResourceNames[0] != TeamOwnerName || len(rule.Verbs) != 1 {
+			t.Fatalf("manager bind authority is not restricted to %s: %#v", TeamOwnerName, rule)
+		}
+	}
+	if !foundBind {
+		t.Fatalf("manager ClusterRole cannot bind %s", TeamOwnerName)
+	}
+}
+
+func readClusterRole(t *testing.T, path string) *rbacv1.ClusterRole {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	role := &rbacv1.ClusterRole{}
+	if err := yaml.NewYAMLOrJSONDecoder(file, 4096).Decode(role); err != nil {
+		t.Fatal(err)
+	}
+	return role
 }
 
 func TestTeamNetworkPolicies(t *testing.T) {
@@ -117,7 +181,7 @@ func TestTeamBuildersAreByteStableAndIndependent(t *testing.T) {
 		func() any { return TeamResourceQuota(team) },
 		func() any { return TeamLimitRange(team) },
 		func() any { return TeamServiceAccount(team) },
-		func() any { return TeamRole(team) },
+		func() any { return TeamOwnerRules() },
 		func() any { return TeamRoleBinding(team) },
 		func() any { return TeamDefaultDenyNetworkPolicy(team) },
 		func() any { return TeamAllowDNSNetworkPolicy(team) },

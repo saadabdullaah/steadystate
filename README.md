@@ -4,7 +4,7 @@ SteadyState is a laptop-scale internal developer platform built around a Kuberne
 
 Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization.
 
-> Status: Phase 0 and Phase 1 are complete. PR #10 was merged at `8229c7b`, post-merge Nightly Integration and CodeQL passed, and the annotated `v0.1.0` release is published. Phase 2 tenancy implementation is now beginning from that immutable baseline.
+> Status: Phase 0 and Phase 1 are complete and the annotated `v0.1.0` release is published. Phase 2 is in progress: PRs #11 and #12 added the Team API, deterministic tenant guardrails, and the Team controller. Application-to-Team repository authorization and hosted isolation acceptance remain before `v0.2.0`.
 
 ## Architecture
 
@@ -14,7 +14,9 @@ flowchart LR
     PS --> Tools["Pinned repository-local tools"]
     PS --> Kind["kind cluster"]
     Kind --> Calico["Calico CNI and NetworkPolicy"]
-    PS --> CR["Application CR"]
+    PS --> Team["Team CR"]
+    Team --> Boundary["team-&lt;name&gt; Namespace / quota / RBAC / NetworkPolicy"]
+    Boundary --> CR["Application CR"]
     CR --> Operator["SteadyState operator"]
     Operator --> Children["Deployment / Service / ConfigMap / HTTPRoute"]
     Children --> Gateway["Gateway API and Envoy Gateway"]
@@ -103,7 +105,7 @@ make destroy
 | `test-network-policy` | Prove traffic succeeds before and fails after deny policy |
 | `build-images` / `load-images` | Build the operator and demo app, then load them into kind |
 | `deploy-operator` / `undeploy-operator` | Reconcile or remove the in-cluster operator runtime |
-| `test-operator` | Create the sample Application and verify it through Envoy Gateway |
+| `test-operator` | Create the sample Team and authorized Application, then verify it through Envoy Gateway |
 | `demo-self-heal` | Delete and drift owned resources, then prove repair and garbage collection |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |

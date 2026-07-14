@@ -3,11 +3,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -17,11 +19,14 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
 	applicationlogic "github.com/saadabdullaah/steadystate/internal/application"
 	"github.com/saadabdullaah/steadystate/internal/resources"
+	teamlogic "github.com/saadabdullaah/steadystate/internal/team"
 )
 
 const ApplicationFinalizer = "steadystate.dev/finalizer"
@@ -48,6 +53,8 @@ type ApplicationReconciler struct {
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=platform.steadystate.dev,resources=teams,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
 // Reconcile converges all Application-owned objects without periodic polling.
 func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -84,6 +91,18 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, statusErr
 	}
 
+	policyFailure, err := r.applicationTenancy(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("verify Application tenancy: %w", err)
+	}
+	if policyFailure != nil {
+		changed, statusErr := r.patchStatus(ctx, app, degradedStatus(app, policyFailure.reason, policyFailure.message))
+		if changed {
+			r.event(app, corev1.EventTypeWarning, policyFailure.reason, policyFailure.message)
+		}
+		return ctrl.Result{}, statusErr
+	}
+
 	if unsupported := applicationlogic.UnsupportedFeatures(app); len(unsupported) > 0 {
 		message := "unsupported Phase 1 capabilities requested: " + strings.Join(unsupported, ", ")
 		changed, err := r.patchStatus(ctx, app, degradedStatus(app, "UnsupportedFeature", message))
@@ -115,6 +134,51 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.event(app, corev1.EventTypeNormal, "Reconciled", "Application resources and status were reconciled")
 	}
 	return ctrl.Result{}, nil
+}
+
+type applicationTenancyFailure struct {
+	reason  string
+	message string
+}
+
+func (r *ApplicationReconciler) applicationTenancy(ctx context.Context, app *platformv1alpha1.Application) (*applicationTenancyFailure, error) {
+	namespace := &corev1.Namespace{}
+	if err := r.Get(ctx, types.NamespacedName{Name: app.Namespace}, namespace); err != nil {
+		if apierrors.IsNotFound(err) {
+			return &applicationTenancyFailure{reason: "NamespaceNotManaged", message: fmt.Sprintf("Namespace %s is not managed by a SteadyState Team", app.Namespace)}, nil
+		}
+		return nil, err
+	}
+
+	teamName := namespace.Labels[resources.TeamLabelKey]
+	if teamName == "" || namespace.Name != resources.TeamNamespacePrefix+teamName || namespace.Annotations[resources.TeamUIDAnnotationKey] == "" {
+		return &applicationTenancyFailure{reason: "NamespaceNotManaged", message: fmt.Sprintf("Namespace %s is not a verified SteadyState Team namespace", app.Namespace)}, nil
+	}
+
+	team := &platformv1alpha1.Team{}
+	if err := r.Get(ctx, types.NamespacedName{Name: teamName}, team); err != nil {
+		if apierrors.IsNotFound(err) {
+			return &applicationTenancyFailure{reason: "TeamNotFound", message: fmt.Sprintf("Team %s referenced by Namespace %s does not exist", teamName, app.Namespace)}, nil
+		}
+		return nil, err
+	}
+	return validateApplicationTenancy(app, namespace, team), nil
+}
+
+func validateApplicationTenancy(app *platformv1alpha1.Application, namespace *corev1.Namespace, team *platformv1alpha1.Team) *applicationTenancyFailure {
+	if namespace.Labels[resources.TeamLabelKey] != team.Name || namespace.Name != resources.TeamNamespaceName(team) || namespace.Annotations[resources.TeamUIDAnnotationKey] != string(team.UID) {
+		return &applicationTenancyFailure{reason: "NamespaceOwnershipMismatch", message: fmt.Sprintf("Namespace %s does not belong to the current Team %s incarnation", namespace.Name, team.Name)}
+	}
+	if !team.DeletionTimestamp.IsZero() {
+		return &applicationTenancyFailure{reason: "TeamTerminating", message: fmt.Sprintf("Team %s is terminating", team.Name)}
+	}
+	if err := teamlogic.Validate(team); err != nil {
+		return &applicationTenancyFailure{reason: "TeamInvalid", message: fmt.Sprintf("Team %s configuration is invalid: %v", team.Name, err)}
+	}
+	if !teamlogic.RepositoryAllowed(team, app.Spec.Image.Repository) {
+		return &applicationTenancyFailure{reason: "RepositoryNotAllowed", message: fmt.Sprintf("repository %s is not allowed by Team %s", app.Spec.Image.Repository, team.Name)}
+	}
+	return nil
 }
 
 func (r *ApplicationReconciler) reconcileChildren(ctx context.Context, app *platformv1alpha1.Application) (*appsv1.Deployment, *gatewayv1.HTTPRoute, bool, error) {
@@ -353,7 +417,29 @@ func (r *ApplicationReconciler) event(app *platformv1alpha1.Application, eventTy
 	}
 }
 
-// SetupWithManager registers owner watches for every generated resource.
+func (r *ApplicationReconciler) applicationRequestsInNamespace(ctx context.Context, namespace string) []ctrlreconcile.Request {
+	applications := &platformv1alpha1.ApplicationList{}
+	if err := r.List(ctx, applications, client.InNamespace(namespace)); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "unable to list Applications for tenancy change", "namespace", namespace)
+		return nil
+	}
+	requests := make([]ctrlreconcile.Request, 0, len(applications.Items))
+	for i := range applications.Items {
+		requests = append(requests, ctrlreconcile.Request{NamespacedName: types.NamespacedName{Name: applications.Items[i].Name, Namespace: namespace}})
+	}
+	sort.Slice(requests, func(i, j int) bool { return requests[i].Name < requests[j].Name })
+	return requests
+}
+
+func (r *ApplicationReconciler) applicationsForNamespace(ctx context.Context, object client.Object) []ctrlreconcile.Request {
+	return r.applicationRequestsInNamespace(ctx, object.GetName())
+}
+
+func (r *ApplicationReconciler) applicationsForTeam(ctx context.Context, object client.Object) []ctrlreconcile.Request {
+	return r.applicationRequestsInNamespace(ctx, resources.TeamNamespacePrefix+object.GetName())
+}
+
+// SetupWithManager registers owner watches and tenancy dependency watches.
 func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1alpha1.Application{}).
@@ -361,6 +447,8 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&gatewayv1.HTTPRoute{}).
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForNamespace)).
+		Watches(&platformv1alpha1.Team{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForTeam)).
 		Named("application").
 		Complete(r)
 }

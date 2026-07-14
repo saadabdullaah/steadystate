@@ -62,7 +62,10 @@
 - Merged the fully green GitHub Actions dependency update in PR #3 at `2d7ebfd`, closed stale Go dependency PR #7, and froze the resulting dependency baseline for Phase 2.
 - Approved the cluster-scoped `Team` API, managed Namespace lifecycle, label-and-UID ownership model, protected tenant RBAC, default-deny networking, Envoy Gateway ingress selector, repository glob contract, and Application tenancy guard.
 - Split Phase 2 into bounded API, controller, Application integration, and hosted acceptance closeout pull requests.
+- Merged the Team API and deterministic Namespace, quota, LimitRange, RBAC, and NetworkPolicy builders in PR #11 at `36eeebf`.
+- Merged the watch-driven Team controller, exact-UID non-adoption boundary, drift repair, staged status, and safe Namespace finalization in PR #12 at `6dac808`.
+- Passed quality, Windows, envtest, security, and kind-smoke for the Team runtime in CI run `29315523417`.
 
 ### Next
 
-- Implement the Team API and deterministic tenant-resource builders.
+- Enforce Application namespace ownership and repository authorization, then automate hosted cross-team isolation acceptance.

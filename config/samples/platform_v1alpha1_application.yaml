@@ -2,7 +2,7 @@ apiVersion: platform.steadystate.dev/v1alpha1
 kind: Application
 metadata:
   name: demo
-  namespace: steadystate-demo
+  namespace: team-payments
 spec:
   owner: platform-team
   image:

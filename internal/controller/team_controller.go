@@ -56,7 +56,9 @@ type TeamReconciler struct {
 // +kubebuilder:rbac:groups=platform.steadystate.dev,resources=teams/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=platform.steadystate.dev,resources=teams/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces;resourcequotas;limitranges;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=steadystate-team-owner,verbs=bind
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
@@ -150,21 +152,19 @@ func (r *TeamReconciler) reconcileResourcePolicy(ctx context.Context, team *plat
 }
 
 func (r *TeamReconciler) reconcileRBAC(ctx context.Context, team *platformv1alpha1.Team) (bool, error) {
+	installedRole := &rbacv1.ClusterRole{}
+	if err := r.Get(ctx, types.NamespacedName{Name: resources.TeamOwnerName}, installedRole); err != nil {
+		return false, fmt.Errorf("installed Team owner ClusterRole: %w", err)
+	}
+	if !apiequality.Semantic.DeepEqual(installedRole.Rules, resources.TeamOwnerRules()) {
+		return false, fmt.Errorf("installed Team owner ClusterRole rules do not match the protected platform contract")
+	}
+
 	mutated := false
 	desiredAccount := resources.TeamServiceAccount(team)
 	currentAccount := &corev1.ServiceAccount{}
 	changed, err := r.reconcileManagedObject(ctx, team, "ServiceAccount", currentAccount, desiredAccount, func() {
 		currentAccount.AutomountServiceAccountToken = desiredAccount.AutomountServiceAccountToken
-	})
-	mutated = mutated || changed
-	if err != nil {
-		return mutated, err
-	}
-
-	desiredRole := resources.TeamRole(team)
-	currentRole := &rbacv1.Role{}
-	changed, err = r.reconcileManagedObject(ctx, team, "Role", currentRole, desiredRole, func() {
-		currentRole.Rules = desiredRole.Rules
 	})
 	mutated = mutated || changed
 	if err != nil {
@@ -311,7 +311,7 @@ func readyTeamStatus(team *platformv1alpha1.Team) platformv1alpha1.TeamStatus {
 	status := baseTeamStatus(team)
 	setTeamCondition(&status, team.Generation, conditionTeamNamespaceReady, metav1.ConditionTrue, "NamespaceReconciled", "Managed Namespace exists and has verified ownership")
 	setTeamCondition(&status, team.Generation, conditionTeamResourcePolicyReady, metav1.ConditionTrue, "ResourcePolicyReconciled", "ResourceQuota and LimitRange match the Team specification")
-	setTeamCondition(&status, team.Generation, conditionTeamRBACReady, metav1.ConditionTrue, "RBACReconciled", "ServiceAccount, Role, and RoleBinding match the Team specification")
+	setTeamCondition(&status, team.Generation, conditionTeamRBACReady, metav1.ConditionTrue, "RBACReconciled", "ServiceAccount and RoleBinding match the installed Team owner ClusterRole")
 	setTeamCondition(&status, team.Generation, conditionTeamNetworkPolicyReady, metav1.ConditionTrue, "NetworkPolicyReconciled", "Default deny, DNS, and Envoy Gateway policies are enforced")
 	setTeamCondition(&status, team.Generation, conditionTeamReady, metav1.ConditionTrue, "TeamReady", "All Team boundary resources are reconciled")
 	return status
@@ -419,6 +419,22 @@ func teamRequestsForObject(_ context.Context, object client.Object) []ctrlreconc
 	return []ctrlreconcile.Request{{NamespacedName: types.NamespacedName{Name: teamName}}}
 }
 
+func (r *TeamReconciler) teamRequestsForOwnerClusterRole(ctx context.Context, object client.Object) []ctrlreconcile.Request {
+	if object.GetName() != resources.TeamOwnerName {
+		return nil
+	}
+	teams := &platformv1alpha1.TeamList{}
+	if err := r.List(ctx, teams); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "unable to list Teams for owner ClusterRole change")
+		return nil
+	}
+	requests := make([]ctrlreconcile.Request, 0, len(teams.Items))
+	for i := range teams.Items {
+		requests = append(requests, ctrlreconcile.Request{NamespacedName: types.NamespacedName{Name: teams.Items[i].Name}})
+	}
+	return requests
+}
+
 // SetupWithManager registers label-based watches for every Team-generated kind.
 func (r *TeamReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapper := handler.EnqueueRequestsFromMapFunc(teamRequestsForObject)
@@ -428,8 +444,8 @@ func (r *TeamReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.ResourceQuota{}, mapper).
 		Watches(&corev1.LimitRange{}, mapper).
 		Watches(&corev1.ServiceAccount{}, mapper).
-		Watches(&rbacv1.Role{}, mapper).
 		Watches(&rbacv1.RoleBinding{}, mapper).
+		Watches(&rbacv1.ClusterRole{}, handler.EnqueueRequestsFromMapFunc(r.teamRequestsForOwnerClusterRole)).
 		Watches(&networkingv1.NetworkPolicy{}, mapper).
 		Named("team").
 		Complete(r)

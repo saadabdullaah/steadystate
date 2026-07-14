@@ -2,7 +2,7 @@
 param(
     [int]$HttpPort = 8080,
     [string]$ApplicationName = 'demo',
-    [string]$Namespace = 'steadystate-demo',
+    [string]$Namespace = 'team-payments',
     [string]$EvidencePath
 )
 

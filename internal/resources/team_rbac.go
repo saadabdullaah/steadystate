@@ -18,25 +18,22 @@ func TeamServiceAccount(team *platformv1alpha1.Team) *corev1.ServiceAccount {
 	}
 }
 
-// TeamRole builds the protected owner role for a managed Team namespace.
-func TeamRole(team *platformv1alpha1.Team) *rbacv1.Role {
-	return &rbacv1.Role{
-		ObjectMeta: teamObjectMeta(team, TeamOwnerName),
-		Rules: []rbacv1.PolicyRule{
-			{APIGroups: []string{"platform.steadystate.dev"}, Resources: []string{"applications"}, Verbs: []string{"create", "delete", "get", "list", "patch", "update", "watch"}},
-			{APIGroups: []string{"platform.steadystate.dev"}, Resources: []string{"applications/status"}, Verbs: []string{"get"}},
-			{APIGroups: []string{""}, Resources: []string{"configmaps", "secrets"}, Verbs: []string{"create", "delete", "get", "list", "patch", "update", "watch"}},
-			{APIGroups: []string{""}, Resources: []string{"events", "pods", "services"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"}},
-			{APIGroups: []string{""}, Resources: []string{"pods/exec"}, Verbs: []string{"create", "get"}},
-			{APIGroups: []string{"apps"}, Resources: []string{"deployments", "replicasets"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"events.k8s.io"}, Resources: []string{"events"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"gateway.networking.k8s.io"}, Resources: []string{"httproutes"}, Verbs: []string{"get", "list", "watch"}},
-		},
+// TeamOwnerRules defines the install-time ClusterRole delegated inside each Team namespace.
+func TeamOwnerRules() []rbacv1.PolicyRule {
+	return []rbacv1.PolicyRule{
+		{APIGroups: []string{"platform.steadystate.dev"}, Resources: []string{"applications"}, Verbs: []string{"create", "delete", "get", "list", "patch", "update", "watch"}},
+		{APIGroups: []string{"platform.steadystate.dev"}, Resources: []string{"applications/status"}, Verbs: []string{"get"}},
+		{APIGroups: []string{""}, Resources: []string{"configmaps", "secrets"}, Verbs: []string{"create", "delete", "get", "list", "patch", "update", "watch"}},
+		{APIGroups: []string{""}, Resources: []string{"events", "pods", "services"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"}},
+		{APIGroups: []string{""}, Resources: []string{"pods/exec"}, Verbs: []string{"create", "get"}},
+		{APIGroups: []string{"apps"}, Resources: []string{"deployments", "replicasets"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"events.k8s.io"}, Resources: []string{"events"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"gateway.networking.k8s.io"}, Resources: []string{"httproutes"}, Verbs: []string{"get", "list", "watch"}},
 	}
 }
 
-// TeamRoleBinding binds sorted Kubernetes users and the generated ServiceAccount to the Team role.
+// TeamRoleBinding binds sorted Kubernetes users and the generated ServiceAccount to the installed Team owner ClusterRole.
 func TeamRoleBinding(team *platformv1alpha1.Team) *rbacv1.RoleBinding {
 	owners := make([]string, len(team.Spec.Owners))
 	for i, owner := range team.Spec.Owners {
@@ -52,7 +49,7 @@ func TeamRoleBinding(team *platformv1alpha1.Team) *rbacv1.RoleBinding {
 		Subjects:   subjects,
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: rbacv1.GroupName,
-			Kind:     "Role",
+			Kind:     "ClusterRole",
 			Name:     TeamOwnerName,
 		},
 	}
