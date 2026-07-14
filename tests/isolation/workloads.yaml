@@ -1,0 +1,118 @@
+apiVersion: platform.steadystate.dev/v1alpha1
+kind: Application
+metadata:
+  name: payments-api
+  namespace: team-payments
+spec:
+  owner: payments-owner
+  image:
+    repository: __DEMO_REPOSITORY__
+    tag: __DEMO_TAG__
+  runtime:
+    port: 8080
+    replicas:
+      min: 1
+      max: 3
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  deployment:
+    strategy: rolling
+    automaticRollback: true
+  reliability:
+    availabilityTarget: "99.9%"
+    maximumP95Latency: 250ms
+    maximumErrorRate: "1%"
+  observability:
+    metrics: false
+    logs: false
+    traces: false
+  security:
+    requireSignedImage: false
+    runAsNonRoot: true
+    networkIsolation: false
+---
+apiVersion: platform.steadystate.dev/v1alpha1
+kind: Application
+metadata:
+  name: orders-api
+  namespace: team-orders
+spec:
+  owner: orders-owner
+  image:
+    repository: __DEMO_REPOSITORY__
+    tag: __DEMO_TAG__
+  runtime:
+    port: 8080
+    replicas:
+      min: 1
+      max: 3
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  deployment:
+    strategy: rolling
+    automaticRollback: true
+  reliability:
+    availabilityTarget: "99.9%"
+    maximumP95Latency: 250ms
+    maximumErrorRate: "1%"
+  observability:
+    metrics: false
+    logs: false
+    traces: false
+  security:
+    requireSignedImage: false
+    runAsNonRoot: true
+    networkIsolation: false
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: isolation-client
+  namespace: team-orders
+  annotations:
+    checkov.io/skip1: >-
+      CKV2_K8S_6=The Team controller creates and continuously reconciles the
+      namespace-wide default-deny and explicit allow NetworkPolicies.
+    checkov.io/skip2: >-
+      CKV_K8S_14=The runtime renderer replaces the placeholder with the
+      SHA-256-pinned ISOLATION_CLIENT_IMAGE from scripts/versions.env.
+    checkov.io/skip3: >-
+      CKV_K8S_43=The runtime renderer replaces the placeholder with the
+      SHA-256-pinned ISOLATION_CLIENT_IMAGE from scripts/versions.env.
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    runAsGroup: 65532
+    runAsNonRoot: true
+    runAsUser: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: client
+      image: __ISOLATION_CLIENT_IMAGE__
+      command: ["sleep", "3600"]
+      readinessProbe:
+        exec:
+          command: ["sh", "-c", "true"]
+      livenessProbe:
+        exec:
+          command: ["sh", "-c", "true"]
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {cpu: 100m, memory: 64Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+        runAsUser: 65532

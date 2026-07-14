@@ -27,7 +27,7 @@ jobs:
         run: |
           ./scripts/dev.ps1 destroy
           ./scripts/dev.ps1 bootstrap -Profile standard
-      - name: Build and load Phase 1 images
+      - name: Build and load operator images
         shell: pwsh
         run: |
           ./scripts/dev.ps1 build-images
@@ -132,6 +132,57 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           include-hidden-files: true
+      - name: Run Phase 2 cross-team isolation acceptance
+        shell: pwsh
+        run: ./scripts/dev.ps1 test-isolation -Profile standard -EvidencePath .artifacts/phase2/acceptance.json
+      - name: Verify Phase 2 acceptance evidence
+        shell: pwsh
+        run: |
+          $evidence = Get-Content -Raw -LiteralPath .artifacts/phase2/acceptance.json | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed') {
+            throw 'The Phase 2 evidence document is invalid or did not pass.'
+          }
+          if ($evidence.sourceRevision -ne $env:GITHUB_SHA -or $evidence.profile -ne 'standard') {
+            throw 'The Phase 2 evidence does not describe this standard-profile workflow revision.'
+          }
+          $required = @(
+            'calico-enforcement-present',
+            'team-boundaries-ready',
+            'concurrent-applications-ready',
+            'cross-team-service-denied',
+            'gateway-route-succeeds',
+            'cross-team-rbac-denied',
+            'repository-authorization-rejected',
+            'unmanaged-namespace-rejected',
+            'quota-admission-rejected',
+            'team-deletion-isolated'
+          )
+          $passed = @($evidence.checks | Where-Object status -eq 'passed')
+          $actual = @($passed | ForEach-Object name)
+          if (@($actual | Select-Object -Unique).Count -ne $actual.Count) {
+            throw 'The Phase 2 evidence contains duplicate check names.'
+          }
+          foreach ($name in $required) {
+            if ($name -notin $actual) { throw "Missing passed Phase 2 acceptance check: $name" }
+          }
+          if (@($passed | Where-Object { [double]$_.elapsedSeconds -lt 0 }).Count -gt 0) {
+            throw 'The Phase 2 evidence contains a negative elapsed time.'
+          }
+          Write-Host "Verified $($required.Count) Phase 2 acceptance checks."
+      - name: Capture Phase 2 acceptance diagnostics
+        shell: pwsh
+        run: ./scripts/dev.ps1 diagnostics
+      - name: Upload Phase 2 acceptance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase2-acceptance-${{ github.sha }}
+          path: |
+            .artifacts/phase2/acceptance.json
+            .artifacts/phase2/rendered/
+            .artifacts/diagnostics/
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
       - name: Capture diagnostics
         if: failure()
         shell: pwsh
@@ -141,7 +192,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: standard-round-trip-diagnostics
-          path: .artifacts/diagnostics/
+          path: |
+            .artifacts/phase2/
+            .artifacts/diagnostics/
           retention-days: 7
           include-hidden-files: true
       - name: Undeploy the Application operator

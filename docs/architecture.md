@@ -58,6 +58,12 @@ The Team controller owns the desired state of its Namespace, aggregate ResourceQ
 
 Applications are authorized from the Namespace boundary, never from the descriptive `spec.owner` field. The Application controller requires the deterministic namespace name, Team label, exact current Team UID, a non-terminating valid Team, and a repository matching one of the Team's anchored, case-sensitive Go path globs. Team and Namespace watches immediately reevaluate dependent Applications when authorization changes.
 
+## Tenancy acceptance contract
+
+`test-isolation` treats Calico readiness as a prerequisite rather than assuming a timeout proves NetworkPolicy enforcement. On a standard-profile cluster it creates payments and orders Teams and runs both Applications concurrently within their independent quotas. An orders Pod must time out against the payments Service ClusterIP, while both applications must remain reachable through their distinct shared-Gateway hostnames. The orders ServiceAccount is authorized for own-namespace Secrets and denied in payments. Forbidden repositories and Applications outside verified Team namespaces must report their exact rejection conditions without creating children, and ResourceQuota admission must reject a Pod above the Team ceiling. Finally, deleting orders must remove its Namespace while payments retains the same Namespace UID and remains Ready and reachable.
+
+The command writes evidence only after every assertion passes. Hosted Nightly validation checks the evidence revision, profile, unique named checks, and result before uploading the JSON, rendered fixtures, and cluster diagnostics.
+
 ## Application ownership contract
 
 The `Application` controller is the sole writer of its generated Deployment, Service, ConfigMap, and HTTPRoute. Every child has a controller owner reference and stable SteadyState labels. Owner watches enqueue reconciliation immediately when a child is deleted or changed; no polling interval is used. A rejected Application does not create or mutate children, so a newly unauthorized change cannot replace the last known-good workload.

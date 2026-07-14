@@ -65,7 +65,10 @@
 - Merged the Team API and deterministic Namespace, quota, LimitRange, RBAC, and NetworkPolicy builders in PR #11 at `36eeebf`.
 - Merged the watch-driven Team controller, exact-UID non-adoption boundary, drift repair, staged status, and safe Namespace finalization in PR #12 at `6dac808`.
 - Passed quality, Windows, envtest, security, and kind-smoke for the Team runtime in CI run `29315523417`.
+- Merged the Application tenancy guard, Team and Namespace dependency watches, repository authorization, Team-aware demo path, and install-time owner ClusterRole in PR #13 at `21ca1a5`.
+- Passed all five CI jobs in run `29324628300` and the hosted standard-profile operator path in Nightly run `29322107063`.
+- Added a hosted Phase 2 acceptance harness with explicit Calico, concurrent application, cross-team network and RBAC, Gateway, repository, unmanaged namespace, quota, and isolated Team-deletion proofs.
 
 ### Next
 
-- Enforce Application namespace ownership and repository authorization, then automate hosted cross-team isolation acceptance.
+- Validate the hosted cross-team isolation artifact on the PR and merged `main`, then close Phase 2 as `v0.2.0`.

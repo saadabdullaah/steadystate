@@ -4,7 +4,7 @@ SteadyState is a laptop-scale internal developer platform built around a Kuberne
 
 Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization.
 
-> Status: Phase 0 and Phase 1 are complete and the annotated `v0.1.0` release is published. Phase 2 is in progress: PRs #11 and #12 added the Team API, deterministic tenant guardrails, and the Team controller. Application-to-Team repository authorization and hosted isolation acceptance remain before `v0.2.0`.
+> Status: Phase 0 and Phase 1 are complete and the annotated `v0.1.0` release is published. Phase 2 is in progress: PRs #11, #12, and #13 added the Team API, deterministic tenant guardrails, the Team controller, and Application repository authorization. Hosted isolation acceptance and the `v0.2.0` closeout remain.
 
 ## Architecture
 
@@ -68,6 +68,14 @@ To run the Phase 1 operator path on an existing standard-profile cluster:
 .\scripts\dev.ps1 demo-self-heal
 ```
 
+To run the Phase 2 tenancy acceptance suite after the operator test:
+
+```powershell
+.\scripts\dev.ps1 test-isolation -Profile standard -EvidencePath .artifacts/phase2/acceptance.json
+```
+
+The suite creates payments and orders tenants, proves direct cross-team traffic and RBAC are denied, proves Gateway traffic is allowed, rejects forbidden repositories and unmanaged namespaces, exercises quota admission, and deletes one Team without disturbing the other. It leaves the successful state available for `diagnostics`; `undeploy-operator` removes the acceptance resources.
+
 The hosted integration workflow records the same destructive self-heal test against a disposable cluster:
 
 ![Phase 1 Application self-heal demonstration](docs/demonstrations/phase1-self-heal.gif)
@@ -88,6 +96,7 @@ Linux and GitHub Actions use the same PowerShell implementation through Make:
 make tools
 make test
 make bootstrap PROFILE=minimal
+make test-isolation PROFILE=standard
 make destroy
 ```
 
@@ -107,6 +116,7 @@ make destroy
 | `deploy-operator` / `undeploy-operator` | Reconcile or remove the in-cluster operator runtime |
 | `test-operator` | Create the sample Team and authorized Application, then verify it through Envoy Gateway |
 | `demo-self-heal` | Delete and drift owned resources, then prove repair and garbage collection |
+| `test-isolation` | Prove Phase 2 network, Gateway, RBAC, repository, namespace, quota, and Team-deletion boundaries |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |
 
