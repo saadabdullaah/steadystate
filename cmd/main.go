@@ -61,6 +61,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.TeamReconciler{
+		Client:   mgr.GetClient(),
+		Recorder: mgr.GetEventRecorder("steadystate-team-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.Error(err, "unable to create controller", "controller", "Team")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		ctrl.Log.Error(err, "unable to register health check")
 		os.Exit(1)

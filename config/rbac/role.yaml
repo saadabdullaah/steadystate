@@ -8,6 +8,10 @@ rules:
   - ""
   resources:
   - configmaps
+  - limitranges
+  - namespaces
+  - resourcequotas
+  - serviceaccounts
   - services
   verbs:
   - create
@@ -51,6 +55,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - platform.steadystate.dev
   resources:
   - applications
@@ -66,13 +82,38 @@ rules:
   - platform.steadystate.dev
   resources:
   - applications/finalizers
+  - teams/finalizers
   verbs:
   - update
 - apiGroups:
   - platform.steadystate.dev
   resources:
   - applications/status
+  - teams/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - platform.steadystate.dev
+  resources:
+  - teams
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
