@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -69,11 +70,14 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 		"SETUP_ENVTEST_VERSION", "KUSTOMIZE_VERSION", "GOLANGCI_LINT_VERSION",
 		"VHS_VERSION", "TTYD_VERSION", "VHS_LINUX_X86_64_SHA256", "TTYD_LINUX_X86_64_SHA256",
 		"GATEWAYCLASS_CRD_SHA256", "GATEWAY_CRD_SHA256", "HTTPROUTE_CRD_SHA256",
-		"GO_BUILDER_IMAGE", "OPERATOR_IMAGE", "DEMO_IMAGE",
+		"GO_BUILDER_IMAGE", "OPERATOR_IMAGE", "DEMO_IMAGE", "ISOLATION_CLIENT_IMAGE",
 	} {
 		if !strings.Contains(text, key+"=") {
 			t.Errorf("versions.env is missing %s", key)
 		}
+	}
+	if !regexp.MustCompile(`(?m)^ISOLATION_CLIENT_IMAGE=[^@\s]+@sha256:[0-9a-f]{64}$`).MatchString(text) {
+		t.Error("ISOLATION_CLIENT_IMAGE must be pinned by a sha256 digest")
 	}
 }
 

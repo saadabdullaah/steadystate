@@ -107,6 +107,17 @@ Do not remove the finalizer manually until controller logs have been captured. P
 
 The test asserts that `calico-node` exists, proves connectivity before applying a deny policy, expects a timeout afterward, and verifies DNS remains usable. If traffic still succeeds, inspect Calico status rather than accepting a false isolation claim.
 
+## Phase 2 isolation acceptance fails
+
+Run the suite on a standard-profile cluster only after building, loading, deploying, and testing the operator:
+
+```powershell
+.\scripts\dev.ps1 test-isolation -Profile standard -EvidencePath .artifacts/phase2/acceptance.json
+.\scripts\dev.ps1 diagnostics
+```
+
+No evidence file is written when an assertion fails. Preserve the cluster until diagnostics are captured. For a direct-network failure, verify all `calico-node` replicas are Ready and inspect the three generated Team NetworkPolicies. For RBAC, compare `kubectl auth can-i` using `system:serviceaccount:team-orders:steadystate-team-owner` in both namespaces. For quota rejection, inspect `steadystate-quota` usage and the admission error. If Team deletion stalls, inspect the Team condition, Namespace ownership annotation, Application finalizers, and controller logs before changing any finalizer manually.
+
 ## Reset
 
 ```powershell

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','undeploy-operator','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -219,8 +219,8 @@ function Invoke-TestOperator {
 
 function Invoke-UndeployOperator {
     Assert-Cluster
-    Invoke-External kubectl delete application demo -n team-payments --ignore-not-found=true --wait=true --timeout=120s
-    Invoke-External kubectl delete team payments --ignore-not-found=true --wait=true --timeout=120s
+    Invoke-External kubectl delete team payments orders --ignore-not-found=true --wait=true --timeout=180s
+    Invoke-External kubectl delete namespace steadystate-unmanaged --ignore-not-found=true --wait=true --timeout=120s
     Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true
     Write-Host 'SteadyState Application controller is undeployed.'
 }
@@ -479,6 +479,10 @@ try {
         'demo-self-heal' {
             Assert-Cluster
             & (Join-Path $PSScriptRoot 'demo-self-heal.ps1') -HttpPort $HttpPort -EvidencePath $EvidencePath
+        }
+        'test-isolation' {
+            Assert-Cluster
+            & (Join-Path $PSScriptRoot 'test-isolation.ps1') -HttpPort $HttpPort -Profile $Profile -EvidencePath $EvidencePath
         }
         'undeploy-operator' { Invoke-UndeployOperator }
         'bootstrap' { Invoke-Bootstrap }
