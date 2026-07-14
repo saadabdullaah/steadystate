@@ -22,6 +22,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
+	"github.com/saadabdullaah/steadystate/internal/resources"
 )
 
 var _ = Describe("Application reconciler", Ordered, func() {
@@ -178,6 +179,24 @@ var _ = Describe("Application reconciler", Ordered, func() {
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 	})
 
+	It("rejects an invalid source revision before mutating children", func(ctx SpecContext) {
+		app := validApplication("invalid-revision", namespace)
+		app.Annotations = map[string]string{platformv1alpha1.SourceRevisionAnnotationKey: "not-a-full-object-id"}
+		Expect(k8sClient.Create(ctx, app)).To(Succeed())
+		reconcile(ctx, k8sClient, app)
+
+		key := types.NamespacedName{Name: app.Name, Namespace: namespace}
+		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
+		Expect(app.Status.Phase).To(Equal(platformv1alpha1.ApplicationPhaseDegraded))
+		Expect(meta.FindStatusCondition(app.Status.Conditions, conditionReady).Reason).To(Equal("InvalidSourceRevision"))
+		err := k8sClient.Get(ctx, key, &appsv1.Deployment{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+		app.Annotations[platformv1alpha1.SourceRevisionAnnotationKey] = testGitRevision
+		Expect(k8sClient.Update(ctx, app)).To(Succeed())
+		reconcile(ctx, k8sClient, app)
+		Expect(k8sClient.Get(ctx, key, &appsv1.Deployment{})).To(Succeed())
+	})
 	It("maps Team and Namespace changes to dependent Applications", func(ctx SpecContext) {
 		reconciler := &ApplicationReconciler{Client: k8sClient}
 		team := &platformv1alpha1.Team{}
@@ -191,7 +210,7 @@ var _ = Describe("Application reconciler", Ordered, func() {
 		Expect(namespaceRequests).To(ContainElement(ctrl.Request{NamespacedName: types.NamespacedName{Name: "repository-drift", Namespace: namespace}}))
 	})
 
-	It("derives Healthy status only from Deployment and HTTPRoute status", func(ctx SpecContext) {
+	It("derives Healthy status from Deployment, runtime Pod digest, and HTTPRoute status", func(ctx SpecContext) {
 		app := validApplication("healthy", namespace)
 		Expect(k8sClient.Create(ctx, app)).To(Succeed())
 		reconcile(ctx, k8sClient, app)
@@ -218,13 +237,36 @@ var _ = Describe("Application reconciler", Ordered, func() {
 			},
 		}}
 		Expect(k8sClient.Status().Update(ctx, route)).To(Succeed())
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "healthy-runtime", Namespace: namespace, Labels: resources.SelectorLabels(app)},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "application", Image: deployment.Spec.Template.Spec.Containers[0].Image}}},
+		}
+		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+		pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "application", Image: deployment.Spec.Template.Spec.Containers[0].Image, ImageID: "containerd://" + testImageDigest, Ready: true}}
+		Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
 		reconcile(ctx, k8sClient, app)
 
 		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
 		Expect(app.Status.Phase).To(Equal(platformv1alpha1.ApplicationPhaseHealthy))
 		Expect(app.Status.ActiveVersion).To(Equal("v0.1.0"))
 		Expect(app.Status.CandidateVersion).To(BeEmpty())
+		Expect(app.Status.ResolvedImageDigest).To(Equal(testImageDigest))
+		Expect(app.Status.ResolvedGitRevision).To(BeEmpty())
 		Expect(meta.IsStatusConditionTrue(app.Status.Conditions, conditionReady)).To(BeTrue())
+
+		deploymentResourceVersion := deployment.ResourceVersion
+		app.Annotations = map[string]string{platformv1alpha1.SourceRevisionAnnotationKey: testGitRevision}
+		Expect(k8sClient.Update(ctx, app)).To(Succeed())
+		counting := &countingClient{Client: k8sClient}
+		reconcile(ctx, counting, app)
+		Expect(counting.mutations.Load()).To(Equal(int64(1)), "only the status patch may write for a revision-only update")
+		Expect(k8sClient.Get(ctx, key, deployment)).To(Succeed())
+		Expect(deployment.ResourceVersion).To(Equal(deploymentResourceVersion))
+		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
+		Expect(app.Status.ResolvedGitRevision).To(Equal(testGitRevision))
+		Expect(app.Status.ResolvedImageDigest).To(Equal(testImageDigest))
 
 		Expect(k8sClient.Get(ctx, key, route)).To(Succeed())
 		route.Status.Parents[0].Conditions[0].Status = metav1.ConditionFalse
