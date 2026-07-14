@@ -71,6 +71,8 @@
 - Passed quality, Windows, envtest, security, and kind-smoke on the Phase 2 acceptance candidate `b3b56a9` in CI run `29337911712`.
 - Passed all ten revision-bound Phase 2 checks in hosted standard-profile Nightly run `29337904627`; evidence artifact `phase2-acceptance-b3b56a95249fcdd7ac6d38be925d55f29bc169dd` (artifact `8313037526`, SHA-256 `b4b64434faa8ea6665e662b737d1518a353cb0cbaffa1c1a7c5b085a027bcf85`) contains the JSON result, rendered fixtures, and diagnostics.
 
-### Next
+### Release outcome
 
-- Merge the fully validated Phase 2 acceptance PR, repeat hosted acceptance on the exact merge commit, and publish `v0.2.0`.
+- Merged the Phase 2 acceptance closeout in PR #14 at `d67aa3b`.
+- Passed all five post-merge CI jobs in run `29344460290`, CodeQL analysis in run `29344460213`, and all post-merge hosted acceptance steps in Nightly run `29344492583`.
+- Retained merge-bound evidence as `phase2-acceptance-d67aa3b83ef7167d8dc1e3863c5598d60ed11533` (artifact `8315782226`, SHA-256 `f037f4b501b734be14d3f1336ef80a38deb7a2bebc5b2cac05731625d95d39c2`) and prepared permanent JSON evidence for the annotated `v0.2.0` release.
