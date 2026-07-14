@@ -4,7 +4,7 @@ SteadyState is a laptop-scale internal developer platform built around a Kuberne
 
 Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization.
 
-> Status: Phase 0 and Phase 1 are complete and the annotated `v0.1.0` release is published. Phase 2 is in progress: PRs #11, #12, and #13 added the Team API, deterministic tenant guardrails, the Team controller, and Application repository authorization. Hosted isolation acceptance and the `v0.2.0` closeout remain.
+> Status: Phase 0 and Phase 1 are complete and the annotated `v0.1.0` release is published. Phase 2 implementation is complete across PRs #11 through #14: the Team API, deterministic tenant guardrails, Team controller, Application repository authorization, and hosted isolation acceptance are fully validated. The `v0.2.0` merge and release publication are the remaining closeout actions.
 
 ## Architecture
 
@@ -75,6 +75,8 @@ To run the Phase 2 tenancy acceptance suite after the operator test:
 ```
 
 The suite creates payments and orders tenants, proves direct cross-team traffic and RBAC are denied, proves Gateway traffic is allowed, rejects forbidden repositories and unmanaged namespaces, exercises quota admission, and deletes one Team without disturbing the other. It leaves the successful state available for `diagnostics`; `undeploy-operator` removes the acceptance resources.
+
+[Hosted Phase 2 acceptance run 29337904627](https://github.com/saadabdullaah/steadystate/actions/runs/29337904627) passed all ten revision-bound checks on `b3b56a9`: Calico enforcement, concurrent tenant applications, cross-team Service and RBAC denial, sanctioned Gateway access, repository and unmanaged-namespace rejection, quota admission, and isolated Team deletion. The retained `phase2-acceptance-b3b56a9...` artifact contains the verified JSON evidence, rendered fixtures, and diagnostics.
 
 The hosted integration workflow records the same destructive self-heal test against a disposable cluster:
 
