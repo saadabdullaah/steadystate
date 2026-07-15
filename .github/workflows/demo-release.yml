@@ -1,0 +1,266 @@
+name: Demo release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/demo-app/main.go
+      - apps/demo-app/Dockerfile
+      - apps/demo-app/VERSION
+      - go.mod
+      - go.sum
+  workflow_dispatch:
+    inputs:
+      recovery_reason:
+        description: Reason this recovery release is required
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: demo-release
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/saadabdullaah/steadystate-demo-app
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Validate release version
+        id: metadata
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw -LiteralPath apps/demo-app/VERSION).Trim()
+          if ($version -cnotmatch '^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$') {
+            throw 'apps/demo-app/VERSION must contain strict vMAJOR.MINOR.PATCH syntax.'
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "sha_tag=sha-$env:GITHUB_SHA" >> $env:GITHUB_OUTPUT
+
+      - name: Test demo application
+        shell: pwsh
+        run: |
+          $goFiles = @(Get-ChildItem -LiteralPath apps/demo-app -Filter '*.go' -File | ForEach-Object FullName)
+          $unformatted = @(gofmt -l @goFiles)
+          if ($LASTEXITCODE -ne 0) { throw 'gofmt failed.' }
+          if ($unformatted.Count -gt 0) { throw "Unformatted demo files: $($unformatted -join ', ')" }
+          go vet ./apps/demo-app/...
+          if ($LASTEXITCODE -ne 0) { throw 'go vet failed for the demo application.' }
+          go test ./apps/demo-app/...
+          if ($LASTEXITCODE -ne 0) { throw 'Demo application tests failed.' }
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check immutable registry tags
+        id: preflight
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+          SHA_TAG: ${{ steps.metadata.outputs.sha_tag }}
+        run: |
+          function Get-RegistryDigest {
+              param([Parameter(Mandatory)][string]$Reference)
+              $previousPreference = $ErrorActionPreference
+              $ErrorActionPreference = 'Continue'
+              $output = @(& docker buildx imagetools inspect $Reference 2>&1)
+              $exitCode = $LASTEXITCODE
+              $ErrorActionPreference = $previousPreference
+              if ($exitCode -ne 0) {
+                  $message = $output -join [Environment]::NewLine
+                  if ($message -match '(?i)manifest unknown|not found') { return $null }
+                  throw "Registry inspection failed for ${Reference}: $message"
+              }
+              $digestLines = @($output | Where-Object { $_ -match '^Digest:' })
+              if ($digestLines.Count -ne 1) { throw "Expected one registry digest for $Reference." }
+              $match = [regex]::Match([string]$digestLines[0], '^Digest:\s+(sha256:[0-9a-f]{64})\s*$')
+              if (-not $match.Success) { throw "Malformed registry digest for $Reference." }
+              return $match.Groups[1].Value
+          }
+
+          $versionRef = "$env:IMAGE`:$env:VERSION"
+          $shaRef = "$env:IMAGE`:$env:SHA_TAG"
+          $versionDigest = Get-RegistryDigest -Reference $versionRef
+          $shaDigest = Get-RegistryDigest -Reference $shaRef
+          if (-not $versionDigest -and -not $shaDigest) {
+              'publish=true' >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+          if (-not $versionDigest -or -not $shaDigest) {
+              throw 'Immutable tag reuse is partial; both semver and SHA tags must exist or both must be absent.'
+          }
+          if ($versionDigest -ne $shaDigest) {
+              throw 'Immutable semver and SHA tags resolve to different digests.'
+          }
+          'publish=false' >> $env:GITHUB_OUTPUT
+          "digest=$versionDigest" >> $env:GITHUB_OUTPUT
+
+      - name: Build and publish immutable demo image
+        if: steps.preflight.outputs.publish == 'true'
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: apps/demo-app/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.metadata.outputs.version }}
+            ${{ env.IMAGE }}:${{ steps.metadata.outputs.sha_tag }}
+
+      - name: Verify published digest
+        id: registry
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+          SHA_TAG: ${{ steps.metadata.outputs.sha_tag }}
+          PUBLISH: ${{ steps.preflight.outputs.publish }}
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          REUSED_DIGEST: ${{ steps.preflight.outputs.digest }}
+        run: |
+          function Get-RegistryDigest {
+              param([Parameter(Mandatory)][string]$Reference)
+              $output = @(& docker buildx imagetools inspect $Reference)
+              if ($LASTEXITCODE -ne 0) { throw "Registry inspection failed for $Reference." }
+              $digestLines = @($output | Where-Object { $_ -match '^Digest:' })
+              if ($digestLines.Count -ne 1) { throw "Expected one registry digest for $Reference." }
+              $match = [regex]::Match([string]$digestLines[0], '^Digest:\s+(sha256:[0-9a-f]{64})\s*$')
+              if (-not $match.Success) { throw "Malformed registry digest for $Reference." }
+              return $match.Groups[1].Value
+          }
+
+          $expected = if ($env:PUBLISH -eq 'true') { $env:BUILT_DIGEST } else { $env:REUSED_DIGEST }
+          if ($expected -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'The recorded image digest is invalid.' }
+          foreach ($reference in @("$env:IMAGE`:$env:VERSION", "$env:IMAGE`:$env:SHA_TAG")) {
+              if ((Get-RegistryDigest -Reference $reference) -ne $expected) {
+                  throw "$reference does not resolve to the recorded digest."
+              }
+          }
+          "digest=$expected" >> $env:GITHUB_OUTPUT
+
+      - name: Create delivery installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout for GitOps delivery
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Create or update GitOps pull request
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+          DIGEST: ${{ steps.registry.outputs.digest }}
+        run: |
+          $manifest = 'gitops/applications/demo/application.yaml'
+          $branch = "automation/demo-app-$env:VERSION"
+          $title = "chore(gitops): deploy demo app $env:VERSION"
+          $content = Get-Content -Raw -LiteralPath $manifest
+          $tagPattern = '(?m)^    tag: v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$'
+          $tagMatches = [regex]::Matches($content, $tagPattern)
+          if ($tagMatches.Count -ne 1) { throw "Expected exactly one demo image tag in $manifest." }
+          if ($tagMatches[0].Value -eq "    tag: $env:VERSION") {
+              Write-Host "$manifest already deploys $env:VERSION; no delivery PR is required."
+              exit 0
+          }
+
+          git config user.name '${{ steps.app-token.outputs.app-slug }}[bot]'
+          $userId = gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id
+          if ($LASTEXITCODE -ne 0 -or -not $userId) { throw 'Could not resolve the GitHub App bot identity.' }
+          git config user.email "$userId+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+          git fetch origin main:refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch main.' }
+
+          $previousPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          git ls-remote --exit-code --heads origin $branch *> $null
+          $branchExitCode = $LASTEXITCODE
+          $ErrorActionPreference = $previousPreference
+          if ($branchExitCode -eq 0) {
+              git fetch origin "$branch`:refs/remotes/origin/$branch"
+              if ($LASTEXITCODE -ne 0) { throw "Could not fetch existing branch $branch." }
+              git switch --create $branch --track "origin/$branch"
+          } elseif ($branchExitCode -eq 2) {
+              git switch --create $branch $env:GITHUB_SHA
+          } else {
+              throw "Could not determine whether branch $branch exists."
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Could not switch to delivery branch $branch." }
+
+          $existingChanges = @(git diff --name-only origin/main...HEAD)
+          $unexpected = @($existingChanges | Where-Object { $_ -ne $manifest })
+          if ($unexpected.Count -gt 0) {
+              throw "Delivery branch contains unexpected files: $($unexpected -join ', ')"
+          }
+
+          $content = Get-Content -Raw -LiteralPath $manifest
+          $tagMatches = [regex]::Matches($content, $tagPattern)
+          if ($tagMatches.Count -ne 1) { throw "Expected exactly one demo image tag in $manifest." }
+          $updated = [regex]::Replace($content, $tagPattern, "    tag: $env:VERSION")
+          [IO.File]::WriteAllText($manifest, $updated, [Text.UTF8Encoding]::new($false))
+          $worktreeChanges = @(git diff --name-only)
+          $unexpected = @($worktreeChanges | Where-Object { $_ -ne $manifest })
+          if ($unexpected.Count -gt 0 -or $worktreeChanges.Count -gt 1) {
+              throw 'The delivery mutation must change only the demo GitOps manifest.'
+          }
+          if ($worktreeChanges.Count -eq 1) {
+              git add -- $manifest
+              git commit -m "chore(gitops): deploy demo app $env:VERSION"
+              if ($LASTEXITCODE -ne 0) { throw 'Could not commit the GitOps manifest bump.' }
+          }
+
+          $deliveryChanges = @(git diff --name-only origin/main...HEAD)
+          if ($deliveryChanges.Count -ne 1 -or $deliveryChanges[0] -ne $manifest) {
+              throw 'The delivery branch must contain only the demo GitOps manifest change.'
+          }
+          git push --set-upstream origin $branch
+          if ($LASTEXITCODE -ne 0) { throw 'Could not push the GitOps delivery branch.' }
+
+          $workflowUrl = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          $body = @"
+          Automated GitOps delivery for the SteadyState demo application.
+
+          - Source commit: $env:GITHUB_SHA
+          - Semver: $env:VERSION
+          - Image digest: $env:DIGEST
+          - Workflow: $workflowUrl
+          - Manifest: $manifest
+          "@
+          $number = gh pr list --head $branch --base main --state open --json number --jq '.[0].number'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not query existing delivery pull requests.' }
+          if ($number) {
+              gh pr edit $number --title $title --body $body
+          } else {
+              gh pr create --base main --head $branch --title $title --body $body
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create or update the delivery pull request.' }
