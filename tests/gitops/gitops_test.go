@@ -325,6 +325,102 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 	}
 }
 
+func TestPhase3HostedAcceptanceContracts(t *testing.T) {
+	root := repositoryRoot(t)
+	read := func(path string) string {
+		t.Helper()
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content)
+	}
+	workflow := read(filepath.Join(root, ".github", "workflows", "nightly.yml"))
+	script := read(filepath.Join(root, "scripts", "phase3-acceptance.ps1"))
+	tape := read(filepath.Join(root, "docs", "demonstrations", "phase3-gitops-delivery.tape"))
+
+	workflowTokens := []string{
+		"timeout-minutes: 90",
+		"persist-credentials: false",
+		"actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+		"client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}",
+		"private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}",
+		"permission-contents: write",
+		"phase3-acceptance-${{ github.sha }}",
+		"if-no-files-found: error",
+		"Delete Phase 3 acceptance branch",
+	}
+	for _, token := range workflowTokens {
+		if !strings.Contains(workflow, token) {
+			t.Errorf("Phase 3 Nightly workflow is missing %q", token)
+		}
+	}
+
+	requiredChecks := []string{
+		"pinned-argocd-installed-dex-absent",
+		"argocd-ui-route-reachable",
+		"root-platform-team-applications-healthy",
+		"baseline-version-reachable",
+		"git-commit-detected-without-kubectl-delivery-mutation",
+		"candidate-synchronized-and-served",
+		"runtime-digest-matches-ghcr-linux-amd64",
+		"resolved-git-revision-matches-candidate",
+		"kubernetes-and-argo-degraded-on-rejection",
+		"recovery-restores-healthy",
+		"argo-health-matches-kubernetes-status",
+		"operator-outage-preserves-resource-uids",
+		"operator-restart-reconciles-without-drift",
+		"argo-ownership-boundary",
+	}
+	for _, check := range requiredChecks {
+		if !strings.Contains(script, check) || !strings.Contains(workflow, check) {
+			t.Errorf("Phase 3 acceptance check %q is not implemented and verified", check)
+		}
+	}
+
+	for _, token := range []string{
+		"acceptance/phase3-",
+		"schemaVersion = 1",
+		"sourceSHA = $SourceRevision",
+		"baselineCommit = $baselineCommit",
+		"candidateCommit = $candidateCommit",
+		"rejectionCommit = $rejectionCommit",
+		"recoveryCommit = $recoveryCommit",
+		"anonymousPull = $true",
+		"linux/amd64",
+		"RepositoryNotAllowed",
+		"control-plane=controller-manager",
+		"Assert-ArgoOwnershipBoundary",
+		"Write-Evidence -EvidenceResult failed",
+	} {
+		if !strings.Contains(script, token) {
+			t.Errorf("Phase 3 acceptance script is missing %q", token)
+		}
+	}
+
+	candidateStart := strings.Index(script, "$candidateCommit = New-AcceptanceCommit")
+	outageStart := strings.Index(script, "$outageBefore = Get-ResourceSnapshot")
+	if candidateStart < 0 || outageStart <= candidateStart {
+		t.Fatal("could not locate the Git-only delivery interval")
+	}
+	deliveryInterval := script[candidateStart:outageStart]
+	for _, mutation := range []string{"kubectl apply", "kubectl patch", "kubectl delete"} {
+		if strings.Contains(deliveryInterval, mutation) {
+			t.Errorf("delivery interval contains Kubernetes mutation %q", mutation)
+		}
+	}
+
+	diagnostics := strings.Index(workflow, "Capture Phase 3 acceptance diagnostics")
+	branchCleanup := strings.Index(workflow, "Delete Phase 3 acceptance branch")
+	clusterCleanup := strings.Index(workflow, "Undeploy GitOps foundation")
+	if diagnostics < 0 || diagnostics >= branchCleanup || branchCleanup >= clusterCleanup {
+		t.Fatal("Phase 3 diagnostics and cleanup ordering is invalid")
+	}
+	if !strings.Contains(tape, "Output docs/demonstrations/phase3-gitops-delivery.gif") ||
+		!strings.Contains(tape, "scripts/phase3-acceptance.ps1") {
+		t.Fatal("Phase 3 VHS tape does not record the real hosted acceptance script")
+	}
+}
 func TestArgoVersionAndChecksumPins(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(repositoryRoot(t), "scripts", "versions.env"))
 	if err != nil {

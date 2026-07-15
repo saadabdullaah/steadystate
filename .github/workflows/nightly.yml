@@ -12,10 +12,12 @@ jobs:
   round-trip:
     name: standard-round-trip
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - name: Install pinned tools
         shell: pwsh
         run: ./scripts/install-tools.ps1 -BaseOnly
@@ -183,54 +185,125 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           include-hidden-files: true
-      - name: Deploy Argo CD and GitOps root
-        shell: pwsh
-        run: ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA
-      - name: Run Phase 3 GitOps foundation baseline
-        shell: pwsh
-        run: ./scripts/dev.ps1 test-gitops -Profile standard -GitRevision $env:GITHUB_SHA -EvidencePath .artifacts/gitops/baseline.json
-      - name: Verify GitOps foundation evidence
+      - name: Prepare Phase 3 acceptance branch
         shell: pwsh
         run: |
-          $evidence = Get-Content -Raw -LiteralPath .artifacts/gitops/baseline.json | ConvertFrom-Json
-          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed') {
-            throw 'The GitOps baseline evidence is invalid or did not pass.'
+          "PHASE3_ACCEPTANCE_BRANCH=acceptance/phase3-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Create Phase 3 acceptance installation token
+        id: phase3-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+      - name: Configure Phase 3 Git credentials
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.phase3-app-token.outputs.token }}
+        run: gh auth setup-git
+      - name: Record and run Phase 3 GitOps delivery acceptance
+        id: phase3
+        shell: bash
+        env:
+          CI: ""
+          COLORTERM: truecolor
+          GH_TOKEN: ${{ steps.phase3-app-token.outputs.token }}
+          PHASE3_APP_SLUG: ${{ steps.phase3-app-token.outputs.app-slug }}
+        run: vhs docs/demonstrations/phase3-gitops-delivery.tape
+      - name: Verify Phase 3 acceptance evidence
+        shell: pwsh
+        run: |
+          $gif = Get-Item -LiteralPath docs/demonstrations/phase3-gitops-delivery.gif
+          if ($gif.Length -le 0) { throw 'The Phase 3 GIF is empty.' }
+          $evidence = Get-Content -Raw -LiteralPath .artifacts/phase3/acceptance.json | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed' -or $evidence.failure) {
+            throw 'The Phase 3 evidence document is invalid or did not pass.'
           }
-          if ($evidence.profile -ne 'standard' -or $evidence.resolvedGitRevision -ne $env:GITHUB_SHA) {
-            throw 'The GitOps baseline evidence does not match this standard-profile commit.'
+          if ($evidence.sourceSHA -ne $env:GITHUB_SHA -or $evidence.profile -ne 'standard' -or
+              $evidence.ephemeralBranch -ne $env:PHASE3_ACCEPTANCE_BRANCH) {
+            throw 'The Phase 3 evidence does not describe this workflow revision and branch.'
           }
-          if ($evidence.argoCDVersion -ne '3.4.2') {
-            throw 'The GitOps baseline used an unexpected Argo CD version.'
+          foreach ($field in @('baselineCommit','candidateCommit','rejectionCommit','recoveryCommit')) {
+            if ([string]$evidence.$field -notmatch '^([0-9a-f]{40}|[0-9a-f]{64})$') {
+              throw "Phase 3 evidence has an invalid $field."
+            }
+          }
+          if ($evidence.resolvedGitRevision -ne $evidence.recoveryCommit) {
+            throw 'The final resolved Git revision does not match the recovery commit.'
+          }
+          if ([string]$evidence.runtimeDigest -notmatch '^sha256:[0-9a-f]{64}$' -or
+              $evidence.runtimeDigest -ne $evidence.registry.runtimeDigest -or
+              -not $evidence.registry.anonymousPull -or $evidence.registry.platform -ne 'linux/amd64') {
+            throw 'The runtime and anonymous GHCR digest evidence is invalid.'
           }
           $required = @(
-            'pinned-argocd-ready-dex-absent',
-            'argocd-application-argocd-configuration-healthy',
-            'argocd-application-steadystate-operator-healthy',
-            'argocd-application-payments-healthy',
-            'argocd-application-steadystate-root-healthy',
-            'gitops-team-and-application-ready',
-            'argocd-ui-gateway-reachable',
-            'runtime-provenance-matches-root-revision',
-            'annotation-resource-tracking'
+            'pinned-argocd-installed-dex-absent',
+            'argocd-ui-route-reachable',
+            'root-platform-team-applications-healthy',
+            'baseline-version-reachable',
+            'git-commit-detected-without-kubectl-delivery-mutation',
+            'candidate-synchronized-and-served',
+            'runtime-digest-matches-ghcr-linux-amd64',
+            'resolved-git-revision-matches-candidate',
+            'kubernetes-and-argo-degraded-on-rejection',
+            'recovery-restores-healthy',
+            'argo-health-matches-kubernetes-status',
+            'operator-outage-preserves-resource-uids',
+            'operator-restart-reconciles-without-drift',
+            'argo-ownership-boundary'
           )
-          $passed = @($evidence.checks | Where-Object status -eq 'passed' | ForEach-Object name)
-          if (@($passed | Select-Object -Unique).Count -ne $passed.Count) {
-            throw 'The GitOps baseline contains duplicate check names.'
+          $passed = @($evidence.checks | Where-Object status -eq 'passed')
+          $names = @($passed | ForEach-Object name)
+          if (@($names | Select-Object -Unique).Count -ne $names.Count) {
+            throw 'The Phase 3 evidence contains duplicate check names.'
           }
           foreach ($name in $required) {
-            if ($name -notin $passed) { throw "Missing passed GitOps baseline check: $name" }
+            if ($name -notin $names) { throw "Missing passed Phase 3 check: $name" }
           }
-      - name: Capture GitOps foundation diagnostics
+          if (@($passed | Where-Object { [double]$_.elapsedSeconds -lt 0 }).Count -gt 0) {
+            throw 'The Phase 3 evidence contains a negative elapsed time.'
+          }
+          Write-Host "Verified $($required.Count) Phase 3 checks and $($gif.Length) bytes of GIF evidence."
+      - name: Capture Phase 3 acceptance diagnostics
+        if: always() && steps.phase3.outcome != 'skipped'
         shell: pwsh
         run: ./scripts/dev.ps1 diagnostics
-      - name: Upload GitOps foundation evidence
+      - name: Verify Phase 3 artifact completeness
+        if: always() && steps.phase3.outcome != 'skipped'
+        shell: pwsh
+        run: |
+          $requiredFiles = @(
+            '.artifacts/phase3/acceptance.json',
+            '.artifacts/phase3/registry.json',
+            '.artifacts/phase3/rendered/baseline.yaml',
+            '.artifacts/phase3/rendered/candidate.yaml',
+            '.artifacts/phase3/rendered/rejection.yaml',
+            '.artifacts/phase3/rendered/recovery.yaml',
+            '.artifacts/phase3/rendered/root.yaml',
+            '.artifacts/phase3/snapshots/argocd-applications.json',
+            '.artifacts/phase3/snapshots/application.json',
+            '.artifacts/phase3/snapshots/team.json',
+            '.artifacts/phase3/logs/operator.log',
+            '.artifacts/phase3/logs/argocd-application-controller.log',
+            '.artifacts/phase3/logs/argocd-repo-server.log'
+          )
+          foreach ($path in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+                (Get-Item -LiteralPath $path).Length -le 0) {
+              throw "Missing or empty Phase 3 artifact file: $path"
+            }
+          }
+          $diagnostics = @(Get-ChildItem -LiteralPath .artifacts/diagnostics -Recurse -File -ErrorAction SilentlyContinue)
+          if ($diagnostics.Count -eq 0) { throw 'Phase 3 cluster diagnostics are missing.' }
+      - name: Upload Phase 3 acceptance evidence
+        if: always() && steps.phase3.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: phase3-gitops-foundation-${{ github.sha }}
+          name: phase3-acceptance-${{ github.sha }}
           path: |
-            .artifacts/gitops/baseline.json
-            .artifacts/gitops/bootstrap-projects.yaml
-            .artifacts/gitops/bootstrap-root-application.yaml
+            docs/demonstrations/phase3-gitops-delivery.gif
+            .artifacts/phase3/
             .artifacts/diagnostics/
           retention-days: 30
           if-no-files-found: error
@@ -247,9 +320,29 @@ jobs:
           path: |
             .artifacts/gitops/
             .artifacts/phase2/
+            .artifacts/phase3/
             .artifacts/diagnostics/
           retention-days: 7
           include-hidden-files: true
+      - name: Delete Phase 3 acceptance branch
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.phase3-app-token.outputs.token }}
+        run: |
+          if (-not $env:GH_TOKEN -or -not $env:PHASE3_ACCEPTANCE_BRANCH) {
+            Write-Host 'No Phase 3 acceptance branch credentials were created.'
+            exit 0
+          }
+          gh auth setup-git
+          $heads = @(git ls-remote --heads origin $env:PHASE3_ACCEPTANCE_BRANCH)
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the Phase 3 acceptance branch.' }
+          if ($heads.Count -gt 0) {
+            git push origin --delete $env:PHASE3_ACCEPTANCE_BRANCH
+            if ($LASTEXITCODE -ne 0) { throw 'Could not delete the Phase 3 acceptance branch.' }
+          } else {
+            Write-Host 'The Phase 3 acceptance branch is already absent.'
+          }
       - name: Undeploy GitOps foundation
         if: always()
         continue-on-error: true
