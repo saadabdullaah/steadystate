@@ -50,6 +50,7 @@ type ApplicationReconciler struct {
 // +kubebuilder:rbac:groups=platform.steadystate.dev,resources=applications/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
@@ -91,6 +92,15 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, statusErr
 	}
 
+	sourceRevision, revisionErr := resolvedSourceRevision(app)
+	if revisionErr != nil {
+		message := revisionErr.Error()
+		changed, statusErr := r.patchStatus(ctx, app, degradedStatus(app, "InvalidSourceRevision", message))
+		if changed {
+			r.event(app, corev1.EventTypeWarning, "InvalidSourceRevision", message)
+		}
+		return ctrl.Result{}, statusErr
+	}
 	policyFailure, err := r.applicationTenancy(ctx, app)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("verify Application tenancy: %w", err)
@@ -123,7 +133,18 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	desiredStatus, routeRejected := workloadStatus(app, deployment, route)
+	digestResolution, digestErr := r.resolveImageDigest(ctx, app)
+	if digestErr != nil {
+		message := fmt.Sprintf("failed to resolve runtime image digest: %v", digestErr)
+		_, statusErr := r.patchStatus(ctx, app, degradedStatus(app, "ReconciliationFailed", message))
+		r.event(app, corev1.EventTypeWarning, "ReconciliationFailed", message)
+		if statusErr != nil {
+			return ctrl.Result{}, fmt.Errorf("resolve image digest: %w; patch status: %v", digestErr, statusErr)
+		}
+		return ctrl.Result{}, digestErr
+	}
+
+	desiredStatus, routeRejected := workloadStatus(app, deployment, route, digestResolution, sourceRevision)
 	statusChanged, err := r.patchStatus(ctx, app, desiredStatus)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -282,7 +303,7 @@ func mergeStringMap(current *map[string]string, desired map[string]string) {
 	}
 }
 
-func workloadStatus(app *platformv1alpha1.Application, deployment *appsv1.Deployment, route *gatewayv1.HTTPRoute) (platformv1alpha1.ApplicationStatus, bool) {
+func workloadStatus(app *platformv1alpha1.Application, deployment *appsv1.Deployment, route *gatewayv1.HTTPRoute, digest imageDigestResolution, sourceRevision string) (platformv1alpha1.ApplicationStatus, bool) {
 	status := baseStatus(app)
 	setCondition(&status, app.Generation, conditionConfigurationReady, metav1.ConditionTrue, "ResourcesReconciled", "All generated resources match the Application specification")
 	setCondition(&status, app.Generation, conditionSecurityPolicyReady, metav1.ConditionTrue, "Hardened", "Phase 1 workload security settings are applied")
@@ -300,12 +321,29 @@ func workloadStatus(app *platformv1alpha1.Application, deployment *appsv1.Deploy
 		status.CandidateVersion = ""
 		setCondition(&status, app.Generation, conditionRolloutHealthy, conditionFromBool(deploymentReady), "DeploymentObserved", "Deployment readiness has been observed")
 		setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, "RouteRejected", "HTTPRoute was rejected or has unresolved references")
+	case deploymentReady && routeReady && digest.state == imageDigestInvalid:
+		status.Phase = platformv1alpha1.ApplicationPhaseDegraded
+		status.CandidateVersion = ""
+		setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionFalse, "ImageDigestInvalid", digest.message)
+		setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, "ImageDigestInvalid", digest.message)
+	case deploymentReady && routeReady && digest.state == imageDigestConflict:
+		status.Phase = platformv1alpha1.ApplicationPhaseDegraded
+		status.CandidateVersion = ""
+		setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionFalse, "ImageDigestConflict", digest.message)
+		setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, "ImageDigestConflict", digest.message)
+	case deploymentReady && routeReady && digest.state != imageDigestResolved:
+		status.Phase = platformv1alpha1.ApplicationPhaseProgressing
+		status.CandidateVersion = app.Spec.Image.Tag
+		setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionUnknown, "ResolvingImageDigest", digest.message)
+		setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, "ResolvingImageDigest", digest.message)
 	case deploymentReady && routeReady:
 		status.Phase = platformv1alpha1.ApplicationPhaseHealthy
 		status.ActiveVersion = app.Spec.Image.Tag
 		status.CandidateVersion = ""
-		setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionTrue, "DeploymentAvailable", "Desired Deployment replicas are available")
-		setCondition(&status, app.Generation, conditionReady, metav1.ConditionTrue, "ApplicationReady", "Deployment and HTTPRoute are ready")
+		status.ResolvedImageDigest = digest.digest
+		status.ResolvedGitRevision = sourceRevision
+		setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionTrue, "DeploymentAvailable", "Desired Deployment replicas are available at one runtime image digest")
+		setCondition(&status, app.Generation, conditionReady, metav1.ConditionTrue, "ApplicationReady", "Deployment, runtime image digest, and HTTPRoute are ready")
 	default:
 		status.Phase = platformv1alpha1.ApplicationPhaseProgressing
 		status.CandidateVersion = app.Spec.Image.Tag
@@ -447,6 +485,7 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&gatewayv1.HTTPRoute{}).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForNamespace)).
 		Watches(&platformv1alpha1.Team{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForTeam)).
 		Named("application").

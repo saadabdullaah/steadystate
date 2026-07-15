@@ -26,6 +26,14 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
+    - jsonPath: .status.resolvedImageDigest
+      name: Digest
+      priority: 1
+      type: string
+    - jsonPath: .status.resolvedGitRevision
+      name: Revision
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -310,6 +318,12 @@ spec:
                 - Healthy
                 - Degraded
                 - RollingBack
+                type: string
+              resolvedGitRevision:
+                pattern: ^([0-9a-f]{40}|[0-9a-f]{64})$
+                type: string
+              resolvedImageDigest:
+                pattern: ^sha256:[0-9a-f]{64}$
                 type: string
             type: object
         required:

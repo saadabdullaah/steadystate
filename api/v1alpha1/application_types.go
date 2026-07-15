@@ -15,6 +15,10 @@ const (
 	ApplicationPhaseHealthy     ApplicationPhase = "Healthy"
 	ApplicationPhaseDegraded    ApplicationPhase = "Degraded"
 	ApplicationPhaseRollingBack ApplicationPhase = "RollingBack"
+
+	// SourceRevisionAnnotationKey carries the resolved Git commit that produced
+	// an Application. GitOps systems set it without changing Application.spec.
+	SourceRevisionAnnotationKey = "steadystate.dev/source-revision"
 )
 
 // DeploymentStrategy selects the requested delivery strategy.
@@ -183,6 +187,18 @@ type ApplicationStatus struct {
 	// +optional
 	CandidateVersion string `json:"candidateVersion,omitempty"`
 
+	// ResolvedImageDigest is the canonical digest reported by every ready Pod
+	// for the active version.
+	// +kubebuilder:validation:Pattern=`^sha256:[0-9a-f]{64}$`
+	// +optional
+	ResolvedImageDigest string `json:"resolvedImageDigest,omitempty"`
+
+	// ResolvedGitRevision is the full Git object ID that produced the active
+	// configuration. It is empty for Applications not delivered by GitOps.
+	// +kubebuilder:validation:Pattern=`^([0-9a-f]{40}|[0-9a-f]{64})$`
+	// +optional
+	ResolvedGitRevision string `json:"resolvedGitRevision,omitempty"`
+
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -195,6 +211,8 @@ type ApplicationStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="ActiveVersion",type=string,JSONPath=`.status.activeVersion`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.status.resolvedImageDigest`,priority=1
+// +kubebuilder:printcolumn:name="Revision",type=string,JSONPath=`.status.resolvedGitRevision`,priority=1
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 63",message="Application names must contain at most 63 characters"
 
 // Application is the Schema for the applications API.
