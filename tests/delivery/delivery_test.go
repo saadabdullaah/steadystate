@@ -30,7 +30,7 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 	required := []string{
 		"group: demo-release",
 		"cancel-in-progress: false",
-		"recovery_reason:",
+		"workflow_dispatch: # Recovery only; no user-controlled build inputs.",
 		"Get-ChildItem -LiteralPath apps/demo-app -Filter '*.go' -File",
 		"contents: read",
 		"packages: write",

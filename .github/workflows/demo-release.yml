@@ -9,12 +9,7 @@ on:
       - apps/demo-app/VERSION
       - go.mod
       - go.sum
-  workflow_dispatch:
-    inputs:
-      recovery_reason:
-        description: Reason this recovery release is required
-        required: true
-        type: string
+  workflow_dispatch: # Recovery only; no user-controlled build inputs.
 
 permissions:
   contents: read
