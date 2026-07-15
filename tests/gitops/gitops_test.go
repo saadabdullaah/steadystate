@@ -293,6 +293,32 @@ func TestGitOpsCommandsAreMirrored(t *testing.T) {
 	}
 }
 
+func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
+	root := repositoryRoot(t)
+	content, err := os.ReadFile(filepath.Join(root, "scripts", "gitops.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+
+	if !strings.Contains(text, "[AllowEmptyCollection()]") {
+		t.Fatal("the acceptance evidence check list must accept its initially empty collection")
+	}
+
+	rootDelete := strings.Index(text, "delete application.argoproj.io steadystate-root")
+	paymentsDelete := strings.Index(text, "delete application.argoproj.io payments")
+	remainingDelete := strings.Index(text, "delete application.argoproj.io argocd-configuration steadystate-operator")
+	if !(rootDelete >= 0 && rootDelete < paymentsDelete && paymentsDelete < remainingDelete) {
+		t.Fatal("GitOps teardown must delete root, payments, then the remaining child Applications")
+	}
+
+	for _, command := range []string{"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s", "payments -n argocd --ignore-not-found=true --wait=true --timeout=60s", "argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s"} {
+		if !strings.Contains(text, command) {
+			t.Fatalf("GitOps teardown is missing bounded delete %q", command)
+		}
+	}
+}
+
 func TestArgoVersionAndChecksumPins(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(repositoryRoot(t), "scripts", "versions.env"))
 	if err != nil {

@@ -248,6 +248,7 @@ function Invoke-Deploy {
 
 function Add-PassedCheck {
     param(
+        [AllowEmptyCollection()]
         [Parameter(Mandatory)][System.Collections.Generic.List[object]]$Checks,
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][datetime]$Started,
@@ -355,10 +356,14 @@ function Invoke-Undeploy {
     $ErrorActionPreference = $previousPreference
 
     if ($argoApplicationsExist) {
-        Invoke-External kubectl delete application.argoproj.io argocd-configuration steadystate-operator payments steadystate-root -n argocd --ignore-not-found=true --wait=true
+        Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s
+        Invoke-External kubectl delete application.argoproj.io payments -n argocd --ignore-not-found=true --wait=true --timeout=60s
     }
     if ($teamsExist) {
         Invoke-External kubectl delete team payments --ignore-not-found=true --wait=true --timeout=180s
+    }
+    if ($argoApplicationsExist) {
+        Invoke-External kubectl delete application.argoproj.io argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s
     }
     Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true
     Invoke-External kubectl delete -n argocd -f $manifest --ignore-not-found=true --wait=false
