@@ -20,11 +20,11 @@ func TestDemoVersionContract(t *testing.T) {
 	}
 	manifest := read(t, filepath.Join(root, "gitops", "applications", "demo", "application.yaml"))
 	tagPattern := regexp.MustCompile(`(?m)^    tag: (v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
-	tagMatches := tagPattern.FindStringSubmatch(manifest)
-	if len(tagMatches) != 2 {
+	tagMatches := tagPattern.FindAllStringSubmatch(manifest, -1)
+	if len(tagMatches) != 1 || len(tagMatches[0]) != 2 {
 		t.Fatal("the demo manifest must contain exactly one strict semver image tag")
 	}
-	manifestVersion := tagMatches[1]
+	manifestVersion := tagMatches[0][1]
 	if manifestVersion != version && manifestVersion != "v0.1.0" {
 		t.Fatalf("demo manifest tag %q must be the v0.1.0 delivery baseline or match VERSION %q", manifestVersion, version)
 	}
