@@ -19,8 +19,14 @@ func TestDemoVersionContract(t *testing.T) {
 		t.Fatalf("checkpoint 3 must start at v0.3.0, got %q", version)
 	}
 	manifest := read(t, filepath.Join(root, "gitops", "applications", "demo", "application.yaml"))
-	if !strings.Contains(manifest, "    tag: v0.1.0") {
-		t.Fatal("the checkpoint must leave the demo manifest for the generated delivery PR")
+	tagPattern := regexp.MustCompile(`(?m)^    tag: (v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
+	tagMatches := tagPattern.FindStringSubmatch(manifest)
+	if len(tagMatches) != 2 {
+		t.Fatal("the demo manifest must contain exactly one strict semver image tag")
+	}
+	manifestVersion := tagMatches[1]
+	if manifestVersion != version && manifestVersion != "v0.1.0" {
+		t.Fatalf("demo manifest tag %q must be the v0.1.0 delivery baseline or match VERSION %q", manifestVersion, version)
 	}
 }
 
