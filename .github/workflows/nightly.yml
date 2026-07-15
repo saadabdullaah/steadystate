@@ -12,7 +12,7 @@ jobs:
   round-trip:
     name: standard-round-trip
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -183,6 +183,58 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           include-hidden-files: true
+      - name: Deploy Argo CD and GitOps root
+        shell: pwsh
+        run: ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA
+      - name: Run Phase 3 GitOps foundation baseline
+        shell: pwsh
+        run: ./scripts/dev.ps1 test-gitops -Profile standard -GitRevision $env:GITHUB_SHA -EvidencePath .artifacts/gitops/baseline.json
+      - name: Verify GitOps foundation evidence
+        shell: pwsh
+        run: |
+          $evidence = Get-Content -Raw -LiteralPath .artifacts/gitops/baseline.json | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed') {
+            throw 'The GitOps baseline evidence is invalid or did not pass.'
+          }
+          if ($evidence.profile -ne 'standard' -or $evidence.resolvedGitRevision -ne $env:GITHUB_SHA) {
+            throw 'The GitOps baseline evidence does not match this standard-profile commit.'
+          }
+          if ($evidence.argoCDVersion -ne '3.4.2') {
+            throw 'The GitOps baseline used an unexpected Argo CD version.'
+          }
+          $required = @(
+            'pinned-argocd-ready-dex-absent',
+            'argocd-application-argocd-configuration-healthy',
+            'argocd-application-steadystate-operator-healthy',
+            'argocd-application-payments-healthy',
+            'argocd-application-steadystate-root-healthy',
+            'gitops-team-and-application-ready',
+            'argocd-ui-gateway-reachable',
+            'runtime-provenance-matches-root-revision',
+            'annotation-resource-tracking'
+          )
+          $passed = @($evidence.checks | Where-Object status -eq 'passed' | ForEach-Object name)
+          if (@($passed | Select-Object -Unique).Count -ne $passed.Count) {
+            throw 'The GitOps baseline contains duplicate check names.'
+          }
+          foreach ($name in $required) {
+            if ($name -notin $passed) { throw "Missing passed GitOps baseline check: $name" }
+          }
+      - name: Capture GitOps foundation diagnostics
+        shell: pwsh
+        run: ./scripts/dev.ps1 diagnostics
+      - name: Upload GitOps foundation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase3-gitops-foundation-${{ github.sha }}
+          path: |
+            .artifacts/gitops/baseline.json
+            .artifacts/gitops/bootstrap-projects.yaml
+            .artifacts/gitops/bootstrap-root-application.yaml
+            .artifacts/diagnostics/
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
       - name: Capture diagnostics
         if: failure()
         shell: pwsh
@@ -193,10 +245,16 @@ jobs:
         with:
           name: standard-round-trip-diagnostics
           path: |
+            .artifacts/gitops/
             .artifacts/phase2/
             .artifacts/diagnostics/
           retention-days: 7
           include-hidden-files: true
+      - name: Undeploy GitOps foundation
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/dev.ps1 undeploy-gitops
       - name: Undeploy the Application operator
         if: always()
         shell: pwsh

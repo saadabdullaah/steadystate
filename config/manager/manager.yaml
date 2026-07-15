@@ -11,8 +11,8 @@ metadata:
   name: controller-manager
   namespace: steadystate-system
   annotations:
-    checkov.io/skip1: CKV_K8S_43=Phase 1 images are built and loaded into kind locally; registry publishing and immutable runtime digests begin in Phase 3.
-    checkov.io/skip2: CKV_K8S_15=IfNotPresent is required so kind uses the locally loaded Phase 1 image instead of contacting an unpublished registry tag.
+    checkov.io/skip1: CKV_K8S_43=The Phase 3 operator image remains build/load-first for kind; remote operator publication begins in a later phase.
+    checkov.io/skip2: CKV_K8S_15=IfNotPresent is required so kind uses the locally loaded v0.3.0 operator image instead of contacting an unpublished registry tag.
     checkov.io/skip3: CKV_K8S_38=The controller requires its dedicated least-privileged service-account token to reconcile Kubernetes resources.
   labels:
     app.kubernetes.io/component: controller
@@ -37,7 +37,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: ghcr.io/saadabdullaah/steadystate-operator:v0.1.0
+          image: ghcr.io/saadabdullaah/steadystate-operator:v0.3.0
           imagePullPolicy: IfNotPresent
           command: ["/manager"]
           args:

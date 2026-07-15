@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-cmd-params-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  server.insecure: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  application.resourceTrackingMethod: annotation
+  resource.customizations.health.platform.steadystate.dev_Application: |
+    health = {status = "Progressing", message = "Waiting for current Application status"}
+    if obj.status == nil or obj.status.observedGeneration == nil or
+       obj.status.observedGeneration ~= obj.metadata.generation then
+      return health
+    end
+    if obj.status.phase == "Degraded" then
+      health.status = "Degraded"
+      health.message = "SteadyState Application is Degraded"
+      return health
+    end
+    local ready = nil
+    if obj.status.conditions ~= nil then
+      for _, condition in ipairs(obj.status.conditions) do
+        if condition.type == "Ready" then
+          ready = condition
+          break
+        end
+      end
+    end
+    if obj.status.phase == "Healthy" and ready ~= nil and ready.status == "True" then
+      health.status = "Healthy"
+      health.message = ready.message or "SteadyState Application is ready"
+    elseif ready ~= nil and ready.status == "False" and obj.status.phase == "Degraded" then
+      health.status = "Degraded"
+      health.message = ready.message or "SteadyState Application is degraded"
+    end
+    return health
+  resource.customizations.health.platform.steadystate.dev_Team: |
+    health = {status = "Progressing", message = "Waiting for current Team status"}
+    if obj.status == nil or obj.status.observedGeneration == nil or
+       obj.status.observedGeneration ~= obj.metadata.generation or
+       obj.status.conditions == nil then
+      return health
+    end
+    for _, condition in ipairs(obj.status.conditions) do
+      if condition.type == "Ready" then
+        health.message = condition.message or "Team readiness observed"
+        if condition.status == "True" then
+          health.status = "Healthy"
+        elseif condition.status == "False" then
+          health.status = "Degraded"
+        end
+        return health
+      end
+    end
+    return health
+  resource.customizations.health.argoproj.io_Application: |
+    health = {status = "Progressing", message = "Waiting for child Application health"}
+    if obj.status ~= nil and obj.status.health ~= nil and
+       obj.status.health.status ~= nil then
+      health.status = obj.status.health.status
+      health.message = obj.status.health.message or "Child Application health forwarded"
+    end
+    return health

@@ -1,0 +1,463 @@
+package gitops_test
+
+import (
+	"bytes"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	kyaml "k8s.io/apimachinery/pkg/util/yaml"
+)
+
+const (
+	repositoryURL = "https://github.com/saadabdullaah/steadystate.git"
+	testRevision  = "0123456789abcdef0123456789abcdef01234567"
+)
+
+func TestGitOpsRendersDeterministically(t *testing.T) {
+	root := repositoryRoot(t)
+	helmArguments := []string{
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--namespace", "argocd",
+		"--set-string", "gitRevision=" + testRevision,
+	}
+	first := run(t, root, "helm", helmArguments...)
+	second := run(t, root, "helm", helmArguments...)
+	if !bytes.Equal(first, second) {
+		t.Fatal("Helm root rendering is not deterministic")
+	}
+	decodeManifests(t, first)
+
+	for _, path := range []string{
+		"gitops/platform",
+		"gitops/teams/payments",
+		"gitops/applications/demo",
+	} {
+		arguments := []string{"build", filepath.Join(root, filepath.FromSlash(path))}
+		first = run(t, root, "kustomize", arguments...)
+		second = run(t, root, "kustomize", arguments...)
+		if !bytes.Equal(first, second) {
+			t.Fatalf("Kustomize rendering is not deterministic for %s", path)
+		}
+		decodeManifests(t, first)
+	}
+}
+
+func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
+	root := repositoryRoot(t)
+	rendered := run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--namespace", "argocd",
+		"--set-string", "gitRevision="+testRevision,
+	)
+	objects := decodeManifests(t, rendered)
+	if len(objects) != 6 {
+		t.Fatalf("root chart rendered %d objects, want 6", len(objects))
+	}
+
+	for _, name := range []string{"root", "platform", "tenant"} {
+		project := findObject(t, objects, "AppProject", name)
+		assertAnnotation(t, project, "argocd.argoproj.io/sync-wave", "-30")
+		assertOnlyRepository(t, project)
+	}
+
+	expectedWaves := map[string]string{
+		"argocd-configuration": "-20",
+		"steadystate-operator": "-10",
+		"payments":             "0",
+	}
+	for name, wave := range expectedWaves {
+		application := findObject(t, objects, "Application", name)
+		assertAnnotation(t, application, "argocd.argoproj.io/sync-wave", wave)
+	}
+
+	argocd := findObject(t, objects, "Application", "argocd-configuration")
+	assertString(t, argocd, repositoryURL, "spec", "source", "repoURL")
+	assertString(t, argocd, "gitops/platform", "spec", "source", "path")
+	assertString(t, argocd, testRevision, "spec", "source", "targetRevision")
+	assertAutomated(t, argocd, true)
+
+	operator := findObject(t, objects, "Application", "steadystate-operator")
+	assertString(t, operator, repositoryURL, "spec", "source", "repoURL")
+	assertString(t, operator, "config/default", "spec", "source", "path")
+	assertString(t, operator, testRevision, "spec", "source", "targetRevision")
+	assertAutomated(t, operator, true)
+	images, found, err := unstructured.NestedStringSlice(operator, "spec", "source", "kustomize", "images")
+	if err != nil || !found || len(images) != 1 || images[0] != "ghcr.io/saadabdullaah/steadystate-operator:v0.3.0" {
+		t.Fatalf("operator image override is invalid: %#v, found=%v, err=%v", images, found, err)
+	}
+
+	payments := findObject(t, objects, "Application", "payments")
+	assertAutomated(t, payments, false)
+	sources := nestedSlice(t, payments, "spec", "sources")
+	if len(sources) != 2 {
+		t.Fatalf("payments has %d sources, want 2", len(sources))
+	}
+	expectedPaths := []string{"gitops/teams/payments", "gitops/applications/demo"}
+	for index, rawSource := range sources {
+		source, ok := rawSource.(map[string]any)
+		if !ok {
+			t.Fatalf("payments source %d is %T", index, rawSource)
+		}
+		assertString(t, source, repositoryURL, "repoURL")
+		assertString(t, source, testRevision, "targetRevision")
+		assertString(t, source, expectedPaths[index], "path")
+		envsubst, found, err := unstructured.NestedBool(source, "kustomize", "commonAnnotationsEnvsubst")
+		if err != nil || !found || !envsubst {
+			t.Fatalf("source %s does not enable commonAnnotationsEnvsubst", expectedPaths[index])
+		}
+		annotations, found, err := unstructured.NestedStringMap(source, "kustomize", "commonAnnotations")
+		if err != nil || !found || annotations["steadystate.dev/source-revision"] != "$ARGOCD_APP_REVISION" {
+			t.Fatalf("source %s has invalid revision annotations: %#v", expectedPaths[index], annotations)
+		}
+	}
+	options, found, err := unstructured.NestedStringSlice(payments, "spec", "syncPolicy", "syncOptions")
+	if err != nil || !found || !contains(options, "RespectIgnoreDifferences=true") {
+		t.Fatalf("payments does not respect ignored operator fields: %#v", options)
+	}
+	encoded := string(rendered)
+	for _, pointer := range []string{"/metadata/finalizers", "/status"} {
+		if strings.Count(encoded, pointer) < 2 {
+			t.Fatalf("operator-owned field %s is not ignored for Team and Application", pointer)
+		}
+	}
+	if strings.Contains(encoded, "CreateNamespace=") {
+		t.Fatal("CreateNamespace must not be enabled")
+	}
+}
+
+func TestProjectRestrictions(t *testing.T) {
+	root := repositoryRoot(t)
+	objects := decodeManifests(t, run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--set-string", "gitRevision="+testRevision,
+	))
+
+	rootProject := findObject(t, objects, "AppProject", "root")
+	rootKinds := resourceKinds(t, rootProject, "namespaceResourceWhitelist")
+	assertExactSet(t, rootKinds, []string{"argoproj.io/AppProject", "argoproj.io/Application"})
+	if _, found, _ := unstructured.NestedSlice(rootProject, "spec", "clusterResourceWhitelist"); found {
+		t.Fatal("root project must not permit cluster-scoped resources")
+	}
+
+	platform := findObject(t, objects, "AppProject", "platform")
+	platformKinds := append(
+		resourceKinds(t, platform, "clusterResourceWhitelist"),
+		resourceKinds(t, platform, "namespaceResourceWhitelist")...,
+	)
+	for _, forbidden := range []string{"platform.steadystate.dev/Team", "platform.steadystate.dev/Application"} {
+		if contains(platformKinds, forbidden) {
+			t.Fatalf("platform project unexpectedly permits %s", forbidden)
+		}
+	}
+
+	tenant := findObject(t, objects, "AppProject", "tenant")
+	assertExactSet(t, resourceKinds(t, tenant, "clusterResourceWhitelist"), []string{"platform.steadystate.dev/Team"})
+	assertExactSet(t, resourceKinds(t, tenant, "namespaceResourceWhitelist"), []string{"platform.steadystate.dev/Application"})
+	warn, found, err := unstructured.NestedBool(tenant, "spec", "orphanedResources", "warn")
+	if err != nil || !found || warn {
+		t.Fatalf("tenant orphan warning must be explicitly false: found=%v value=%v err=%v", found, warn, err)
+	}
+	destinations := nestedSlice(t, tenant, "spec", "destinations")
+	if len(destinations) != 1 {
+		t.Fatalf("tenant has %d destinations, want 1", len(destinations))
+	}
+	destination := destinations[0].(map[string]any)
+	assertString(t, destination, "team-*", "namespace")
+}
+
+func TestTenantLeavesContainOnlyOwnedCustomResources(t *testing.T) {
+	root := repositoryRoot(t)
+	teamObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "teams", "payments")))
+	if len(teamObjects) != 1 || objectString(teamObjects[0], "kind") != "Team" {
+		t.Fatalf("Team leaf rendered unexpected objects: %#v", objectIdentities(teamObjects))
+	}
+	assertAnnotation(t, teamObjects[0], "argocd.argoproj.io/sync-wave", "-1")
+
+	applicationObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "applications", "demo")))
+	if len(applicationObjects) != 1 || objectString(applicationObjects[0], "kind") != "Application" ||
+		objectString(applicationObjects[0], "apiVersion") != "platform.steadystate.dev/v1alpha1" {
+		t.Fatalf("Application leaf rendered unexpected objects: %#v", objectIdentities(applicationObjects))
+	}
+	assertAnnotation(t, applicationObjects[0], "argocd.argoproj.io/sync-wave", "0")
+}
+
+func TestArgoConfigurationContracts(t *testing.T) {
+	root := repositoryRoot(t)
+	objects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "platform")))
+	namespace := findObject(t, objects, "Namespace", "argocd")
+	labels, found, err := unstructured.NestedStringMap(namespace, "metadata", "labels")
+	if err != nil || !found || labels["steadystate.dev/gateway-access"] != "true" {
+		t.Fatalf("argocd namespace does not opt into the shared Gateway: %#v", labels)
+	}
+
+	config := findObject(t, objects, "ConfigMap", "argocd-cm")
+	data, found, err := unstructured.NestedStringMap(config, "data")
+	if err != nil || !found {
+		t.Fatalf("argocd-cm data missing: %v", err)
+	}
+	required := []string{
+		"application.resourceTrackingMethod",
+		"resource.customizations.health.platform.steadystate.dev_Application",
+		"resource.customizations.health.platform.steadystate.dev_Team",
+		"resource.customizations.health.argoproj.io_Application",
+	}
+	for _, key := range required {
+		if data[key] == "" {
+			t.Errorf("argocd-cm is missing %s", key)
+		}
+	}
+	healthContracts := map[string][]string{
+		"resource.customizations.health.platform.steadystate.dev_Application": {
+			"observedGeneration", `phase == "Degraded"`, `phase == "Healthy"`, `condition.type == "Ready"`,
+		},
+		"resource.customizations.health.platform.steadystate.dev_Team": {
+			"observedGeneration", `condition.status == "True"`, `condition.status == "False"`,
+		},
+		"resource.customizations.health.argoproj.io_Application": {
+			"obj.status.health.status",
+		},
+	}
+	for key, tokens := range healthContracts {
+		for _, token := range tokens {
+			if !strings.Contains(data[key], token) {
+				t.Errorf("health customization %s is missing %q", key, token)
+			}
+		}
+	}
+	if data["application.resourceTrackingMethod"] != "annotation" {
+		t.Fatal("Argo resource tracking must be annotation-based")
+	}
+
+	parameters := findObject(t, objects, "ConfigMap", "argocd-cmd-params-cm")
+	assertString(t, parameters, "true", "data", "server.insecure")
+
+	route := findObject(t, objects, "HTTPRoute", "argocd")
+	hostnames, found, err := unstructured.NestedStringSlice(route, "spec", "hostnames")
+	if err != nil || !found || len(hostnames) != 1 || hostnames[0] != "argocd.localtest.me" {
+		t.Fatalf("unexpected Argo hostnames: %#v", hostnames)
+	}
+	parentRefs := nestedSlice(t, route, "spec", "parentRefs")
+	if len(parentRefs) != 1 {
+		t.Fatalf("Argo route has %d parentRefs", len(parentRefs))
+	}
+	parent := parentRefs[0].(map[string]any)
+	assertString(t, parent, "steadystate", "name")
+	assertString(t, parent, "steadystate-system", "namespace")
+}
+
+func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
+	root := repositoryRoot(t)
+	rendered := run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--set", "bootstrapRoot=true",
+		"--set-string", "rootTargetRevision=checkpoint-branch",
+		"--show-only", "templates/root-application.yaml.tpl",
+	)
+	objects := decodeManifests(t, rendered)
+	rootApplication := findObject(t, objects, "Application", "steadystate-root")
+	assertString(t, rootApplication, "root", "spec", "project")
+	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
+	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
+	if len(parameters) != 1 {
+		t.Fatalf("root application has %d Helm parameters", len(parameters))
+	}
+	parameter := parameters[0].(map[string]any)
+	assertString(t, parameter, "gitRevision", "name")
+	assertString(t, parameter, "$ARGOCD_APP_REVISION", "value")
+	assertAutomated(t, rootApplication, true)
+}
+
+func TestGitOpsCommandsAreMirrored(t *testing.T) {
+	root := repositoryRoot(t)
+	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	devScript, err := os.ReadFile(filepath.Join(root, "scripts", "dev.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops"} {
+		if !strings.Contains(string(makefile), command) {
+			t.Errorf("Makefile is missing %s", command)
+		}
+		if !strings.Contains(string(devScript), "'"+command+"'") {
+			t.Errorf("scripts/dev.ps1 is missing %s", command)
+		}
+	}
+}
+
+func TestArgoVersionAndChecksumPins(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join(repositoryRoot(t), "scripts", "versions.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	if !regexp.MustCompile(`(?m)^ARGO_CD_VERSION=3\.4\.2$`).MatchString(text) {
+		t.Fatal("ARGO_CD_VERSION is not pinned to 3.4.2")
+	}
+	if !regexp.MustCompile("(?m)^ARGO_CD_MANIFEST_SHA256=69114b8c9eb48a1d08598e6f654a0869b10ae902456ea4b70796cb563760f5ec$").MatchString(text) {
+		t.Fatal("Argo CD manifest checksum is not pinned")
+	}
+}
+
+func run(t *testing.T, directory, name string, arguments ...string) []byte {
+	t.Helper()
+	command := exec.Command(name, arguments...)
+	command.Dir = directory
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %s failed: %v\n%s", name, strings.Join(arguments, " "), err, output)
+	}
+	return output
+}
+
+func decodeManifests(t *testing.T, content []byte) []map[string]any {
+	t.Helper()
+	decoder := kyaml.NewYAMLOrJSONDecoder(bytes.NewReader(content), 4096)
+	objects := []map[string]any{}
+	for {
+		object := map[string]any{}
+		err := decoder.Decode(&object)
+		if err == io.EOF {
+			return objects
+		}
+		if err != nil {
+			t.Fatalf("decode rendered YAML: %v", err)
+		}
+		if len(object) > 0 {
+			objects = append(objects, object)
+		}
+	}
+}
+
+func findObject(t *testing.T, objects []map[string]any, kind, name string) map[string]any {
+	t.Helper()
+	for _, object := range objects {
+		if objectString(object, "kind") == kind && objectString(object, "metadata", "name") == name {
+			return object
+		}
+	}
+	t.Fatalf("missing %s/%s in %#v", kind, name, objectIdentities(objects))
+	return nil
+}
+
+func objectIdentities(objects []map[string]any) []string {
+	identities := make([]string, 0, len(objects))
+	for _, object := range objects {
+		identities = append(identities, objectString(object, "apiVersion")+"/"+objectString(object, "kind")+"/"+objectString(object, "metadata", "name"))
+	}
+	return identities
+}
+
+func objectString(object map[string]any, fields ...string) string {
+	value, _, _ := unstructured.NestedString(object, fields...)
+	return value
+}
+
+func assertString(t *testing.T, object map[string]any, expected string, fields ...string) {
+	t.Helper()
+	actual, found, err := unstructured.NestedString(object, fields...)
+	if err != nil || !found || actual != expected {
+		t.Fatalf("%s: got %q, found=%v, err=%v, want %q", strings.Join(fields, "."), actual, found, err, expected)
+	}
+}
+
+func assertAnnotation(t *testing.T, object map[string]any, key, expected string) {
+	t.Helper()
+	annotations, found, err := unstructured.NestedStringMap(object, "metadata", "annotations")
+	if err != nil || !found || annotations[key] != expected {
+		t.Fatalf("annotation %s: got %#v, found=%v, err=%v", key, annotations, found, err)
+	}
+}
+
+func assertOnlyRepository(t *testing.T, project map[string]any) {
+	t.Helper()
+	repositories, found, err := unstructured.NestedStringSlice(project, "spec", "sourceRepos")
+	if err != nil || !found || len(repositories) != 1 || repositories[0] != repositoryURL {
+		t.Fatalf("project repositories are not restricted: %#v", repositories)
+	}
+}
+
+func assertAutomated(t *testing.T, application map[string]any, expectPrune bool) {
+	t.Helper()
+	selfHeal, found, err := unstructured.NestedBool(application, "spec", "syncPolicy", "automated", "selfHeal")
+	if err != nil || !found || !selfHeal {
+		t.Fatalf("%s does not enable automated self-heal", objectString(application, "metadata", "name"))
+	}
+	prune, found, err := unstructured.NestedBool(application, "spec", "syncPolicy", "automated", "prune")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expectPrune && (!found || !prune) {
+		t.Fatalf("%s must enable prune", objectString(application, "metadata", "name"))
+	}
+	if !expectPrune && found && prune {
+		t.Fatalf("%s must not enable prune", objectString(application, "metadata", "name"))
+	}
+}
+
+func nestedSlice(t *testing.T, object map[string]any, fields ...string) []any {
+	t.Helper()
+	value, found, err := unstructured.NestedSlice(object, fields...)
+	if err != nil || !found {
+		t.Fatalf("%s missing: found=%v err=%v", strings.Join(fields, "."), found, err)
+	}
+	return value
+}
+
+func resourceKinds(t *testing.T, project map[string]any, field string) []string {
+	t.Helper()
+	resources := nestedSlice(t, project, "spec", field)
+	kinds := make([]string, 0, len(resources))
+	for _, raw := range resources {
+		resource := raw.(map[string]any)
+		kinds = append(kinds, objectString(resource, "group")+"/"+objectString(resource, "kind"))
+	}
+	return kinds
+}
+
+func assertExactSet(t *testing.T, actual, expected []string) {
+	t.Helper()
+	for _, value := range expected {
+		if !contains(actual, value) {
+			t.Fatalf("missing %s from %#v", value, actual)
+		}
+	}
+	if len(actual) != len(expected) {
+		t.Fatalf("got %#v, want exactly %#v", actual, expected)
+	}
+}
+
+func contains(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(directory, "go.mod")); err == nil {
+			return directory
+		}
+		parent := filepath.Dir(directory)
+		if parent == directory {
+			t.Fatal("could not find repository root")
+		}
+		directory = parent
+	}
+}

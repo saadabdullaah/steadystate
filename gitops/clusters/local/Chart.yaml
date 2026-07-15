@@ -1,0 +1,6 @@
+apiVersion: v2
+name: steadystate-local
+description: SteadyState local-cluster app-of-apps root
+type: application
+version: 0.3.0
+appVersion: "0.3.0"

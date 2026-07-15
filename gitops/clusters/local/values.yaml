@@ -1,0 +1,5 @@
+repoURL: https://github.com/saadabdullaah/steadystate.git
+gitRevision: main
+bootstrapRoot: false
+rootTargetRevision: main
+operatorImage: ghcr.io/saadabdullaah/steadystate-operator:v0.3.0
