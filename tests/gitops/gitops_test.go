@@ -308,8 +308,14 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 	rootDelete := strings.Index(text, "delete application.argoproj.io steadystate-root")
 	paymentsDelete := strings.Index(text, "delete application.argoproj.io payments")
 	remainingDelete := strings.Index(text, "delete application.argoproj.io argocd-configuration steadystate-operator")
-	if !(rootDelete >= 0 && rootDelete < paymentsDelete && paymentsDelete < remainingDelete) {
+	if rootDelete < 0 || rootDelete >= paymentsDelete || paymentsDelete >= remainingDelete {
 		t.Fatal("GitOps teardown must delete root, payments, then the remaining child Applications")
+	}
+
+	for _, lookup := range []string{"'applications.platform.steadystate.dev'", "'teams.platform.steadystate.dev'"} {
+		if !strings.Contains(text, lookup) {
+			t.Fatalf("GitOps acceptance is missing fully qualified lookup %s", lookup)
+		}
 	}
 
 	for _, command := range []string{"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s", "payments -n argocd --ignore-not-found=true --wait=true --timeout=60s", "argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s"} {

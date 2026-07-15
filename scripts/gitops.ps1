@@ -171,7 +171,8 @@ function Wait-SteadyStateReady {
     param([Parameter(Mandatory)][ValidateSet('team','application')][string]$Kind, [Parameter(Mandatory)][string]$Name, [string]$Namespace)
     $deadline = (Get-Date).AddSeconds(600)
     do {
-        $arguments = @('get', $Kind, $Name)
+        $resource = if ($Kind -eq 'application') { 'applications.platform.steadystate.dev' } else { 'teams.platform.steadystate.dev' }
+        $arguments = @('get', $resource, $Name)
         if ($Namespace) { $arguments += @('-n', $Namespace) }
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
@@ -295,7 +296,7 @@ function Invoke-Test {
     if ($resolvedRevision -notmatch '^([0-9a-f]{40}|[0-9a-f]{64})$') {
         throw "Root Application reported invalid resolved revision '$resolvedRevision'."
     }
-    $application = Get-KubernetesObject @('get','application','demo','-n','team-payments')
+    $application = Get-KubernetesObject @('get','applications.platform.steadystate.dev','demo','-n','team-payments')
     $annotatedRevision = [string]$application.metadata.annotations.'steadystate.dev/source-revision'
     if ($annotatedRevision -ne $resolvedRevision -or $application.status.resolvedGitRevision -ne $resolvedRevision) {
         throw 'The SteadyState Application annotation/status revision does not match the root resolved commit.'
