@@ -30,6 +30,12 @@ jobs:
         run: |
           ./scripts/check-private-files.ps1
           ./scripts/check-text.ps1
+      - name: Require demo VERSION bump
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        env:
+          BASE_REVISION: ${{ github.event.pull_request.base.sha }}
+        run: ./scripts/check-demo-version.ps1 -BaseRevision $env:BASE_REVISION
       - name: Go checks
         shell: pwsh
         run: |
