@@ -1,0 +1,15 @@
+apiVersion: platform.steadystate.dev/v1alpha1
+kind: Team
+metadata:
+  name: payments
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  owners:
+    - payments-owner
+  quota:
+    cpu: "2"
+    memory: 2Gi
+  allowedRepositories:
+    - ghcr.io/saadabdullaah/steadystate-demo-app
+    - ghcr.io/saadabdullaah/payments-*

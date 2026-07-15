@@ -6,6 +6,7 @@ ignore: |
   config/gateway-api/crds/gateway.networking.k8s.io_gatewayclasses.yaml
   config/gateway-api/crds/gateway.networking.k8s.io_gateways.yaml
   config/gateway-api/crds/gateway.networking.k8s.io_httproutes.yaml
+  gitops/clusters/local/templates/
 
 rules:
   document-start: disable

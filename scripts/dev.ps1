@@ -1,14 +1,15 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
     [string]$ClusterName = $(if ($env:CLUSTER_NAME) { $env:CLUSTER_NAME } else { 'steadystate' }),
     [int]$HttpPort = $(if ($env:HTTP_PORT) { [int]$env:HTTP_PORT } else { 8080 }),
     [int]$HttpsPort = $(if ($env:HTTPS_PORT) { [int]$env:HTTPS_PORT } else { 8443 }),
-    [string]$EvidencePath
+    [string]$EvidencePath,
+    [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -225,6 +226,17 @@ function Invoke-UndeployOperator {
     Write-Host 'SteadyState Application controller is undeployed.'
 }
 
+function Invoke-GitOpsCommand {
+    param([Parameter(Mandatory)][ValidateSet('Deploy','Test','Undeploy','Verify')][string]$Mode)
+    if ($Mode -ne 'Verify') { Assert-Cluster }
+    & (Join-Path $PSScriptRoot 'gitops.ps1') `
+        -Mode $Mode `
+        -HttpPort $HttpPort `
+        -GitRevision $GitRevision `
+        -EvidencePath $EvidencePath `
+        -Profile $Profile
+}
+
 function Invoke-Doctor {
     $v = Read-Versions
     $problems = @()
@@ -325,6 +337,9 @@ function Invoke-Diagnostics {
         & kubectl get namespace,resourcequota,limitrange,serviceaccount,role.rbac.authorization.k8s.io,rolebinding.rbac.authorization.k8s.io,networkpolicy -A -l steadystate.dev/team -o yaml *> (Join-Path $directory 'team-boundaries.yaml')
         & kubectl get clusterrole steadystate-team-owner -o yaml *> (Join-Path $directory 'team-owner-clusterrole.yaml')
         & kubectl get applications.platform.steadystate.dev -A -o yaml *> (Join-Path $directory 'applications.yaml')
+        & kubectl get applications.argoproj.io,appprojects.argoproj.io -n argocd -o yaml *> (Join-Path $directory 'argocd-applications.yaml')
+        & kubectl get all,configmap,httproute -n argocd -o yaml *> (Join-Path $directory 'argocd-resources.yaml')
+        & kubectl logs -n argocd -l app.kubernetes.io/part-of=argocd --all-containers --tail=500 --prefix=true *> (Join-Path $directory 'argocd.log')
         & kubectl get deployment,service,configmap -A -l app.kubernetes.io/managed-by=steadystate -o yaml *> (Join-Path $directory 'application-children.yaml')
         & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=500 *> (Join-Path $directory 'operator.log')
         & kubectl get events -A --sort-by=.lastTimestamp *> (Join-Path $directory 'events.txt')
@@ -462,7 +477,7 @@ try {
             if ($unformatted) { throw "Go files require formatting: $($unformatted -join ', ')" }
             Invoke-External go vet ./...
             if (-not (Test-CommandAvailable 'kustomize')) { throw "kustomize is missing. Run '.\scripts\dev.ps1 tools'." }
-            foreach ($overlay in @('config/default','config/gateway','config/samples')) {
+            foreach ($overlay in @('config/default','config/gateway','config/samples','gitops/platform','gitops/teams/payments','gitops/applications/demo')) {
                 & kustomize build $overlay *> $null
                 if ($LASTEXITCODE -ne 0) { throw "Kustomize rendering failed for $overlay" }
             }
@@ -486,6 +501,10 @@ try {
         }
         'undeploy-operator' { Invoke-UndeployOperator }
         'bootstrap' { Invoke-Bootstrap }
+        'deploy-gitops' { Invoke-GitOpsCommand -Mode Deploy }
+        'test-gitops' { Invoke-GitOpsCommand -Mode Test }
+        'undeploy-gitops' { Invoke-GitOpsCommand -Mode Undeploy }
+        'verify-gitops' { Invoke-GitOpsCommand -Mode Verify }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }
         'diagnostics' { Invoke-Diagnostics }

@@ -35,6 +35,7 @@ jobs:
         run: |
           ./scripts/dev.ps1 check-versions
           ./scripts/dev.ps1 verify-generated
+          ./scripts/dev.ps1 verify-gitops
           ./scripts/dev.ps1 lint
           ./scripts/dev.ps1 test
       - name: Workflow, YAML, Markdown, and shell lint
@@ -63,6 +64,7 @@ jobs:
           ./scripts/dev.ps1 generate
           ./scripts/dev.ps1 manifests
           git diff --exit-code -- api config/crd config/rbac
+          ./scripts/dev.ps1 verify-gitops
           ./scripts/dev.ps1 test
 
   envtest:

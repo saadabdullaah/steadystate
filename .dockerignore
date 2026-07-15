@@ -3,6 +3,7 @@
 .tools
 .artifacts
 .kube
+gitops
 .idea
 .vscode
 m-plan.md
