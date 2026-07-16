@@ -318,9 +318,29 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 		}
 	}
 
-	for _, command := range []string{"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s", "payments -n argocd --ignore-not-found=true --wait=true --timeout=60s", "argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s"} {
+	for _, command := range []string{
+		"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s",
+		"payments -n argocd --ignore-not-found=true --wait=true --timeout=60s",
+		"applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s",
+		"teams.platform.steadystate.dev --all --ignore-not-found=true --wait=true --timeout=180s",
+		"namespace steadystate-unmanaged --ignore-not-found=true --wait=true --timeout=120s",
+		"argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s",
+		"config/default') --ignore-not-found=true --wait=true --timeout=180s",
+	} {
 		if !strings.Contains(text, command) {
 			t.Fatalf("GitOps teardown is missing bounded delete %q", command)
+		}
+	}
+	devScript, err := os.ReadFile(filepath.Join(root, "scripts", "dev.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{
+		"applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s",
+		"config/default') --ignore-not-found=true --wait=true --timeout=180s",
+	} {
+		if !strings.Contains(string(devScript), command) {
+			t.Fatalf("operator teardown is missing bounded cleanup %q", command)
 		}
 	}
 }
@@ -419,11 +439,22 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 	if diagnostics < 0 || diagnostics >= branchCleanup || branchCleanup >= clusterCleanup {
 		t.Fatal("Phase 3 diagnostics and cleanup ordering is invalid")
 	}
-	if !strings.Contains(tape, "Output docs/demonstrations/phase3-gitops-delivery.gif") ||
-		!strings.Contains(tape, "scripts/phase3-acceptance.ps1") {
-		t.Fatal("Phase 3 VHS tape does not record the real hosted acceptance script")
+	if strings.Count(workflow, "timeout-minutes: 5") < 3 {
+		t.Fatal("every destructive Nightly cleanup step must have a five-minute outer timeout")
+	}
+	for _, token := range []string{
+		"Output docs/demonstrations/phase3-gitops-delivery.gif",
+		"scripts/phase3-acceptance.ps1",
+		"Set WaitTimeout 20m",
+		"PHASE3_ACCEPTANCE_EXIT_$status",
+		"Wait+Screen /PHASE3_ACCEPTANCE_EXIT_[0-9]+/",
+	} {
+		if !strings.Contains(tape, token) {
+			t.Errorf("Phase 3 VHS tape is missing %q", token)
+		}
 	}
 }
+
 func TestArgoVersionAndChecksumPins(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(repositoryRoot(t), "scripts", "versions.env"))
 	if err != nil {

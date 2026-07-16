@@ -346,14 +346,17 @@ jobs:
       - name: Undeploy GitOps foundation
         if: always()
         continue-on-error: true
+        timeout-minutes: 5
         shell: pwsh
         run: ./scripts/dev.ps1 undeploy-gitops
       - name: Undeploy the Application operator
         if: always()
+        timeout-minutes: 5
         shell: pwsh
         run: |
           ./scripts/dev.ps1 undeploy-operator
       - name: Destroy cluster
         if: always()
+        timeout-minutes: 5
         shell: pwsh
         run: ./scripts/dev.ps1 destroy

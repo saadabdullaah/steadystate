@@ -352,6 +352,8 @@ function Invoke-Undeploy {
     $ErrorActionPreference = 'Continue'
     & kubectl get customresourcedefinition applications.argoproj.io *> $null
     $argoApplicationsExist = $LASTEXITCODE -eq 0
+    & kubectl get customresourcedefinition applications.platform.steadystate.dev *> $null
+    $steadyStateApplicationsExist = $LASTEXITCODE -eq 0
     & kubectl get customresourcedefinition teams.platform.steadystate.dev *> $null
     $teamsExist = $LASTEXITCODE -eq 0
     $ErrorActionPreference = $previousPreference
@@ -360,13 +362,17 @@ function Invoke-Undeploy {
         Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s
         Invoke-External kubectl delete application.argoproj.io payments -n argocd --ignore-not-found=true --wait=true --timeout=60s
     }
-    if ($teamsExist) {
-        Invoke-External kubectl delete team payments --ignore-not-found=true --wait=true --timeout=180s
+    if ($steadyStateApplicationsExist) {
+        Invoke-External kubectl delete applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s
     }
+    if ($teamsExist) {
+        Invoke-External kubectl delete teams.platform.steadystate.dev --all --ignore-not-found=true --wait=true --timeout=180s
+    }
+    Invoke-External kubectl delete namespace steadystate-unmanaged --ignore-not-found=true --wait=true --timeout=120s
     if ($argoApplicationsExist) {
         Invoke-External kubectl delete application.argoproj.io argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s
     }
-    Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true
+    Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true --wait=true --timeout=180s
     Invoke-External kubectl delete -n argocd -f $manifest --ignore-not-found=true --wait=false
     Invoke-External kubectl delete namespace argocd --ignore-not-found=true --wait=true --timeout=180s
     Write-Host 'Argo CD and SteadyState GitOps-managed demo resources are undeployed.'
