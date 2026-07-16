@@ -380,6 +380,7 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 
 	for _, token := range []string{
 		"acceptance/phase3-",
+		"docs/demonstrations/phase1-self-heal.gif",
 		"schemaVersion = 1",
 		"sourceSHA = $SourceRevision",
 		"baselineCommit = $baselineCommit",

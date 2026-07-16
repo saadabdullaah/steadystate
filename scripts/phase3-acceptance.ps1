@@ -259,6 +259,7 @@ function Set-DemoManifest {
     $changed = @(git diff --name-only)
     $allowed = @(
         'gitops/applications/demo/application.yaml',
+        'docs/demonstrations/phase1-self-heal.gif',
         'docs/demonstrations/phase3-gitops-delivery.gif'
     )
     $unexpected = @($changed | Where-Object { $_ -notin $allowed })
@@ -434,7 +435,10 @@ try {
     if (-not $originalBranch) { throw 'The workflow checkout must be on a named branch.' }
     $trackedChanges = @(git diff --name-only)
     $unexpectedChanges = @($trackedChanges | Where-Object {
-        $_ -ne 'docs/demonstrations/phase3-gitops-delivery.gif'
+        $_ -notin @(
+            'docs/demonstrations/phase1-self-heal.gif',
+            'docs/demonstrations/phase3-gitops-delivery.gif'
+        )
     })
     if ($unexpectedChanges.Count -gt 0) {
         throw "Tracked files are dirty before acceptance: $($unexpectedChanges -join ', ')"
