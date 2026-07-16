@@ -392,6 +392,8 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 		"RepositoryNotAllowed",
 		"control-plane=controller-manager",
 		"Assert-ArgoOwnershipBoundary",
+		"[Alias('o')]",
+		"Invoke-External git commit -m $Message | Out-Host",
 		"Write-Evidence -EvidenceResult failed",
 	} {
 		if !strings.Contains(script, token) {

@@ -60,7 +60,12 @@ function Invoke-ExternalText {
 }
 
 function Invoke-KubectlResult {
-    param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    [CmdletBinding(PositionalBinding=$false)]
+    param(
+        [Parameter(ValueFromRemainingArguments)][string[]]$Arguments,
+        [Alias('o')][string]$OutputFormat
+    )
+    if ($PSBoundParameters.ContainsKey('OutputFormat')) { $Arguments += @('-o', $OutputFormat) }
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $output = @(& kubectl @Arguments 2>&1)
@@ -74,8 +79,7 @@ function Invoke-KubectlResult {
 
 function Get-KubernetesObject {
     param([Parameter(Mandatory)][string[]]$Arguments)
-    $allArguments = @($Arguments) + @('-o','json')
-    $result = Invoke-KubectlResult @allArguments
+    $result = Invoke-KubectlResult -Arguments $Arguments -OutputFormat json
     if ($result.ExitCode -ne 0 -or -not $result.Output) {
         throw "kubectl $($Arguments -join ' ') failed: $($result.Output)"
     }
@@ -271,8 +275,8 @@ function Set-DemoManifest {
 
 function New-AcceptanceCommit {
     param([Parameter(Mandatory)][string]$Message)
-    Invoke-External git add -- gitops/applications/demo/application.yaml
-    Invoke-External git commit -m $Message
+    Invoke-External git add -- gitops/applications/demo/application.yaml | Out-Host
+    Invoke-External git commit -m $Message | Out-Host
     return (Invoke-ExternalText git rev-parse HEAD)
 }
 
