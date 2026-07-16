@@ -446,6 +446,8 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 		"Output docs/demonstrations/phase3-gitops-delivery.gif",
 		"scripts/phase3-acceptance.ps1",
 		"Set WaitTimeout 20m",
+		"Set Framerate 2",
+		"Set PlaybackSpeed 8.0",
 		"Wait+Screen /PHASE3_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
 	} {
 		if !strings.Contains(tape, token) {
