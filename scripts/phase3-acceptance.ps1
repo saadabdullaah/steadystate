@@ -316,7 +316,15 @@ function Get-ResourceSnapshot {
     $pods = Get-KubernetesObject -Arguments @(
         'get','pods','-n',$ApplicationNamespace,'-l',"app.kubernetes.io/name=$ApplicationName"
     )
-    $snapshot.pods = @($pods.items | Sort-Object { $_.metadata.name } | ForEach-Object {
+    $activePods = @($pods.items | Where-Object {
+        -not $_.metadata.deletionTimestamp -and
+        $_.status.phase -eq 'Running' -and
+        @($_.status.conditions | Where-Object {
+            $_.type -eq 'Ready' -and $_.status -eq 'True'
+        }).Count -eq 1
+    })
+    if ($activePods.Count -eq 0) { throw 'No active Ready Application Pods were found for the resource snapshot.' }
+    $snapshot.pods = @($activePods | Sort-Object { $_.metadata.name } | ForEach-Object {
         [ordered]@{ name = [string]$_.metadata.name; uid = [string]$_.metadata.uid }
     })
     return $snapshot
@@ -578,10 +586,12 @@ try {
     $result = 'passed'
     Write-Evidence -EvidenceResult passed
     Write-Host 'SteadyState Phase 3 GitOps delivery acceptance passed.' -ForegroundColor Cyan
+    Write-Host 'PHASE3_ACCEPTANCE_RESULT_PASSED' -ForegroundColor Cyan
 } catch {
     $failureMessage = $_.Exception.Message
     try { Save-ClusterEvidence } catch { Write-Warning "Could not capture all Phase 3 cluster evidence: $($_.Exception.Message)" }
     Write-Evidence -EvidenceResult failed
+    Write-Host 'PHASE3_ACCEPTANCE_RESULT_FAILED' -ForegroundColor Red
     throw
 } finally {
     if ($originalBranch) {

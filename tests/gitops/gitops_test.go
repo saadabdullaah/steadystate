@@ -446,11 +446,21 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 		"Output docs/demonstrations/phase3-gitops-delivery.gif",
 		"scripts/phase3-acceptance.ps1",
 		"Set WaitTimeout 20m",
-		"PHASE3_ACCEPTANCE_EXIT_$status",
-		"Wait+Screen /PHASE3_ACCEPTANCE_EXIT_[0-9]+/",
+		"Wait+Screen /PHASE3_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
 	} {
 		if !strings.Contains(tape, token) {
 			t.Errorf("Phase 3 VHS tape is missing %q", token)
+		}
+	}
+	for _, token := range []string{
+		"-not $_.metadata.deletionTimestamp",
+		"$_.status.phase -eq 'Running'",
+		"$_.type -eq 'Ready' -and $_.status -eq 'True'",
+		"PHASE3_ACCEPTANCE_RESULT_PASSED",
+		"PHASE3_ACCEPTANCE_RESULT_FAILED",
+	} {
+		if !strings.Contains(script, token) {
+			t.Errorf("Phase 3 acceptance script is missing %q", token)
 		}
 	}
 }

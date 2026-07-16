@@ -11,7 +11,7 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 5ms
 Set WaitTimeout 20m
 
-Type "pwsh -NoProfile -File scripts/phase3-acceptance.ps1 -Profile standard -EvidencePath .artifacts/phase3/acceptance.json; status=$?; echo PHASE3_ACCEPTANCE_EXIT_$status"
+Type "pwsh -NoProfile -File scripts/phase3-acceptance.ps1 -Profile standard -EvidencePath .artifacts/phase3/acceptance.json"
 Enter
-Wait+Screen /PHASE3_ACCEPTANCE_EXIT_[0-9]+/
+Wait+Screen /PHASE3_ACCEPTANCE_RESULT_(PASSED|FAILED)/
 Sleep 3s
