@@ -42,6 +42,8 @@ jobs:
           }
           "version=$version" >> $env:GITHUB_OUTPUT
           "sha_tag=sha-$env:GITHUB_SHA" >> $env:GITHUB_OUTPUT
+          "bad_version=$version-bad" >> $env:GITHUB_OUTPUT
+          "bad_sha_tag=sha-$env:GITHUB_SHA-bad" >> $env:GITHUB_OUTPUT
 
       - name: Test demo application
         shell: pwsh
@@ -52,7 +54,7 @@ jobs:
           if ($unformatted.Count -gt 0) { throw "Unformatted demo files: $($unformatted -join ', ')" }
           go vet ./apps/demo-app/...
           if ($LASTEXITCODE -ne 0) { throw 'go vet failed for the demo application.' }
-          go test ./apps/demo-app/...
+          go test -race ./apps/demo-app/...
           if ($LASTEXITCODE -ne 0) { throw 'Demo application tests failed.' }
 
       - name: Set up Docker Buildx
@@ -71,6 +73,8 @@ jobs:
         env:
           VERSION: ${{ steps.metadata.outputs.version }}
           SHA_TAG: ${{ steps.metadata.outputs.sha_tag }}
+          BAD_VERSION: ${{ steps.metadata.outputs.bad_version }}
+          BAD_SHA_TAG: ${{ steps.metadata.outputs.bad_sha_tag }}
         run: |
           function Get-RegistryDigest {
               param([Parameter(Mandatory)][string]$Reference)
@@ -91,26 +95,40 @@ jobs:
               return $match.Groups[1].Value
           }
 
-          $versionRef = "$env:IMAGE`:$env:VERSION"
-          $shaRef = "$env:IMAGE`:$env:SHA_TAG"
-          $versionDigest = Get-RegistryDigest -Reference $versionRef
-          $shaDigest = Get-RegistryDigest -Reference $shaRef
-          if (-not $versionDigest -and -not $shaDigest) {
+          $references = [ordered]@{
+              goodVersion = "$env:IMAGE`:$env:VERSION"
+              goodSHA = "$env:IMAGE`:$env:SHA_TAG"
+              badVersion = "$env:IMAGE`:$env:BAD_VERSION"
+              badSHA = "$env:IMAGE`:$env:BAD_SHA_TAG"
+          }
+          $digests = @{}
+          foreach ($entry in $references.GetEnumerator()) {
+              $digests[$entry.Key] = Get-RegistryDigest -Reference $entry.Value
+          }
+          $present = @($digests.Values | Where-Object { $_ }).Count
+          if ($present -eq 0) {
               'publish=true' >> $env:GITHUB_OUTPUT
               exit 0
           }
-          if (-not $versionDigest -or -not $shaDigest) {
-              throw 'Immutable tag reuse is partial; both semver and SHA tags must exist or both must be absent.'
+          if ($present -ne $references.Count) {
+              throw 'Immutable tag reuse is partial; all good and bad semver/SHA tags must exist or all must be absent.'
           }
-          if ($versionDigest -ne $shaDigest) {
-              throw 'Immutable semver and SHA tags resolve to different digests.'
+          if ($digests.goodVersion -ne $digests.goodSHA) {
+              throw 'Immutable good semver and SHA tags resolve to different digests.'
+          }
+          if ($digests.badVersion -ne $digests.badSHA) {
+              throw 'Immutable bad semver and SHA tags resolve to different digests.'
+          }
+          if ($digests.goodVersion -eq $digests.badVersion) {
+              throw 'Good and bad image variants must resolve to distinct digests.'
           }
           'publish=false' >> $env:GITHUB_OUTPUT
-          "digest=$versionDigest" >> $env:GITHUB_OUTPUT
+          "good_digest=$($digests.goodVersion)" >> $env:GITHUB_OUTPUT
+          "bad_digest=$($digests.badVersion)" >> $env:GITHUB_OUTPUT
 
-      - name: Build and publish immutable demo image
+      - name: Build and publish immutable good demo image
         if: steps.preflight.outputs.publish == 'true'
-        id: build
+        id: build_good
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
           context: .
@@ -119,9 +137,26 @@ jobs:
           push: true
           provenance: false
           sbom: false
+          build-args: INJECT_ERROR_RATE=0
           tags: |
             ${{ env.IMAGE }}:${{ steps.metadata.outputs.version }}
             ${{ env.IMAGE }}:${{ steps.metadata.outputs.sha_tag }}
+
+      - name: Build and publish immutable bad demo image
+        if: steps.preflight.outputs.publish == 'true'
+        id: build_bad
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: apps/demo-app/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          build-args: INJECT_ERROR_RATE=0.10
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.metadata.outputs.bad_version }}
+            ${{ env.IMAGE }}:${{ steps.metadata.outputs.bad_sha_tag }}
 
       - name: Verify published digest
         id: registry
@@ -129,9 +164,13 @@ jobs:
         env:
           VERSION: ${{ steps.metadata.outputs.version }}
           SHA_TAG: ${{ steps.metadata.outputs.sha_tag }}
+          BAD_VERSION: ${{ steps.metadata.outputs.bad_version }}
+          BAD_SHA_TAG: ${{ steps.metadata.outputs.bad_sha_tag }}
           PUBLISH: ${{ steps.preflight.outputs.publish }}
-          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
-          REUSED_DIGEST: ${{ steps.preflight.outputs.digest }}
+          BUILT_GOOD_DIGEST: ${{ steps.build_good.outputs.digest }}
+          BUILT_BAD_DIGEST: ${{ steps.build_bad.outputs.digest }}
+          REUSED_GOOD_DIGEST: ${{ steps.preflight.outputs.good_digest }}
+          REUSED_BAD_DIGEST: ${{ steps.preflight.outputs.bad_digest }}
         run: |
           function Get-RegistryDigest {
               param([Parameter(Mandatory)][string]$Reference)
@@ -144,14 +183,25 @@ jobs:
               return $match.Groups[1].Value
           }
 
-          $expected = if ($env:PUBLISH -eq 'true') { $env:BUILT_DIGEST } else { $env:REUSED_DIGEST }
-          if ($expected -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'The recorded image digest is invalid.' }
-          foreach ($reference in @("$env:IMAGE`:$env:VERSION", "$env:IMAGE`:$env:SHA_TAG")) {
-              if ((Get-RegistryDigest -Reference $reference) -ne $expected) {
-                  throw "$reference does not resolve to the recorded digest."
+          $goodDigest = if ($env:PUBLISH -eq 'true') { $env:BUILT_GOOD_DIGEST } else { $env:REUSED_GOOD_DIGEST }
+          $badDigest = if ($env:PUBLISH -eq 'true') { $env:BUILT_BAD_DIGEST } else { $env:REUSED_BAD_DIGEST }
+          foreach ($digest in @($goodDigest, $badDigest)) {
+              if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'A recorded image digest is invalid.' }
+          }
+          if ($goodDigest -eq $badDigest) { throw 'Good and bad image variants must have distinct digests.' }
+          $expectedReferences = [ordered]@{
+              "$env:IMAGE`:$env:VERSION" = $goodDigest
+              "$env:IMAGE`:$env:SHA_TAG" = $goodDigest
+              "$env:IMAGE`:$env:BAD_VERSION" = $badDigest
+              "$env:IMAGE`:$env:BAD_SHA_TAG" = $badDigest
+          }
+          foreach ($entry in $expectedReferences.GetEnumerator()) {
+              if ((Get-RegistryDigest -Reference $entry.Key) -ne $entry.Value) {
+                  throw "$($entry.Key) does not resolve to the recorded digest."
               }
           }
-          "digest=$expected" >> $env:GITHUB_OUTPUT
+          "digest=$goodDigest" >> $env:GITHUB_OUTPUT
+          "bad_digest=$badDigest" >> $env:GITHUB_OUTPUT
 
       - name: Create delivery installation token
         id: app-token

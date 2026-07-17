@@ -44,6 +44,9 @@ jobs:
           ./scripts/dev.ps1 verify-gitops
           ./scripts/dev.ps1 lint
           ./scripts/dev.ps1 test
+      - name: Demo race tests
+        shell: pwsh
+        run: go test -race ./apps/demo-app/...
       - name: Workflow, YAML, Markdown, and shell lint
         shell: bash
         run: |

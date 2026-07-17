@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -15,16 +16,41 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const shutdownTimeout = 10 * time.Second
 
 type config struct {
-	Name      string
-	Namespace string
-	Owner     string
-	Version   string
-	Port      int
+	Name               string
+	Namespace          string
+	Owner              string
+	Version            string
+	Port               int
+	InjectErrorRate    float64
+	InjectLatency      time.Duration
+	CrashAfterRequests uint64
+}
+
+type runtimeHooks struct {
+	sleep func(time.Duration)
+	exit  func(int)
+}
+
+type requestRuntime struct {
+	configuration config
+	metrics       *demoMetrics
+	hooks         runtimeHooks
+	sequence      atomic.Uint64
+	crashed       atomic.Bool
+}
+
+type demoMetrics struct {
+	requests *prometheus.CounterVec
+	duration *prometheus.HistogramVec
+	handler  http.Handler
 }
 
 type response struct {
@@ -63,6 +89,27 @@ func loadConfig(getenv func(string) string) (config, error) {
 			return config{}, fmt.Errorf("PORT must be an integer between 1 and 65535")
 		}
 		configuration.Port = port
+	}
+	if rawRate := getenv("INJECT_ERROR_RATE"); rawRate != "" {
+		rate, err := strconv.ParseFloat(rawRate, 64)
+		if err != nil || math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > 1 {
+			return config{}, fmt.Errorf("INJECT_ERROR_RATE must be a decimal between 0 and 1")
+		}
+		configuration.InjectErrorRate = rate
+	}
+	if rawLatency := getenv("INJECT_LATENCY_MS"); rawLatency != "" {
+		latencyMilliseconds, err := strconv.ParseInt(rawLatency, 10, 64)
+		if err != nil || latencyMilliseconds < 0 || latencyMilliseconds > 60000 {
+			return config{}, fmt.Errorf("INJECT_LATENCY_MS must be an integer between 0 and 60000")
+		}
+		configuration.InjectLatency = time.Duration(latencyMilliseconds) * time.Millisecond
+	}
+	if rawCrashThreshold := getenv("CRASH_AFTER_REQUESTS"); rawCrashThreshold != "" {
+		crashThreshold, err := strconv.ParseUint(rawCrashThreshold, 10, 64)
+		if err != nil {
+			return config{}, fmt.Errorf("CRASH_AFTER_REQUESTS must be a non-negative integer")
+		}
+		configuration.CrashAfterRequests = crashThreshold
 	}
 	return configuration, nil
 }
@@ -113,6 +160,18 @@ func run(ctx context.Context, configuration config) error {
 }
 
 func newHandler(configuration config, ready *atomic.Bool) http.Handler {
+	return newHandlerWithRuntime(configuration, ready, runtimeHooks{sleep: time.Sleep, exit: os.Exit})
+}
+
+func newHandlerWithRuntime(configuration config, ready *atomic.Bool, hooks runtimeHooks) http.Handler {
+	if hooks.sleep == nil {
+		hooks.sleep = time.Sleep
+	}
+	if hooks.exit == nil {
+		hooks.exit = os.Exit
+	}
+	metrics := newDemoMetrics(configuration)
+	runtime := &requestRuntime{configuration: configuration, metrics: metrics, hooks: hooks}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(writer, http.StatusOK, response{Application: configuration.Name, Namespace: configuration.Namespace, Status: "healthy", Version: configuration.Version})
@@ -124,14 +183,73 @@ func newHandler(configuration config, ready *atomic.Bool) http.Handler {
 		}
 		writeJSON(writer, http.StatusOK, response{Application: configuration.Name, Namespace: configuration.Namespace, Status: "ready", Version: configuration.Version})
 	})
+	mux.Handle("/metrics", metrics.handler)
 	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/" {
 			http.NotFound(writer, request)
 			return
 		}
-		writeJSON(writer, http.StatusOK, response{Application: configuration.Name, Namespace: configuration.Namespace, Owner: configuration.Owner, Status: "running", Version: configuration.Version})
+		runtime.serveApplication(writer)
 	})
 	return mux
+}
+
+func newDemoMetrics(configuration config) *demoMetrics {
+	requests := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "Total measured application HTTP requests.",
+	}, []string{"application", "namespace", "version", "status"})
+	duration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "http_request_duration_seconds",
+		Help:    "Measured application HTTP request duration in seconds.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"application", "namespace", "version", "status"})
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(requests, duration)
+	return &demoMetrics{
+		requests: requests,
+		duration: duration,
+		handler:  promhttp.HandlerFor(registry, promhttp.HandlerOpts{}),
+	}
+}
+
+func (runtime *requestRuntime) serveApplication(writer http.ResponseWriter) {
+	started := time.Now()
+	sequence := runtime.sequence.Add(1)
+	if runtime.configuration.InjectLatency > 0 {
+		runtime.hooks.sleep(runtime.configuration.InjectLatency)
+	}
+
+	statusCode := http.StatusOK
+	state := "running"
+	if shouldInjectFailure(sequence, runtime.configuration.InjectErrorRate) {
+		statusCode = http.StatusInternalServerError
+		state = "error"
+	}
+	status := strconv.Itoa(statusCode)
+	runtime.metrics.requests.WithLabelValues(runtime.configuration.Name, runtime.configuration.Namespace, runtime.configuration.Version, status).Inc()
+	runtime.metrics.duration.WithLabelValues(runtime.configuration.Name, runtime.configuration.Namespace, runtime.configuration.Version, status).Observe(time.Since(started).Seconds())
+	writeJSON(writer, statusCode, response{
+		Application: runtime.configuration.Name,
+		Namespace:   runtime.configuration.Namespace,
+		Owner:       runtime.configuration.Owner,
+		Status:      state,
+		Version:     runtime.configuration.Version,
+	})
+
+	if runtime.configuration.CrashAfterRequests > 0 && sequence >= runtime.configuration.CrashAfterRequests && runtime.crashed.CompareAndSwap(false, true) {
+		runtime.hooks.exit(1)
+	}
+}
+
+func shouldInjectFailure(sequence uint64, rate float64) bool {
+	if rate <= 0 {
+		return false
+	}
+	if rate >= 1 {
+		return true
+	}
+	return math.Floor(float64(sequence)*rate) > math.Floor(float64(sequence-1)*rate)
 }
 
 func writeJSON(writer http.ResponseWriter, statusCode int, value response) {

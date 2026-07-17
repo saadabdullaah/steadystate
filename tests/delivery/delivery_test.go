@@ -15,8 +15,8 @@ func TestDemoVersionContract(t *testing.T) {
 	if !regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`).MatchString(version) {
 		t.Fatalf("demo VERSION %q is not strict semver", version)
 	}
-	if version != "v0.3.0" {
-		t.Fatalf("checkpoint 3 must start at v0.3.0, got %q", version)
+	if version != "v0.4.0" {
+		t.Fatalf("Phase 4 must declare v0.4.0, got %q", version)
 	}
 	manifest := read(t, filepath.Join(root, "gitops", "applications", "demo", "application.yaml"))
 	tagPattern := regexp.MustCompile(`(?m)^    tag: (v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
@@ -25,8 +25,8 @@ func TestDemoVersionContract(t *testing.T) {
 		t.Fatal("the demo manifest must contain exactly one strict semver image tag")
 	}
 	manifestVersion := tagMatches[0][1]
-	if manifestVersion != version && manifestVersion != "v0.1.0" {
-		t.Fatalf("demo manifest tag %q must be the v0.1.0 delivery baseline or match VERSION %q", manifestVersion, version)
+	if manifestVersion != version && manifestVersion != "v0.3.0" {
+		t.Fatalf("demo manifest tag %q must be the released v0.3.0 baseline or match VERSION %q", manifestVersion, version)
 	}
 }
 
@@ -51,6 +51,12 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 		"chore(gitops): deploy demo app $env:VERSION",
 		"gitops/applications/demo/application.yaml",
 		"sha-$env:GITHUB_SHA",
+		"$version-bad",
+		"sha-$env:GITHUB_SHA-bad",
+		"build-args: INJECT_ERROR_RATE=0.10",
+		"Good and bad image variants must have distinct digests.",
+		"all good and bad semver/SHA tags must exist or all must be absent",
+		"go test -race ./apps/demo-app/...",
 		"manifest unknown|not found",
 	}
 	for _, value := range required {
@@ -74,9 +80,35 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 	if strings.Contains(workflow, ":latest") {
 		t.Fatal("demo release workflow must not publish a mutable latest tag")
 	}
+	if strings.Count(workflow, "docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf") != 2 {
+		t.Fatal("demo release workflow must build exactly the good and bad immutable variants")
+	}
 	for _, path := range []string{"apps/demo-app/main.go", "apps/demo-app/Dockerfile", "apps/demo-app/VERSION", "go.mod", "go.sum"} {
 		if !strings.Contains(workflow, "      - "+path) {
 			t.Errorf("demo release trigger is missing %s", path)
+		}
+	}
+}
+
+func TestDemoTelemetryImageContract(t *testing.T) {
+	root := repositoryRoot(t)
+	source := read(t, filepath.Join(root, "apps", "demo-app", "main.go"))
+	for _, value := range []string{
+		"INJECT_ERROR_RATE",
+		"INJECT_LATENCY_MS",
+		"CRASH_AFTER_REQUESTS",
+		"http_requests_total",
+		"http_request_duration_seconds",
+		`mux.Handle("/metrics"`,
+	} {
+		if !strings.Contains(source, value) {
+			t.Errorf("demo telemetry source is missing %q", value)
+		}
+	}
+	dockerfile := read(t, filepath.Join(root, "apps", "demo-app", "Dockerfile"))
+	for _, value := range []string{"ARG INJECT_ERROR_RATE=0", "ENV INJECT_ERROR_RATE=${INJECT_ERROR_RATE}"} {
+		if !strings.Contains(dockerfile, value) {
+			t.Errorf("demo image contract is missing %q", value)
 		}
 	}
 }
