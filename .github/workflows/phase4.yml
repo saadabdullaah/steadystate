@@ -1,0 +1,107 @@
+name: Phase 4 acceptance
+
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase4-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  foundation:
+    name: rollouts-monitoring-foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install checksum-verified tools
+        shell: pwsh
+        run: |
+          ./scripts/install-tools.ps1 -BaseOnly
+          ./scripts/dev.ps1 check-versions
+      - name: Verify progressive-delivery pins and renders
+        shell: pwsh
+        run: ./scripts/dev.ps1 verify-progressive-delivery
+      - name: Bootstrap standard profile
+        shell: pwsh
+        run: ./scripts/dev.ps1 bootstrap -Profile standard
+      - name: Build and load local images
+        shell: pwsh
+        run: |
+          ./scripts/dev.ps1 build-images
+          ./scripts/dev.ps1 load-images
+      - name: Deploy GitOps foundation at this commit
+        shell: pwsh
+        run: ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA
+      - name: Prove Rollouts plugin and Envoy weighted traffic
+        id: foundation
+        shell: pwsh
+        run: ./scripts/dev.ps1 test-progressive-delivery -Profile standard -EvidencePath .artifacts/phase4/foundation/evidence.json
+      - name: Capture foundation diagnostics
+        if: always()
+        shell: pwsh
+        run: ./scripts/dev.ps1 diagnostics
+      - name: Verify successful foundation evidence
+        if: steps.foundation.outcome == 'success'
+        shell: pwsh
+        run: |
+          $evidence = Get-Content -Raw -LiteralPath .artifacts/phase4/foundation/evidence.json | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed' -or $evidence.profile -ne 'standard') {
+            throw 'The Phase 4 foundation evidence is invalid.'
+          }
+          if ($evidence.sourceRevision -ne $env:GITHUB_SHA) {
+            throw 'The foundation evidence does not describe this workflow commit.'
+          }
+          $required = @(
+            'argocd-argocd-configuration-healthy',
+            'argocd-monitoring-healthy',
+            'argocd-argo-rollouts-healthy',
+            'pinned-rollouts-and-gateway-plugin',
+            'gateway-plugin-enforced-90-10',
+            'envoy-traffic-followed-50-50',
+            'rollout-promoted-stable-100'
+          )
+          $passed = @($evidence.checks | Where-Object status -eq 'passed' | ForEach-Object name)
+          foreach ($name in $required) {
+            if ($name -notin $passed) { throw "Missing passed foundation check: $name" }
+          }
+          foreach ($measurement in @($evidence.measurements)) {
+            if ($measurement.samples -lt 500 -or [Math]::Abs([double]$measurement.observedCanaryPercent - [double]$measurement.requestedCanaryPercent) -gt 8) {
+              throw 'A weighted traffic measurement is outside the compatibility boundary.'
+            }
+          }
+          $diagnostics = @(Get-ChildItem -LiteralPath .artifacts/diagnostics -Recurse -File -ErrorAction SilentlyContinue)
+          if ($diagnostics.Count -eq 0) { throw 'Foundation diagnostics are missing.' }
+      - name: Upload foundation artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase4-foundation-${{ github.sha }}
+          path: |
+            .artifacts/phase4/foundation/
+            .artifacts/diagnostics/
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
+      - name: Undeploy GitOps foundation
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/dev.ps1 undeploy-gitops
+      - name: Destroy cluster
+        if: always()
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/dev.ps1 destroy

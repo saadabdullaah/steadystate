@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -315,6 +315,19 @@ function Invoke-CheckVersions {
         if ($actualVersion -ne $developmentTools[$name]) { throw "$name version mismatch: expected $($developmentTools[$name]), got $actualVersion" }
         Write-Host "[PASS] $name $actualVersion"
     }
+    foreach ($tool in @('kubectl-argo-rollouts','k6')) {
+        if (-not (Test-CommandAvailable $tool)) { throw "$tool is missing from the pinned toolchain." }
+    }
+    $rolloutsVersion = ((& kubectl-argo-rollouts version --short) -join "`n")
+    if ($LASTEXITCODE -ne 0 -or $rolloutsVersion -notmatch [regex]::Escape("v$($v.ARGO_ROLLOUTS_VERSION)")) {
+        throw "Rollouts CLI version mismatch: expected v$($v.ARGO_ROLLOUTS_VERSION), got $rolloutsVersion"
+    }
+    Write-Host "[PASS] kubectl-argo-rollouts $($v.ARGO_ROLLOUTS_VERSION)"
+    $k6Version = ((& k6 version) -join "`n")
+    if ($LASTEXITCODE -ne 0 -or $k6Version -notmatch [regex]::Escape("v$($v.K6_VERSION)")) {
+        throw "k6 version mismatch: expected v$($v.K6_VERSION), got $k6Version"
+    }
+    Write-Host "[PASS] k6 $($v.K6_VERSION)"
     if (-not $IsWindowsHost -and (Test-CommandAvailable 'kubebuilder')) {
         $kubebuilderVersion = ((& kubebuilder version) -join "`n")
         if ($LASTEXITCODE -ne 0 -or $kubebuilderVersion -notmatch [regex]::Escape("v$($v.KUBEBUILDER_VERSION)")) {
@@ -352,6 +365,12 @@ function Invoke-Diagnostics {
         & kubectl get applications.argoproj.io,appprojects.argoproj.io -n argocd -o yaml *> (Join-Path $directory 'argocd-applications.yaml')
         & kubectl get all,configmap,httproute -n argocd -o yaml *> (Join-Path $directory 'argocd-resources.yaml')
         & kubectl logs -n argocd -l app.kubernetes.io/part-of=argocd --all-containers --tail=500 --prefix=true *> (Join-Path $directory 'argocd.log')
+        & kubectl get rollout,analysisrun,analysistemplate -A -o yaml *> (Join-Path $directory 'rollouts.yaml')
+        & kubectl get prometheus,alertmanager,servicemonitor,prometheusrule -A -o yaml *> (Join-Path $directory 'monitoring.yaml')
+        & kubectl get all,configmap -n argo-rollouts -o yaml *> (Join-Path $directory 'argo-rollouts-resources.yaml')
+        & kubectl logs -n argo-rollouts deployment/argo-rollouts --all-containers --tail=500 *> (Join-Path $directory 'argo-rollouts.log')
+        & kubectl get all -n monitoring -o yaml *> (Join-Path $directory 'monitoring-resources.yaml')
+        & kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus-operator --all-containers --tail=500 --prefix=true *> (Join-Path $directory 'prometheus-operator.log')
         & kubectl get deployment,service,configmap -A -l app.kubernetes.io/managed-by=steadystate -o yaml *> (Join-Path $directory 'application-children.yaml')
         & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=500 *> (Join-Path $directory 'operator.log')
         & kubectl get events -A --sort-by=.lastTimestamp *> (Join-Path $directory 'events.txt')
@@ -517,6 +536,8 @@ try {
         'test-gitops' { Invoke-GitOpsCommand -Mode Test }
         'undeploy-gitops' { Invoke-GitOpsCommand -Mode Undeploy }
         'verify-gitops' { Invoke-GitOpsCommand -Mode Verify }
+        'verify-progressive-delivery' { & (Join-Path $PSScriptRoot 'progressive-delivery.ps1') -Mode Verify }
+        'test-progressive-delivery' { Assert-Cluster; & (Join-Path $PSScriptRoot 'progressive-delivery.ps1') -Mode Test -HttpPort $HttpPort -EvidencePath $EvidencePath -Profile $Profile }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }
         'diagnostics' { Invoke-Diagnostics }

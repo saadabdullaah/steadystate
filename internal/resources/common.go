@@ -8,17 +8,18 @@ import (
 )
 
 const (
-	ManagedBy             = "steadystate"
-	TeamLabelKey          = "steadystate.dev/team"
-	TeamUIDAnnotationKey  = "steadystate.dev/team-uid"
-	GatewayAccessLabelKey = "steadystate.dev/gateway-access"
-	TeamNamespacePrefix   = "team-"
-	TeamQuotaName         = "steadystate-quota"
-	TeamLimitRangeName    = "steadystate-defaults"
-	TeamOwnerName         = "steadystate-team-owner"
-	DefaultDenyPolicyName = "steadystate-default-deny"
-	AllowDNSPolicyName    = "steadystate-allow-dns"
-	AllowEnvoyPolicyName  = "steadystate-allow-envoy-gateway"
+	ManagedBy                 = "steadystate"
+	TeamLabelKey              = "steadystate.dev/team"
+	TeamUIDAnnotationKey      = "steadystate.dev/team-uid"
+	GatewayAccessLabelKey     = "steadystate.dev/gateway-access"
+	TeamNamespacePrefix       = "team-"
+	TeamQuotaName             = "steadystate-quota"
+	TeamLimitRangeName        = "steadystate-defaults"
+	TeamOwnerName             = "steadystate-team-owner"
+	DefaultDenyPolicyName     = "steadystate-default-deny"
+	AllowDNSPolicyName        = "steadystate-allow-dns"
+	AllowEnvoyPolicyName      = "steadystate-allow-envoy-gateway"
+	AllowMonitoringPolicyName = "steadystate-allow-monitoring"
 )
 
 // Labels returns the stable identity labels shared by every generated object.

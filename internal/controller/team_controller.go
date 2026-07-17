@@ -186,6 +186,7 @@ func (r *TeamReconciler) reconcileNetworkPolicy(ctx context.Context, team *platf
 		resources.TeamDefaultDenyNetworkPolicy(team),
 		resources.TeamAllowDNSNetworkPolicy(team),
 		resources.TeamAllowEnvoyNetworkPolicy(team),
+		resources.TeamAllowMonitoringNetworkPolicy(team),
 	} {
 		current := &networkingv1.NetworkPolicy{}
 		changed, err := r.reconcileManagedObject(ctx, team, "NetworkPolicy", current, desired, func() {
@@ -312,7 +313,7 @@ func readyTeamStatus(team *platformv1alpha1.Team) platformv1alpha1.TeamStatus {
 	setTeamCondition(&status, team.Generation, conditionTeamNamespaceReady, metav1.ConditionTrue, "NamespaceReconciled", "Managed Namespace exists and has verified ownership")
 	setTeamCondition(&status, team.Generation, conditionTeamResourcePolicyReady, metav1.ConditionTrue, "ResourcePolicyReconciled", "ResourceQuota and LimitRange match the Team specification")
 	setTeamCondition(&status, team.Generation, conditionTeamRBACReady, metav1.ConditionTrue, "RBACReconciled", "ServiceAccount and RoleBinding match the installed Team owner ClusterRole")
-	setTeamCondition(&status, team.Generation, conditionTeamNetworkPolicyReady, metav1.ConditionTrue, "NetworkPolicyReconciled", "Default deny, DNS, and Envoy Gateway policies are enforced")
+	setTeamCondition(&status, team.Generation, conditionTeamNetworkPolicyReady, metav1.ConditionTrue, "NetworkPolicyReconciled", "Default deny, DNS, Envoy Gateway, and Prometheus policies are enforced")
 	setTeamCondition(&status, team.Generation, conditionTeamReady, metav1.ConditionTrue, "TeamReady", "All Team boundary resources are reconciled")
 	return status
 }

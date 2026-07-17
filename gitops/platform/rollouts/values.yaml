@@ -1,0 +1,51 @@
+installCRDs: true
+keepCRDs: true
+clusterInstall: true
+createClusterAggregateRoles: false
+
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 192Mi
+  trafficRouterPlugins:
+    - name: argoproj-labs/gatewayAPI
+      location: https://github.com/argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi/releases/download/v0.16.0/gatewayapi-plugin-linux-amd64
+      sha256: 3f129e6a1ea948932f440b16dfb9eae636a065857eb27311928e5790593103c1
+
+providerRBAC:
+  enabled: true
+  providers:
+    istio: false
+    smi: false
+    ambassador: false
+    awsLoadBalancerController: false
+    awsAppMesh: false
+    traefik: false
+    apisix: false
+    contour: false
+    glooPlatform: false
+    gatewayAPI: false
+  additionalRules:
+    - apiGroups:
+        - ""
+      resources:
+        - services
+      verbs:
+        - get
+    - apiGroups:
+        - gateway.networking.k8s.io
+      resources:
+        - httproutes
+      verbs:
+        - get
+        - list
+        - update
+        - patch
+
+dashboard:
+  enabled: false

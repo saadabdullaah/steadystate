@@ -76,11 +76,25 @@ tar -xzf "$helm_archive" -C "$TOOLS_ROOT"
 cp "$TOOLS_ROOT/linux-amd64/helm" "$BIN_DIR/helm"
 
 download_verified \
+  "https://github.com/argoproj/argo-rollouts/releases/download/v${ARGO_ROLLOUTS_VERSION}/kubectl-argo-rollouts-linux-amd64" \
+  "$BIN_DIR/kubectl-argo-rollouts" \
+  "$ARGO_ROLLOUTS_CLI_LINUX_AMD64_SHA256"
+
+k6_archive="$DOWNLOAD_DIR/k6-v${K6_VERSION}-linux-amd64.tar.gz"
+download_verified \
+  "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz" \
+  "$k6_archive" \
+  "$K6_LINUX_AMD64_SHA256"
+mkdir -p "$TOOLS_ROOT/k6-extract"
+tar -xzf "$k6_archive" -C "$TOOLS_ROOT/k6-extract"
+cp "$TOOLS_ROOT/k6-extract/k6-v${K6_VERSION}-linux-amd64/k6" "$BIN_DIR/k6"
+
+download_verified \
   "https://github.com/kubernetes-sigs/kubebuilder/releases/download/v${KUBEBUILDER_VERSION}/kubebuilder_linux_amd64" \
   "$BIN_DIR/kubebuilder" \
   "$KUBEBUILDER_LINUX_AMD64_SHA256"
 
-chmod +x "$BIN_DIR/kubectl" "$BIN_DIR/kind" "$BIN_DIR/helm" "$BIN_DIR/kubebuilder"
+chmod +x "$BIN_DIR/kubectl" "$BIN_DIR/kind" "$BIN_DIR/helm" "$BIN_DIR/kubebuilder" "$BIN_DIR/kubectl-argo-rollouts" "$BIN_DIR/k6"
 
 install_go_tool() {
   local name="$1" package="$2" version="$3"

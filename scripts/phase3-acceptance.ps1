@@ -471,7 +471,7 @@ try {
     & (Join-Path $Root 'scripts/dev.ps1') deploy-gitops -Profile $Profile -GitRevision $BranchName
     if ($LASTEXITCODE -ne 0) { throw 'GitOps deployment failed.' }
     Assert-DexAbsent
-    foreach ($name in @('argocd-configuration','steadystate-operator','payments','steadystate-root')) {
+    foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root')) {
         Wait-ArgoApplication -Name $name -Health Healthy -Revision $baselineCommit | Out-Null
     }
     Add-PassedCheck -Name 'pinned-argocd-installed-dex-absent' -Started $deployStarted `
