@@ -55,6 +55,14 @@ func TestProgressiveDeliveryResourceContracts(t *testing.T) {
 	if plugin["httpRoute"] != route.Name || plugin["namespace"] != application.Namespace {
 		t.Fatalf("unexpected Gateway plugin contract: %#v", plugin)
 	}
+	rolloutObject := RolloutObject(application)
+	if _, found, err := unstructured.NestedFieldNoCopy(rolloutObject.Object, "spec", "template"); err != nil || found {
+		t.Fatalf("workloadRef transport must omit the empty typed template: found=%t err=%v", found, err)
+	}
+	workloadName, found, err := unstructured.NestedString(rolloutObject.Object, "spec", "workloadRef", "name")
+	if err != nil || !found || workloadName != application.Name {
+		t.Fatalf("workloadRef transport lost the typed reference: name=%q found=%t err=%v", workloadName, found, err)
+	}
 	steps := rollout.Spec.Strategy.Canary.Steps
 	if len(steps) != 12 {
 		t.Fatalf("Rollout has %d steps, want weight/pause/analysis for four weights", len(steps))
@@ -145,6 +153,7 @@ func TestProgressiveBuildersAreByteStableAndIndependent(t *testing.T) {
 	application := testCanaryApplication()
 	builders := []func() any{
 		func() any { return Rollout(application) },
+		func() any { return RolloutObject(application) },
 		func() any { return StableService(application) },
 		func() any { return CanaryService(application) },
 		func() any { return CanaryHTTPRoute(application) },

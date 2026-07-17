@@ -25,7 +25,7 @@ var _ = Describe("Progressive-delivery CRD schemas", func() {
 		Expect(err == nil || apierrors.IsAlreadyExists(err)).To(BeTrue())
 	})
 
-	It("accepts every typed and unstructured generated resource", func(ctx SpecContext) {
+	It("accepts every generated progressive-delivery resource", func(ctx SpecContext) {
 		application := validApplication("progressive", namespace)
 		application.Spec.Image.Tag = "v0.4.0"
 		application.Spec.Deployment = platformv1alpha1.ApplicationDeployment{
@@ -39,7 +39,7 @@ var _ = Describe("Progressive-delivery CRD schemas", func() {
 		application.Spec.Observability.Metrics = true
 
 		objects := []client.Object{
-			resources.Rollout(application),
+			resources.RolloutObject(application),
 			resources.AnalysisTemplate(application),
 			resources.ServiceMonitor(application),
 			resources.PrometheusRule(application),

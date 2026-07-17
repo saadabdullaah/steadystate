@@ -133,6 +133,11 @@ func TestDemoVersionBumpGate(t *testing.T) {
 			t.Errorf("demo version guard is missing %q", value)
 		}
 	}
+	for _, value := range []string{"go list -deps", "$demoModules", "$affectedModules", "$buildDirectiveChanged"} {
+		if !strings.Contains(guard, value) {
+			t.Errorf("demo version guard is missing dependency-aware check %q", value)
+		}
+	}
 }
 
 func read(t *testing.T, path string) string {

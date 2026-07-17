@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -88,6 +89,19 @@ func Rollout(application *platformv1alpha1.Application) *rolloutsv1alpha1.Rollou
 			}},
 		},
 	}
+}
+
+// RolloutObject converts the typed Rollout contract into the object sent to
+// Kubernetes. RolloutSpec.Template is a non-pointer Go struct, so the typed
+// JSON encoder emits an empty template even when workloadRef is selected. The
+// upstream API requires that field to be absent for workloadRef Rollouts.
+func RolloutObject(application *platformv1alpha1.Application) *unstructured.Unstructured {
+	object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(Rollout(application))
+	if err != nil {
+		panic(fmt.Sprintf("convert typed Rollout to unstructured object: %v", err))
+	}
+	unstructured.RemoveNestedField(object, "spec", "template")
+	return &unstructured.Unstructured{Object: object}
 }
 
 // StableService builds the Service whose selector is subsequently owned by Argo Rollouts.
