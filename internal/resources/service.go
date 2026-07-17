@@ -10,8 +10,10 @@ import (
 
 // Service builds the stable ClusterIP Service owned by an Application.
 func Service(application *platformv1alpha1.Application) *corev1.Service {
+	labels := Labels(application)
+	labels[ServiceRoleLabelKey] = "base"
 	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: application.Name, Namespace: application.Namespace, Labels: Labels(application)},
+		ObjectMeta: metav1.ObjectMeta{Name: application.Name, Namespace: application.Namespace, Labels: labels},
 		Spec: corev1.ServiceSpec{
 			Selector: SelectorLabels(application),
 			Ports:    []corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromInt32(application.Spec.Runtime.Port)}},

@@ -79,6 +79,9 @@ func validateDeployment(app *platformv1alpha1.Application) error {
 		if len(steps) == 0 {
 			return fmt.Errorf("canary strategy requires steps")
 		}
+		if !app.Spec.Observability.Metrics {
+			return fmt.Errorf("canary strategy requires observability.metrics=true")
+		}
 	default:
 		return fmt.Errorf("unknown deployment strategy %q", app.Spec.Deployment.Strategy)
 	}

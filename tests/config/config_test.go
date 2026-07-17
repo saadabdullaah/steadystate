@@ -70,6 +70,8 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 		"SETUP_ENVTEST_VERSION", "KUSTOMIZE_VERSION", "GOLANGCI_LINT_VERSION",
 		"VHS_VERSION", "TTYD_VERSION", "VHS_LINUX_X86_64_SHA256", "TTYD_LINUX_X86_64_SHA256",
 		"GATEWAYCLASS_CRD_SHA256", "GATEWAY_CRD_SHA256", "HTTPROUTE_CRD_SHA256", "ARGO_CD_MANIFEST_SHA256",
+		"ARGO_ROLLOUT_CRD_SHA256", "ARGO_ANALYSIS_TEMPLATE_CRD_SHA256", "ARGO_ANALYSIS_RUN_CRD_SHA256",
+		"SERVICE_MONITOR_CRD_SHA256", "PROMETHEUS_RULE_CRD_SHA256",
 		"GO_BUILDER_IMAGE", "OPERATOR_IMAGE", "DEMO_IMAGE", "ISOLATION_CLIENT_IMAGE",
 	} {
 		if !strings.Contains(text, key+"=") {
@@ -78,6 +80,11 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 	}
 	if !regexp.MustCompile(`(?m)^ARGO_CD_MANIFEST_SHA256=[0-9a-f]{64}$`).MatchString(text) {
 		t.Error("ARGO_CD_MANIFEST_SHA256 must be a lowercase sha256 checksum")
+	}
+	for _, key := range []string{"ARGO_ROLLOUT_CRD_SHA256", "ARGO_ANALYSIS_TEMPLATE_CRD_SHA256", "ARGO_ANALYSIS_RUN_CRD_SHA256", "SERVICE_MONITOR_CRD_SHA256", "PROMETHEUS_RULE_CRD_SHA256"} {
+		if !regexp.MustCompile(`(?m)^` + key + `=[0-9a-f]{64}$`).MatchString(text) {
+			t.Errorf("%s must be a lowercase sha256 checksum", key)
+		}
 	}
 	if !regexp.MustCompile(`(?m)^ISOLATION_CLIENT_IMAGE=[^@\s]+@sha256:[0-9a-f]{64}$`).MatchString(text) {
 		t.Error("ISOLATION_CLIENT_IMAGE must be pinned by a sha256 digest")

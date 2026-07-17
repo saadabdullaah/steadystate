@@ -146,6 +146,7 @@ type SecurityOptions struct {
 }
 
 // ApplicationSpec defines the desired state of Application.
+// +kubebuilder:validation:XValidation:rule="self.deployment.strategy != 'canary' || self.observability.metrics",message="canary strategy requires observability.metrics=true"
 type ApplicationSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	Owner string `json:"owner"`

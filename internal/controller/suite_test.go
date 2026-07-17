@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	rolloutsv1alpha1 "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -52,6 +53,7 @@ var _ = BeforeSuite(func() {
 	err = platformv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(gatewayv1.Install(scheme.Scheme)).To(Succeed())
+	Expect(rolloutsv1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	// +kubebuilder:scaffold:scheme
 
@@ -60,6 +62,8 @@ var _ = BeforeSuite(func() {
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
 			filepath.Join("..", "..", "config", "gateway-api", "crds"),
+			filepath.Join("..", "..", "config", "rollouts", "crds"),
+			filepath.Join("..", "..", "config", "monitoring", "crds"),
 		},
 		ErrorIfCRDPathMissing: true,
 	}

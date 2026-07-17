@@ -98,6 +98,7 @@ var _ = Describe("Application CRD", func() {
 		}),
 		Entry("duplicate canary weights", func(app *platformv1alpha1.Application) {
 			app.Spec.Deployment.Strategy = platformv1alpha1.DeploymentStrategyCanary
+			app.Spec.Observability.Metrics = true
 			app.Spec.Deployment.Steps = []platformv1alpha1.CanaryStep{
 				{Weight: 10, Pause: metav1.Duration{Duration: time.Second}},
 				{Weight: 10, Pause: metav1.Duration{Duration: time.Second}},
@@ -105,10 +106,15 @@ var _ = Describe("Application CRD", func() {
 		}),
 		Entry("decreasing canary weights", func(app *platformv1alpha1.Application) {
 			app.Spec.Deployment.Strategy = platformv1alpha1.DeploymentStrategyCanary
+			app.Spec.Observability.Metrics = true
 			app.Spec.Deployment.Steps = []platformv1alpha1.CanaryStep{
 				{Weight: 50, Pause: metav1.Duration{Duration: time.Second}},
 				{Weight: 25, Pause: metav1.Duration{Duration: time.Second}},
 			}
+		}),
+		Entry("canary without metrics", func(app *platformv1alpha1.Application) {
+			app.Spec.Deployment.Strategy = platformv1alpha1.DeploymentStrategyCanary
+			app.Spec.Deployment.Steps = []platformv1alpha1.CanaryStep{{Weight: 10, Pause: metav1.Duration{Duration: time.Second}}}
 		}),
 	)
 })

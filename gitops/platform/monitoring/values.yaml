@@ -75,7 +75,7 @@ kube-state-metrics:
   collectors:
     - pods
   metricLabelsAllowlist:
-    - pods=[app.kubernetes.io/instance,app.kubernetes.io/managed-by,rollouts-pod-template-hash]
+    - pods=[app.kubernetes.io/instance,app.kubernetes.io/managed-by,rollouts-pod-template-hash,steadystate.dev/version]
   resources:
     requests:
       cpu: 25m

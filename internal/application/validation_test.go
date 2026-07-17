@@ -64,6 +64,10 @@ func TestValidate(t *testing.T) {
 		"canary no steps": func(app *platformv1alpha1.Application) {
 			app.Spec.Deployment.Strategy = platformv1alpha1.DeploymentStrategyCanary
 		},
+		"canary without metrics": func(app *platformv1alpha1.Application) {
+			app.Spec.Deployment.Strategy = platformv1alpha1.DeploymentStrategyCanary
+			app.Spec.Deployment.Steps = []platformv1alpha1.CanaryStep{{Weight: 10, Pause: metav1.Duration{Duration: time.Second}}}
+		},
 		"decreasing canary": func(app *platformv1alpha1.Application) {
 			app.Spec.Deployment.Strategy = platformv1alpha1.DeploymentStrategyCanary
 			app.Spec.Deployment.Steps = []platformv1alpha1.CanaryStep{{Weight: 50, Pause: metav1.Duration{Duration: time.Second}}, {Weight: 10, Pause: metav1.Duration{Duration: time.Second}}}
