@@ -2,6 +2,7 @@
 package resources
 
 import (
+	"crypto/sha256"
 	"fmt"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
@@ -20,6 +21,10 @@ const (
 	AllowDNSPolicyName        = "steadystate-allow-dns"
 	AllowEnvoyPolicyName      = "steadystate-allow-envoy-gateway"
 	AllowMonitoringPolicyName = "steadystate-allow-monitoring"
+	VersionLabelKey           = "steadystate.dev/version"
+	ServiceRoleLabelKey       = "steadystate.dev/service-role"
+	GatewayPluginName         = "argoproj-labs/gatewayAPI"
+	PrometheusAddress         = "http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090"
 )
 
 // Labels returns the stable identity labels shared by every generated object.
@@ -47,7 +52,42 @@ func Hostname(application *platformv1alpha1.Application) string {
 
 // ConfigMapName returns the generated ConfigMap name.
 func ConfigMapName(application *platformv1alpha1.Application) string {
-	return application.Name + "-config"
+	return suffixedName(application.Name, "-config")
+}
+
+// StableServiceName returns the Rollouts-managed stable Service name.
+func StableServiceName(application *platformv1alpha1.Application) string {
+	return suffixedName(application.Name, "-stable")
+}
+
+// CanaryServiceName returns the Rollouts-managed canary Service name.
+func CanaryServiceName(application *platformv1alpha1.Application) string {
+	return suffixedName(application.Name, "-canary")
+}
+
+// AnalysisTemplateName returns the per-Application AnalysisTemplate name.
+func AnalysisTemplateName(application *platformv1alpha1.Application) string {
+	return suffixedName(application.Name, "-analysis")
+}
+
+// ServiceMonitorName returns the per-Application ServiceMonitor name.
+func ServiceMonitorName(application *platformv1alpha1.Application) string {
+	return suffixedName(application.Name, "-monitor")
+}
+
+// PrometheusRuleName returns the per-Application PrometheusRule name.
+func PrometheusRuleName(application *platformv1alpha1.Application) string {
+	return suffixedName(application.Name, "-alerts")
+}
+
+func suffixedName(name, suffix string) string {
+	candidate := name + suffix
+	if len(candidate) <= 63 {
+		return candidate
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(candidate)))[:8]
+	prefixLength := 63 - len(suffix) - len(digest) - 1
+	return name[:prefixLength] + "-" + digest + suffix
 }
 
 // TeamNamespaceName returns the deterministic namespace managed for a Team.

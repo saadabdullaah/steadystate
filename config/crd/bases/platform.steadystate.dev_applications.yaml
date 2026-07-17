@@ -263,6 +263,9 @@ spec:
             - reliability
             - resources
             type: object
+            x-kubernetes-validations:
+            - message: canary strategy requires observability.metrics=true
+              rule: self.deployment.strategy != 'canary' || self.observability.metrics
           status:
             properties:
               activeVersion:

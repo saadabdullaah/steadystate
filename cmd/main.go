@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 
+	rolloutsv1alpha1 "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -23,6 +24,7 @@ var managerScheme = runtime.NewScheme()
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(managerScheme))
 	utilruntime.Must(platformv1alpha1.AddToScheme(managerScheme))
+	utilruntime.Must(rolloutsv1alpha1.AddToScheme(managerScheme))
 	utilruntime.Must(gatewayv1.Install(managerScheme))
 }
 

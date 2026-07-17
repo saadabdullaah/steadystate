@@ -14,10 +14,16 @@ import (
 func Deployment(application *platformv1alpha1.Application) *appsv1.Deployment {
 	labels := Labels(application)
 	selectors := SelectorLabels(application)
+	templateLabels := Labels(application)
+	templateLabels[VersionLabelKey] = application.Spec.Image.Tag
+	replicas := application.Spec.Runtime.Replicas.Min
+	if application.Spec.Deployment.Strategy == platformv1alpha1.DeploymentStrategyCanary {
+		replicas = 0
+	}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: application.Name, Namespace: application.Namespace, Labels: labels},
 		Spec: appsv1.DeploymentSpec{
-			Replicas: ptr.To(application.Spec.Runtime.Replicas.Min),
+			Replicas: ptr.To(replicas),
 			Selector: &metav1.LabelSelector{MatchLabels: selectors},
 			Strategy: appsv1.DeploymentStrategy{
 				Type: appsv1.RollingUpdateDeploymentStrategyType,
@@ -27,7 +33,7 @@ func Deployment(application *platformv1alpha1.Application) *appsv1.Deployment {
 				},
 			},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: templateLabels},
 				Spec: corev1.PodSpec{
 					AutomountServiceAccountToken: ptr.To(false),
 					SecurityContext: &corev1.PodSecurityContext{

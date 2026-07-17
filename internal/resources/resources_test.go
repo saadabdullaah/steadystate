@@ -2,6 +2,8 @@ package resources
 
 import (
 	"encoding/json"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,8 +22,38 @@ func TestNamingAndHostname(t *testing.T) {
 	if got, want := ConfigMapName(app), "payments-config"; got != want {
 		t.Fatalf("ConfigMapName=%q, want %q", got, want)
 	}
+	if got, want := StableServiceName(app), "payments-stable"; got != want {
+		t.Fatalf("StableServiceName=%q, want %q", got, want)
+	}
+	if got, want := CanaryServiceName(app), "payments-canary"; got != want {
+		t.Fatalf("CanaryServiceName=%q, want %q", got, want)
+	}
 	if got, want := Hostname(app), "payments.demo.steadystate.localtest.me"; got != want {
 		t.Fatalf("Hostname=%q, want %q", got, want)
+	}
+}
+
+func TestSuffixedNamesAreDNSLabelSafe(t *testing.T) {
+	t.Parallel()
+	app := testApplication()
+	app.Name = strings.Repeat("a", 63)
+	for _, named := range []struct {
+		name   string
+		suffix string
+	}{
+		{name: ConfigMapName(app), suffix: "-config"},
+		{name: StableServiceName(app), suffix: "-stable"},
+		{name: CanaryServiceName(app), suffix: "-canary"},
+		{name: AnalysisTemplateName(app), suffix: "-analysis"},
+		{name: ServiceMonitorName(app), suffix: "-monitor"},
+		{name: PrometheusRuleName(app), suffix: "-alerts"},
+	} {
+		if len(named.name) > 63 || !strings.HasSuffix(named.name, named.suffix) {
+			t.Fatalf("suffix-safe name %q is invalid", named.name)
+		}
+		if !regexp.MustCompile(`-[0-9a-f]{8}` + regexp.QuoteMeta(named.suffix) + `$`).MatchString(named.name) {
+			t.Fatalf("suffix-safe name %q lacks its eight-character hash", named.name)
+		}
 	}
 }
 
@@ -39,6 +71,9 @@ func TestGeneratedResources(t *testing.T) {
 	if *deployment.Spec.Replicas != 2 || deployment.Spec.Strategy.Type != appsv1.RollingUpdateDeploymentStrategyType || container.Image != "example.test/payments:v1.2.3" {
 		t.Fatalf("unexpected Deployment: %#v", deployment.Spec)
 	}
+	if deployment.Spec.Template.Labels[VersionLabelKey] != "v1.2.3" {
+		t.Fatalf("Deployment template lacks version identity: %#v", deployment.Spec.Template.Labels)
+	}
 	if container.LivenessProbe.HTTPGet.Path != "/healthz" || container.ReadinessProbe.HTTPGet.Path != "/readyz" || *container.SecurityContext.AllowPrivilegeEscalation || !*container.SecurityContext.ReadOnlyRootFilesystem || !*container.SecurityContext.RunAsNonRoot {
 		t.Fatalf("Deployment hardening or probes are incomplete: %#v", container)
 	}
@@ -49,6 +84,9 @@ func TestGeneratedResources(t *testing.T) {
 	service := Service(app)
 	if service.Spec.Ports[0].Port != 80 || service.Spec.Ports[0].TargetPort.IntVal != 9090 {
 		t.Fatalf("unexpected Service: %#v", service.Spec)
+	}
+	if service.Labels[ServiceRoleLabelKey] != "base" {
+		t.Fatalf("base Service lacks its monitoring role: %#v", service.Labels)
 	}
 
 	route := HTTPRoute(app)
