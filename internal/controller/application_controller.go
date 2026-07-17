@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	rolloutsv1alpha1 "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -118,7 +119,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if unsupported := applicationlogic.UnsupportedFeatures(app); len(unsupported) > 0 {
-		message := "unsupported Phase 1 capabilities requested: " + strings.Join(unsupported, ", ")
+		message := "unsupported capabilities requested: " + strings.Join(unsupported, ", ")
 		changed, err := r.patchStatus(ctx, app, degradedStatus(app, "UnsupportedFeature", message))
 		if changed {
 			r.event(app, corev1.EventTypeWarning, "UnsupportedFeature", message)
@@ -126,7 +127,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	deployment, route, mutated, err := r.reconcileChildren(ctx, app)
+	runtimeState, err := r.reconcileRuntimeChildren(ctx, app)
 	if err != nil {
 		message := fmt.Sprintf("failed to reconcile owned resources: %v", err)
 		_, statusErr := r.patchStatus(ctx, app, degradedStatus(app, "ReconciliationFailed", message))
@@ -148,14 +149,23 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, digestErr
 	}
 
-	desiredStatus, routeRejected := workloadStatus(app, deployment, route, digestResolution, sourceRevision)
+	var desiredStatus platformv1alpha1.ApplicationStatus
+	var routeRejected bool
+	switch {
+	case app.Spec.Deployment.Strategy == platformv1alpha1.DeploymentStrategyCanary:
+		desiredStatus, routeRejected = canaryWorkloadStatus(app, runtimeState, digestResolution, sourceRevision)
+	case runtimeState.migrating:
+		desiredStatus = strategyMigrationStatus(app, runtimeState.migrationDetail)
+	default:
+		desiredStatus, routeRejected = workloadStatus(app, runtimeState.deployment, runtimeState.route, digestResolution, sourceRevision)
+	}
 	statusChanged, err := r.patchStatus(ctx, app, desiredStatus)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if routeRejected && statusChanged {
 		r.event(app, corev1.EventTypeWarning, "RouteRejected", "HTTPRoute was rejected by the shared Gateway")
-	} else if mutated || statusChanged {
+	} else if runtimeState.mutated || statusChanged {
 		r.event(app, corev1.EventTypeNormal, "Reconciled", "Application resources and status were reconciled")
 	}
 	return ctrl.Result{}, nil
@@ -206,70 +216,13 @@ func validateApplicationTenancy(app *platformv1alpha1.Application, namespace *co
 	return nil
 }
 
-func (r *ApplicationReconciler) reconcileChildren(ctx context.Context, app *platformv1alpha1.Application) (*appsv1.Deployment, *gatewayv1.HTTPRoute, bool, error) {
-	mutated := false
-
-	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: resources.ConfigMapName(app), Namespace: app.Namespace}}
-	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, configMap, func() error {
-		desired := resources.ConfigMap(app)
-		mergeLabels(&configMap.ObjectMeta, desired.Labels)
-		configMap.Data = desired.Data
-		return controllerutil.SetControllerReference(app, configMap, r.Scheme)
-	})
-	if err != nil {
-		return nil, nil, mutated, fmt.Errorf("config map: %w", err)
-	}
-	mutated = mutated || op != controllerutil.OperationResultNone
-
-	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace}}
-	op, err = controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
-		desired := resources.Deployment(app)
-		mergeLabels(&deployment.ObjectMeta, desired.Labels)
-		if deployment.CreationTimestamp.IsZero() {
-			deployment.Spec = desired.Spec
-		} else if err := mutateDeployment(deployment, desired); err != nil {
-			return err
-		}
-		return controllerutil.SetControllerReference(app, deployment, r.Scheme)
-	})
-	if err != nil {
-		return nil, nil, mutated, fmt.Errorf("deployment: %w", err)
-	}
-	mutated = mutated || op != controllerutil.OperationResultNone
-
-	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace}}
-	op, err = controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
-		desired := resources.Service(app)
-		mergeLabels(&service.ObjectMeta, desired.Labels)
-		service.Spec.Selector = desired.Spec.Selector
-		service.Spec.Ports = desired.Spec.Ports
-		return controllerutil.SetControllerReference(app, service, r.Scheme)
-	})
-	if err != nil {
-		return nil, nil, mutated, fmt.Errorf("service: %w", err)
-	}
-	mutated = mutated || op != controllerutil.OperationResultNone
-
-	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace}}
-	op, err = controllerutil.CreateOrUpdate(ctx, r.Client, route, func() error {
-		desired := resources.HTTPRoute(app)
-		mergeLabels(&route.ObjectMeta, desired.Labels)
-		route.Spec = desired.Spec
-		return controllerutil.SetControllerReference(app, route, r.Scheme)
-	})
-	if err != nil {
-		return nil, nil, mutated, fmt.Errorf("HTTP route: %w", err)
-	}
-	mutated = mutated || op != controllerutil.OperationResultNone
-
-	return deployment, route, mutated, nil
-}
-
-func mutateDeployment(current, desired *appsv1.Deployment) error {
+func mutateDeployment(current, desired *appsv1.Deployment, manageReplicas bool) error {
 	if current.Spec.Selector != nil && !apiequality.Semantic.DeepEqual(current.Spec.Selector, desired.Spec.Selector) {
 		return fmt.Errorf("immutable selector does not match the Application identity")
 	}
-	current.Spec.Replicas = desired.Spec.Replicas
+	if manageReplicas {
+		current.Spec.Replicas = desired.Spec.Replicas
+	}
 	current.Spec.Selector = desired.Spec.Selector
 	current.Spec.Strategy = desired.Spec.Strategy
 	mergeStringMap(&current.Spec.Template.Labels, desired.Spec.Template.Labels)
@@ -489,6 +442,12 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&gatewayv1.HTTPRoute{}).
+		Owns(&rolloutsv1alpha1.Rollout{}).
+		Owns(&rolloutsv1alpha1.AnalysisTemplate{}).
+		Owns(monitoringWatchObject("ServiceMonitor")).
+		Owns(monitoringWatchObject("PrometheusRule")).
+		Watches(&rolloutsv1alpha1.AnalysisRun{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
+		Watches(&appsv1.ReplicaSet{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForNamespace)).
 		Watches(&platformv1alpha1.Team{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForTeam)).

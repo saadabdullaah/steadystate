@@ -23,8 +23,7 @@ const (
 	prometheusRuleAPIVersion = "monitoring.coreos.com/v1"
 )
 
-// Rollout builds the typed Argo Rollout for a canary Application. Runtime
-// reconciliation remains gated until the controller checkpoint.
+// Rollout builds the typed Argo Rollout for a canary Application.
 func Rollout(application *platformv1alpha1.Application) *rolloutsv1alpha1.Rollout {
 	pluginConfig, err := json.Marshal(map[string]string{
 		"httpRoute": CanaryHTTPRouteName(application),

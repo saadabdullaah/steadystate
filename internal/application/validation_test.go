@@ -92,7 +92,7 @@ func TestUnsupportedFeaturesAreOrdered(t *testing.T) {
 	app.Spec.Observability.Metrics = true
 	app.Spec.Security.NetworkIsolation = true
 	got := UnsupportedFeatures(app)
-	want := []string{"deployment.strategy=canary", "observability.metrics", "security.networkIsolation"}
+	want := []string{"security.networkIsolation"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}

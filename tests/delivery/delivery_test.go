@@ -113,6 +113,27 @@ func TestDemoTelemetryImageContract(t *testing.T) {
 	}
 }
 
+func TestPhase4DemoProgressiveDeliveryContract(t *testing.T) {
+	root := repositoryRoot(t)
+	manifest := read(t, filepath.Join(root, "gitops", "applications", "demo", "application.yaml"))
+	for _, value := range []string{"strategy: canary", "automaticRollback: true", "metrics: true"} {
+		if !strings.Contains(manifest, value) {
+			t.Errorf("Phase 4 demo manifest is missing %q", value)
+		}
+	}
+	for _, weight := range []string{"10", "25", "50", "100"} {
+		if strings.Count(manifest, "- weight: "+weight+"\n        pause: 30s") != 1 {
+			t.Errorf("Phase 4 demo manifest must contain exactly one %s%%/30s step", weight)
+		}
+	}
+	phase3 := read(t, filepath.Join(root, "scripts", "phase3-acceptance.ps1"))
+	for _, value := range []string{"strategy: rolling", "strategy: canary", "metrics: false", "metrics: true"} {
+		if !strings.Contains(phase3, value) {
+			t.Errorf("Phase 3 acceptance rolling override is missing %q", value)
+		}
+	}
+}
+
 func TestDemoVersionBumpGate(t *testing.T) {
 	root := repositoryRoot(t)
 	ci := read(t, filepath.Join(root, ".github", "workflows", "ci.yml"))

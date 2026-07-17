@@ -251,6 +251,11 @@ function Set-DemoManifest {
         [Parameter(Mandatory)][string]$SnapshotName
     )
     $content = Get-Content -Raw -LiteralPath $ManifestPath -Encoding UTF8
+    # Keep the Phase 3 regression on its original rolling-delivery contract
+    # after the repository default advances to progressive delivery.
+    $content = [regex]::Replace($content, '(?m)^    strategy: canary$', '    strategy: rolling')
+    $content = [regex]::Replace($content, '(?ms)^    steps:\r?\n(?:      - weight: [0-9]+\r?\n        pause: [^\r\n]+\r?\n)+', '')
+    $content = [regex]::Replace($content, '(?m)^    metrics: true$', '    metrics: false')
     $repositoryPattern = '(?m)^    repository: .+$'
     $tagPattern = '(?m)^    tag: v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$'
     if ([regex]::Matches($content, $repositoryPattern).Count -ne 1 -or

@@ -587,6 +587,7 @@ func TestPhase4FoundationWorkflowContracts(t *testing.T) {
 	root := repositoryRoot(t)
 	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase4.yml")))
 	script := string(readFile(t, filepath.Join(root, "scripts", "progressive-delivery.ps1")))
+	controllerScript := string(readFile(t, filepath.Join(root, "scripts", "phase4-controller-test.ps1")))
 	for _, token := range []string{
 		"name: Phase 4 acceptance",
 		"timeout-minutes: 75",
@@ -624,6 +625,30 @@ func TestPhase4FoundationWorkflowContracts(t *testing.T) {
 	cleanup := strings.Index(workflow, "Undeploy GitOps foundation")
 	if diagnostics < 0 || diagnostics >= upload || upload >= cleanup {
 		t.Fatal("Phase 4 diagnostics, artifact, and cleanup ordering is invalid")
+	}
+	for _, token := range []string{
+		"Prove controller progression and reversible migrations",
+		".artifacts/phase4/controller/",
+		"rolling-to-canary-zero-downtime",
+		"bad-canary-automatic-rollback",
+		"canary-to-rolling-zero-downtime",
+	} {
+		if !strings.Contains(workflow, token) {
+			t.Errorf("Phase 4 controller workflow is missing %q", token)
+		}
+	}
+	for _, token := range []string{
+		"Start-ContinuousLoad",
+		"Set-ApplicationSpec -Strategy canary -Tag $BadTag",
+		"CanaryAnalysisFailed",
+		"Assert-CanaryRouteStable",
+		"Set-ApplicationSpec -Strategy rolling -Tag $GoodTag",
+		"Save-Snapshots -Name 'failure'",
+		"Write-Evidence -Result failed",
+	} {
+		if !strings.Contains(controllerScript, token) {
+			t.Errorf("Phase 4 controller proof is missing %q", token)
+		}
 	}
 }
 
