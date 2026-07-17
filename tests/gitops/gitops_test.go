@@ -323,6 +323,9 @@ func TestProgressiveDeliveryValuesAreFrozenAndMinimal(t *testing.T) {
 		"defaultRules:\n  create: false",
 		"GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: \"true\"",
 		"auth.anonymous:",
+		"prometheusOperator:\n  tls:\n    enabled: false",
+		"memory: 320Mi",
+		"memory: 448Mi",
 	} {
 		if !strings.Contains(monitoring, token) {
 			t.Errorf("monitoring values are missing %q", token)
@@ -718,6 +721,10 @@ func assertExternalChartApplication(t *testing.T, objects []map[string]any, name
 	assertString(t, valuesSource, repositoryURL, "repoURL")
 	assertString(t, valuesSource, testRevision, "targetRevision")
 	assertString(t, valuesSource, "values", "ref")
+	if name == "monitoring" {
+		options := stringSlice(t, application, "spec", "syncPolicy", "syncOptions")
+		assertExactSet(t, options, []string{"ServerSideApply=true"})
+	}
 }
 
 func assertAutomated(t *testing.T, application map[string]any, expectPrune bool) {

@@ -110,8 +110,8 @@ function Invoke-VerifyFoundation {
     )) {
         if (-not $combined.Contains($required)) { throw "Rendered foundation is missing required contract: $required" }
     }
-    if ($combined -match 'rollouts-dashboard' -or $combined -match 'kind: DaemonSet') {
-        throw 'Rendered foundation unexpectedly enables a dashboard or DaemonSet.'
+    if ($combined -match 'rollouts-dashboard' -or $combined -match 'kind: DaemonSet' -or $combined -match 'monitoring-kube-prometheus-admission') {
+        throw 'Rendered foundation unexpectedly enables a Rollouts dashboard, DaemonSet, or admission TLS secret.'
     }
     Write-Host 'Progressive-delivery pins, checksums, and deterministic chart values are verified.'
 }
@@ -128,6 +128,10 @@ function Wait-ArgoApplication {
         if ($exitCode -eq 0 -and $raw) {
             $application = (($raw -join [Environment]::NewLine) | ConvertFrom-Json)
             if ($application.status.sync.status -eq 'Synced' -and $application.status.health.status -eq 'Healthy') { return }
+            if ($application.status.operationState.phase -eq 'Failed') {
+                $message = [string]$application.status.operationState.message
+                throw "Argo Application $Name sync failed: $message"
+            }
         }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)

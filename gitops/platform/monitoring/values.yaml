@@ -34,11 +34,19 @@ grafana:
     enabled: false
   resources:
     requests:
-      cpu: 25m
-      memory: 64Mi
-    limits:
-      cpu: 100m
+      cpu: 50m
       memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 320Mi
+  sidecar:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 24Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
 
 kubeApiServer:
   enabled: false
@@ -74,9 +82,11 @@ kube-state-metrics:
       memory: 48Mi
     limits:
       cpu: 100m
-      memory: 96Mi
+      memory: 80Mi
 
 prometheusOperator:
+  tls:
+    enabled: false
   admissionWebhooks:
     enabled: false
   resources:
@@ -85,7 +95,7 @@ prometheusOperator:
       memory: 64Mi
     limits:
       cpu: 200m
-      memory: 192Mi
+      memory: 160Mi
 
 prometheus:
   enabled: true
@@ -101,7 +111,7 @@ prometheus:
     resources:
       requests:
         cpu: 100m
-        memory: 256Mi
+        memory: 192Mi
       limits:
         cpu: 500m
-        memory: 768Mi
+        memory: 448Mi
