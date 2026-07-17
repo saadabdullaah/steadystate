@@ -72,6 +72,9 @@ var _ = Describe("Progressive Application reconciliation", Ordered, func() {
 		Expect(rollout.Spec.WorkloadRef.ScaleDown).To(Equal(rolloutsv1alpha1.ScaleDownNever))
 		Expect(rollout.Spec.Strategy.Canary.Steps).To(BeEmpty())
 		Expect(rollout.Spec.Strategy.Canary.TrafficRouting).To(BeNil())
+		Expect(rollout.Spec.Strategy.Canary.ScaleDownDelaySeconds).To(BeNil())
+		Expect(rollout.Spec.Strategy.Canary.AbortScaleDownDelaySeconds).To(BeNil())
+		Expect(rollout.Spec.Strategy.Canary.MinPodsPerReplicaSet).To(BeNil())
 		rollout.Status.ObservedGeneration = strconv.FormatInt(rollout.Generation, 10)
 		rollout.Status.Phase = rolloutsv1alpha1.RolloutPhaseHealthy
 		rollout.Status.StableRS = "baseline-hash"
@@ -90,6 +93,9 @@ var _ = Describe("Progressive Application reconciliation", Ordered, func() {
 		Expect(rollout.Spec.WorkloadRef.ScaleDown).To(Equal(rolloutsv1alpha1.ScaleDownOnSuccess))
 		Expect(rollout.Spec.Strategy.Canary.Steps).NotTo(BeEmpty())
 		Expect(rollout.Spec.Strategy.Canary.TrafficRouting).NotTo(BeNil())
+		Expect(rollout.Spec.Strategy.Canary.ScaleDownDelaySeconds).NotTo(BeNil())
+		Expect(rollout.Spec.Strategy.Canary.AbortScaleDownDelaySeconds).NotTo(BeNil())
+		Expect(rollout.Spec.Strategy.Canary.MinPodsPerReplicaSet).NotTo(BeNil())
 
 		Expect(k8sClient.Get(ctx, key, route)).To(Succeed())
 		route.Labels[gatewayPluginInProgressLabel] = gatewayPluginInProgressValue

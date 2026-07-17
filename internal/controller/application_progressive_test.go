@@ -7,6 +7,7 @@ import (
 	rolloutsv1alpha1 "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
@@ -125,6 +126,25 @@ func TestRolloutReadinessRequiresCurrentObservedGeneration(t *testing.T) {
 	rollout.Status.ObservedGeneration = "6"
 	if rolloutHealthy(rollout, 1) {
 		t.Fatal("stale Rollout status was accepted")
+	}
+}
+
+func TestBootstrapRolloutUsesRouterFreePinnedContract(t *testing.T) {
+	t.Parallel()
+	object := resources.RolloutObject(unitCanaryApplication())
+	if err := configureBootstrapRollout(object); err != nil {
+		t.Fatal(err)
+	}
+	rollout := &rolloutsv1alpha1.Rollout{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, rollout); err != nil {
+		t.Fatal(err)
+	}
+	canary := rollout.Spec.Strategy.Canary
+	if canary == nil || len(canary.Steps) != 0 || canary.TrafficRouting != nil || canary.ScaleDownDelaySeconds != nil || canary.AbortScaleDownDelaySeconds != nil || canary.MinPodsPerReplicaSet != nil {
+		t.Fatalf("bootstrap Rollout retained traffic-routing-only fields: %#v", canary)
+	}
+	if rollout.Spec.WorkloadRef == nil || rollout.Spec.WorkloadRef.ScaleDown != rolloutsv1alpha1.ScaleDownNever {
+		t.Fatalf("bootstrap Rollout did not retain the serving Deployment: %#v", rollout.Spec.WorkloadRef)
 	}
 }
 
