@@ -133,6 +133,9 @@ var _ = Describe("Progressive Application reconciliation", Ordered, func() {
 		Expect(k8sClient.Create(ctx, app)).To(Succeed())
 		reconcile(ctx, k8sClient, app)
 		reconcile(ctx, k8sClient, app)
+		// Give API-server defaults and the status subresource one full
+		// reconciliation barrier before measuring the steady state.
+		reconcile(ctx, k8sClient, app)
 
 		counting := &countingClient{Client: k8sClient}
 		reconcile(ctx, counting, app)

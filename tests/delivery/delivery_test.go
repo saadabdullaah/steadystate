@@ -58,6 +58,10 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 		"all good and bad semver/SHA tags must exist or all must be absent",
 		"go test -race ./apps/demo-app/...",
 		"manifest unknown|not found",
+		"detect-demo-runtime-impact",
+		"needs: impact",
+		"if: needs.impact.outputs.release == 'true'",
+		"'apps/demo-app/VERSION' -in $changed",
 	}
 	for _, value := range required {
 		if !strings.Contains(workflow, value) {

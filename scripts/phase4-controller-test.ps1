@@ -139,7 +139,13 @@ export default function () {
 }
 "@
     Write-Utf8 -Path $scriptPath -Content $script
-    return Start-Process -FilePath 'k6' -ArgumentList @('run', $scriptPath) -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
+    $platform = if ($env:OS -eq 'Windows_NT') { 'windows-amd64' } else { 'linux-amd64' }
+    $binary = if ($env:OS -eq 'Windows_NT') { 'k6.exe' } else { 'k6' }
+    $k6Path = Join-Path $Root ".tools/bin/$platform/$binary"
+    if (-not (Test-Path -LiteralPath $k6Path -PathType Leaf)) {
+        throw "The checksum-verified k6 binary is missing at $k6Path."
+    }
+    return Start-Process -FilePath $k6Path -ArgumentList @('run', $scriptPath) -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
 }
 
 function Assert-CanaryRouteStable {
