@@ -70,6 +70,8 @@ var _ = Describe("Progressive Application reconciliation", Ordered, func() {
 		rollout := &rolloutsv1alpha1.Rollout{}
 		Expect(k8sClient.Get(ctx, key, rollout)).To(Succeed())
 		Expect(rollout.Spec.WorkloadRef.ScaleDown).To(Equal(rolloutsv1alpha1.ScaleDownNever))
+		Expect(rollout.Spec.Strategy.Canary.Steps).To(BeEmpty())
+		Expect(rollout.Spec.Strategy.Canary.TrafficRouting).To(BeNil())
 		rollout.Status.ObservedGeneration = strconv.FormatInt(rollout.Generation, 10)
 		rollout.Status.Phase = rolloutsv1alpha1.RolloutPhaseHealthy
 		rollout.Status.StableRS = "baseline-hash"
@@ -86,6 +88,8 @@ var _ = Describe("Progressive Application reconciliation", Ordered, func() {
 		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix(":v0.4.0"), "desired candidate must start only after the route cutover is observed")
 		Expect(k8sClient.Get(ctx, key, rollout)).To(Succeed())
 		Expect(rollout.Spec.WorkloadRef.ScaleDown).To(Equal(rolloutsv1alpha1.ScaleDownOnSuccess))
+		Expect(rollout.Spec.Strategy.Canary.Steps).NotTo(BeEmpty())
+		Expect(rollout.Spec.Strategy.Canary.TrafficRouting).NotTo(BeNil())
 
 		Expect(k8sClient.Get(ctx, key, route)).To(Succeed())
 		route.Labels[gatewayPluginInProgressLabel] = gatewayPluginInProgressValue
@@ -132,9 +136,6 @@ var _ = Describe("Progressive Application reconciliation", Ordered, func() {
 		}
 		Expect(k8sClient.Create(ctx, app)).To(Succeed())
 		reconcile(ctx, k8sClient, app)
-		reconcile(ctx, k8sClient, app)
-		// Give API-server defaults and the status subresource one full
-		// reconciliation barrier before measuring the steady state.
 		reconcile(ctx, k8sClient, app)
 
 		counting := &countingClient{Client: k8sClient}

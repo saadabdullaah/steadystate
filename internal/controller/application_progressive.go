@@ -252,6 +252,12 @@ func (r *ApplicationReconciler) reconcileProgressiveResources(ctx context.Contex
 		if err := unstructured.SetNestedField(rolloutObject.Object, rolloutsv1alpha1.ScaleDownNever, "spec", "workloadRef", "scaleDown"); err != nil {
 			return mutated, fmt.Errorf("hold serving Deployment during migration: %w", err)
 		}
+		// Bootstrap a healthy Rollout baseline without asking the Gateway
+		// plugin to mutate a route that still targets the serving Deployment.
+		// Full canary steps and traffic routing are activated only after the
+		// two-backend route has been accepted.
+		unstructured.RemoveNestedField(rolloutObject.Object, "spec", "strategy", "canary", "steps")
+		unstructured.RemoveNestedField(rolloutObject.Object, "spec", "strategy", "canary", "trafficRouting")
 	}
 	for _, desired := range []*unstructured.Unstructured{resources.ServiceMonitor(app), resources.PrometheusRule(app), rolloutObject} {
 		changed, reconcileErr := r.reconcileUnstructured(ctx, app, desired)
