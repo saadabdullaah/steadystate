@@ -442,6 +442,9 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 	if strings.Count(workflow, "timeout-minutes: 5") < 3 {
 		t.Fatal("every destructive Nightly cleanup step must have a five-minute outer timeout")
 	}
+	if strings.Count(workflow, "docs/demonstrations/phase3-gitops-delivery.gif") < 3 {
+		t.Fatal("Phase 3 GIF must be verified, completeness-checked, and uploaded")
+	}
 	for _, token := range []string{
 		"Output docs/demonstrations/phase3-gitops-delivery.gif",
 		"scripts/phase3-acceptance.ps1",
@@ -464,6 +467,9 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 		if !strings.Contains(script, token) {
 			t.Errorf("Phase 3 acceptance script is missing %q", token)
 		}
+	}
+	if strings.Count(script, "Clear-Host") < 2 {
+		t.Error("Phase 3 acceptance must present a deterministic final result screen on success and failure")
 	}
 }
 

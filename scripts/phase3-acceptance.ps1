@@ -585,12 +585,15 @@ try {
     Save-ClusterEvidence
     $result = 'passed'
     Write-Evidence -EvidenceResult passed
+    Clear-Host
     Write-Host 'SteadyState Phase 3 GitOps delivery acceptance passed.' -ForegroundColor Cyan
     Write-Host 'PHASE3_ACCEPTANCE_RESULT_PASSED' -ForegroundColor Cyan
 } catch {
     $failureMessage = $_.Exception.Message
     try { Save-ClusterEvidence } catch { Write-Warning "Could not capture all Phase 3 cluster evidence: $($_.Exception.Message)" }
     Write-Evidence -EvidenceResult failed
+    Clear-Host
+    Write-Host "SteadyState Phase 3 GitOps delivery acceptance failed: $failureMessage" -ForegroundColor Red
     Write-Host 'PHASE3_ACCEPTANCE_RESULT_FAILED' -ForegroundColor Red
     throw
 } finally {

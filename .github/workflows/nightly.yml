@@ -274,6 +274,7 @@ jobs:
         shell: pwsh
         run: |
           $requiredFiles = @(
+            'docs/demonstrations/phase3-gitops-delivery.gif',
             '.artifacts/phase3/acceptance.json',
             '.artifacts/phase3/registry.json',
             '.artifacts/phase3/rendered/baseline.yaml',
