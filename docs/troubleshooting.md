@@ -118,6 +118,69 @@ Run the suite on a standard-profile cluster only after building, loading, deploy
 
 No evidence file is written when an assertion fails. Preserve the cluster until diagnostics are captured. For a direct-network failure, verify all `calico-node` replicas are Ready and inspect the three generated Team NetworkPolicies. For RBAC, compare `kubectl auth can-i` using `system:serviceaccount:team-orders:steadystate-team-owner` in both namespaces. For quota rejection, inspect `steadystate-quota` usage and the admission error. If Team deletion stalls, inspect the Team condition, Namespace ownership annotation, Application finalizers, and controller logs before changing any finalizer manually.
 
+## Argo CD route or login fails
+
+```powershell
+kubectl get httproute -n argocd argocd -o yaml
+kubectl get service,pods -n argocd
+kubectl get gateway -n steadystate-system steadystate -o yaml
+Invoke-WebRequest http://argocd.localtest.me:8080
+```
+
+The local route intentionally uses HTTP-only server mode through the loopback-bound shared Gateway. Confirm `argocd.localtest.me` resolves to `127.0.0.1`, the route reports `Accepted=True` and `ResolvedRefs=True`, and the `argocd` Namespace permits shared-Gateway traffic. The local username is `admin`. Retrieve the initial password directly from `argocd-initial-admin-secret` only in your interactive terminal; never paste it into workflow output, diagnostics, issues, or evidence.
+
+## Argo sync is OutOfSync or Progressing
+
+```powershell
+kubectl get applications.argoproj.io -n argocd
+kubectl get application.argoproj.io -n argocd steadystate-root -o yaml
+kubectl logs -n argocd deployment/argocd-repo-server --tail=200
+kubectl logs -n argocd statefulset/argocd-application-controller --tail=200
+.\scripts\dev.ps1 verify-gitops
+```
+
+All child Applications must target the exact revision resolved by the root. Check `status.sync.revision`, the root Helm `gitRevision` parameter, project destination and kind restrictions, and sync-wave ordering. Do not add `CreateNamespace`: the Team controller must create and mark the tenant Namespace before the namespaced Application is applied. Render failures should be reproduced with `verify-gitops` before changing live objects.
+
+## Argo health disagrees with Kubernetes status
+
+```powershell
+kubectl get team payments -o yaml
+kubectl get application.platform.steadystate.dev -n team-payments demo -o yaml
+kubectl get configmap -n argocd argocd-cm -o yaml
+kubectl get application.argoproj.io -n argocd payments -o yaml
+```
+
+Lua health treats a stale or missing `observedGeneration` as Progressing. A current Team requires `Ready=True`; a current SteadyState Application requires `Phase=Healthy` and `Ready=True`. `Phase=Degraded` must appear as Degraded in Argo. Confirm the health customizations remain in `argocd-cm` and that the Argo Application forwards child health.
+
+## Runtime digest or Git revision is missing
+
+```powershell
+kubectl get pods -n team-payments -l app.kubernetes.io/name=demo -o jsonpath='{range .items[*].status.containerStatuses[*]}{.name}{" "}{.imageID}{"\n"}{end}'
+kubectl get application.platform.steadystate.dev -n team-payments demo -o jsonpath='{.metadata.annotations.steadystate\.dev/source-revision}{"\n"}{.status.resolvedImageDigest}{"\n"}{.status.resolvedGitRevision}{"\n"}'
+```
+
+The active release is promoted only when ready desired Pods resolve to exactly one canonical SHA-256 digest. No digest keeps the Application Progressing; conflicting digests make it Degraded while preserving the last healthy tuple. The source annotation must be a full lowercase 40- or 64-character Git object ID. A revision-only change updates status without mutating or restarting the workload.
+
+## Public demo image cannot be pulled
+
+Verify the exact immutable tag at the [SteadyState demo-app package](https://github.com/saadabdullaah/steadystate/pkgs/container/steadystate-demo-app). The package must remain public for anonymous kind pulls. Do not substitute `latest`. If a semver or SHA tag already exists with a different digest, the release workflow intentionally fails closed; investigate the registry metadata instead of overwriting the tag.
+
+## Operator-generated children appear as Argo orphans
+
+This is expected. The tenant AppProject sets `orphanedResources.warn: false` because Argo owns only Team and SteadyState Application CRs. The operator exclusively owns generated Deployments, Services, ConfigMaps, and HTTPRoutes. Do not add those children to GitOps state or enable Argo pruning for the tenant Application.
+
+## Operator Pod is replaced during GitOps operation
+
+```powershell
+kubectl get application.argoproj.io -n argocd payments -o yaml
+kubectl get application.platform.steadystate.dev -n team-payments demo -o yaml
+kubectl get deployment,service,configmap,httproute -n team-payments -o wide
+kubectl rollout status deployment/steadystate-controller-manager -n steadystate-system --timeout=180s
+kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=200
+```
+
+The tenant Argo Application and data-plane resources should remain Healthy and retain their UIDs while the operator Deployment replaces its Pod. After restart, the controller must reconcile without generation or resource-version drift. Capture diagnostics before manually changing finalizers or managed children.
+
 ## Reset
 
 ```powershell

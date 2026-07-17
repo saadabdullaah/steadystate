@@ -318,10 +318,158 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 		}
 	}
 
-	for _, command := range []string{"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s", "payments -n argocd --ignore-not-found=true --wait=true --timeout=60s", "argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s"} {
+	for _, command := range []string{
+		"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s",
+		"payments -n argocd --ignore-not-found=true --wait=true --timeout=60s",
+		"applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s",
+		"teams.platform.steadystate.dev --all --ignore-not-found=true --wait=true --timeout=180s",
+		"namespace steadystate-unmanaged --ignore-not-found=true --wait=true --timeout=120s",
+		"argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s",
+		"config/default') --ignore-not-found=true --wait=true --timeout=180s",
+	} {
 		if !strings.Contains(text, command) {
 			t.Fatalf("GitOps teardown is missing bounded delete %q", command)
 		}
+	}
+	devScript, err := os.ReadFile(filepath.Join(root, "scripts", "dev.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{
+		"applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s",
+		"config/default') --ignore-not-found=true --wait=true --timeout=180s",
+	} {
+		if !strings.Contains(string(devScript), command) {
+			t.Fatalf("operator teardown is missing bounded cleanup %q", command)
+		}
+	}
+}
+
+func TestPhase3HostedAcceptanceContracts(t *testing.T) {
+	root := repositoryRoot(t)
+	read := func(path string) string {
+		t.Helper()
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content)
+	}
+	workflow := read(filepath.Join(root, ".github", "workflows", "nightly.yml"))
+	script := read(filepath.Join(root, "scripts", "phase3-acceptance.ps1"))
+	tape := read(filepath.Join(root, "docs", "demonstrations", "phase3-gitops-delivery.tape"))
+
+	workflowTokens := []string{
+		"timeout-minutes: 90",
+		"persist-credentials: false",
+		"actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+		"client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}",
+		"private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}",
+		"permission-contents: write",
+		"phase3-acceptance-${{ github.sha }}",
+		"if-no-files-found: error",
+		"Delete Phase 3 acceptance branch",
+	}
+	for _, token := range workflowTokens {
+		if !strings.Contains(workflow, token) {
+			t.Errorf("Phase 3 Nightly workflow is missing %q", token)
+		}
+	}
+
+	requiredChecks := []string{
+		"pinned-argocd-installed-dex-absent",
+		"argocd-ui-route-reachable",
+		"root-platform-team-applications-healthy",
+		"baseline-version-reachable",
+		"git-commit-detected-without-kubectl-delivery-mutation",
+		"candidate-synchronized-and-served",
+		"runtime-digest-matches-ghcr-linux-amd64",
+		"resolved-git-revision-matches-candidate",
+		"kubernetes-and-argo-degraded-on-rejection",
+		"recovery-restores-healthy",
+		"argo-health-matches-kubernetes-status",
+		"operator-outage-preserves-resource-uids",
+		"operator-restart-reconciles-without-drift",
+		"argo-ownership-boundary",
+	}
+	for _, check := range requiredChecks {
+		if !strings.Contains(script, check) || !strings.Contains(workflow, check) {
+			t.Errorf("Phase 3 acceptance check %q is not implemented and verified", check)
+		}
+	}
+
+	for _, token := range []string{
+		"acceptance/phase3-",
+		"docs/demonstrations/phase1-self-heal.gif",
+		"schemaVersion = 1",
+		"sourceSHA = $SourceRevision",
+		"baselineCommit = $baselineCommit",
+		"candidateCommit = $candidateCommit",
+		"rejectionCommit = $rejectionCommit",
+		"recoveryCommit = $recoveryCommit",
+		"anonymousPull = $true",
+		"linux/amd64",
+		"RepositoryNotAllowed",
+		"control-plane=controller-manager",
+		"Assert-ArgoOwnershipBoundary",
+		"[Alias('o')]",
+		"Invoke-External git commit -m $Message | Out-Host",
+		"Write-Evidence -EvidenceResult failed",
+	} {
+		if !strings.Contains(script, token) {
+			t.Errorf("Phase 3 acceptance script is missing %q", token)
+		}
+	}
+
+	candidateStart := strings.Index(script, "$candidateCommit = New-AcceptanceCommit")
+	outageStart := strings.Index(script, "$outageBefore = Get-ResourceSnapshot")
+	if candidateStart < 0 || outageStart <= candidateStart {
+		t.Fatal("could not locate the Git-only delivery interval")
+	}
+	deliveryInterval := script[candidateStart:outageStart]
+	for _, mutation := range []string{"kubectl apply", "kubectl patch", "kubectl delete"} {
+		if strings.Contains(deliveryInterval, mutation) {
+			t.Errorf("delivery interval contains Kubernetes mutation %q", mutation)
+		}
+	}
+
+	diagnostics := strings.Index(workflow, "Capture Phase 3 acceptance diagnostics")
+	branchCleanup := strings.Index(workflow, "Delete Phase 3 acceptance branch")
+	clusterCleanup := strings.Index(workflow, "Undeploy GitOps foundation")
+	if diagnostics < 0 || diagnostics >= branchCleanup || branchCleanup >= clusterCleanup {
+		t.Fatal("Phase 3 diagnostics and cleanup ordering is invalid")
+	}
+	if strings.Count(workflow, "timeout-minutes: 5") < 3 {
+		t.Fatal("every destructive Nightly cleanup step must have a five-minute outer timeout")
+	}
+	if strings.Count(workflow, "docs/demonstrations/phase3-gitops-delivery.gif") < 3 {
+		t.Fatal("Phase 3 GIF must be verified, completeness-checked, and uploaded")
+	}
+	for _, token := range []string{
+		"Output docs/demonstrations/phase3-gitops-delivery.gif",
+		"scripts/phase3-acceptance.ps1",
+		"Set WaitTimeout 20m",
+		"Set Framerate 2",
+		"Set PlaybackSpeed 8.0",
+		"Wait+Screen /PHASE3_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
+	} {
+		if !strings.Contains(tape, token) {
+			t.Errorf("Phase 3 VHS tape is missing %q", token)
+		}
+	}
+	for _, token := range []string{
+		"-not $_.metadata.deletionTimestamp",
+		"$_.status.phase -eq 'Running'",
+		"$_.type -eq 'Ready' -and $_.status -eq 'True'",
+		"PHASE3_ACCEPTANCE_RESULT_PASSED",
+		"PHASE3_ACCEPTANCE_RESULT_FAILED",
+	} {
+		if !strings.Contains(script, token) {
+			t.Errorf("Phase 3 acceptance script is missing %q", token)
+		}
+	}
+	if strings.Count(script, "Clear-Host") < 2 {
+		t.Error("Phase 3 acceptance must present a deterministic final result screen on success and failure")
 	}
 }
 

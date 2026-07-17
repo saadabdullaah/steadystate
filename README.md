@@ -2,26 +2,32 @@
 
 SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, and tested recovery without requiring a cloud account.
 
-Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization.
+Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health.
 
-> Status: Phase 0, Phase 1, and Phase 2 are complete. The annotated `v0.1.0` release preserves the Application-operator baseline, and `v0.2.0` is the fully validated Team-tenancy release. Phase 3 GitOps planning is next.
+> Status: Phases 0 through 3 are complete. `v0.1.0` preserves the Application-operator baseline, `v0.2.0` is the Team-tenancy release, and the fully hosted-validated GitOps platform is the `v0.3.0` release line.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Dev["Windows developer workflow"] --> PS["PowerShell command contract"]
-    PS --> Tools["Pinned repository-local tools"]
-    PS --> Kind["kind cluster"]
-    Kind --> Calico["Calico CNI and NetworkPolicy"]
-    PS --> Team["Team CR"]
-    Team --> Boundary["team-&lt;name&gt; Namespace / quota / RBAC / NetworkPolicy"]
-    Boundary --> CR["Application CR"]
-    CR --> Operator["SteadyState operator"]
+    Dev["Developer"] --> Commit["Git commit"]
+    Commit --> Release["Demo release workflow"]
+    Release --> GHCR["Immutable GHCR image"]
+    Release --> PR["GitOps version-bump PR"]
+    PR --> Git["Merged monorepo desired state"]
+    Git --> Argo["Argo CD app-of-apps"]
+    Argo --> Team["Team and Application CRs"]
+    Argo --> Operator["SteadyState operator"]
+    Team --> Operator
     Operator --> Children["Deployment / Service / ConfigMap / HTTPRoute"]
+    GHCR --> Children
     Children --> Gateway["Gateway API and Envoy Gateway"]
     Gateway --> App["Reachable application"]
-    CI["GitHub Actions"] --> PS
+    PS["Windows PowerShell command contract"] --> Tools["Pinned repository-local tools"]
+    PS --> Kind["kind cluster"]
+    Kind --> Calico["Calico CNI and NetworkPolicy"]
+    Kind --> Argo
+    CI["GitHub Actions acceptance"] --> PS
 ```
 
 The repository is a monorepo. Operator APIs and controllers live alongside the CLI, local platform configuration, GitOps state, demo application, tests, and documentation so an end-to-end change can be reviewed in one pull request.
@@ -84,6 +90,23 @@ The hosted integration workflow records the same destructive self-heal test agai
 
 [Hosted acceptance run 29260395935](https://github.com/saadabdullaah/steadystate/actions/runs/29260395935) recreated the Deployment in 0.300 seconds, repaired replica drift in 0.435 seconds, preserved Gateway reachability, and garbage-collected every owned child after releasing the finalizer.
 
+To deploy and verify the Phase 3 GitOps path on a standard-profile cluster:
+
+```powershell
+.\scripts\dev.ps1 build-images
+.\scripts\dev.ps1 load-images
+.\scripts\dev.ps1 deploy-gitops -Profile standard
+.\scripts\dev.ps1 test-gitops -Profile standard
+Invoke-WebRequest http://argocd.localtest.me:8080
+.\scripts\dev.ps1 undeploy-gitops
+```
+
+Argo CD manages its configuration, the operator, the payments Team, and the demo `Application`. The operator remains the sole owner of generated workload children. The `Application` status exposes the active `resolvedImageDigest` and `resolvedGitRevision`, while Argo health customizations translate current Team and Application conditions into Healthy, Progressing, or Degraded.
+
+![Phase 3 GitOps commit-to-cluster demonstration](docs/demonstrations/phase3-gitops-delivery.gif)
+
+[Hosted Phase 3 acceptance run 29570255069](https://github.com/saadabdullaah/steadystate/actions/runs/29570255069) passed all 14 checks on `7f29303`. Artifact `8403532367` contains the 3,320,344-byte GIF, schema-versioned JSON, rendered GitOps state, registry metadata, Argo snapshots, controller logs, and cluster diagnostics; its SHA-256 is `0918fbb1c25b393291a6bd248d549f56027463d8befe3c495b7074b96b06f094`.
+
 Use `-Profile standard` for one worker or `-Profile full` for two workers. Override ports consistently when the defaults are occupied:
 
 ```powershell
@@ -99,8 +122,15 @@ make tools
 make test
 make bootstrap PROFILE=minimal
 make test-isolation PROFILE=standard
+make deploy-gitops PROFILE=standard
+make test-gitops PROFILE=standard
+make undeploy-gitops
 make destroy
 ```
+
+## Automated demo delivery
+
+`apps/demo-app/VERSION` is the authoritative strict semver. A runtime-affecting demo change merged to `main` must bump it. The serialized Demo release workflow tests and publishes `linux/amd64` images to the public [SteadyState demo-app package](https://github.com/saadabdullaah/steadystate/pkgs/container/steadystate-demo-app) under immutable semver and full-source-SHA tags, verifies tag reuse by digest, and uses the repository-scoped delivery GitHub App only to open or update the GitOps manifest PR. No mutable `latest` tag is published, and application delivery begins only after that PR is reviewed and merged.
 
 ## Commands
 
@@ -119,6 +149,9 @@ make destroy
 | `test-operator` | Create the sample Team and authorized Application, then verify it through Envoy Gateway |
 | `demo-self-heal` | Delete and drift owned resources, then prove repair and garbage collection |
 | `test-isolation` | Prove Phase 2 network, Gateway, RBAC, repository, namespace, quota, and Team-deletion boundaries |
+| `deploy-gitops` / `undeploy-gitops` | Reconcile or remove pinned Argo CD, its route, app-of-apps root, operator, Team, and demo Application |
+| `test-gitops` | Verify pinned Argo installation, Dex removal, UI routing, exact revision inheritance, health, and demo reachability |
+| `verify-gitops` | Render and structurally validate the Helm root, every Kustomize leaf, projects, sync policies, and ownership boundaries |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |
 

@@ -1,43 +1,43 @@
-# Architecture Through Phase 2 Tenancy
+# Architecture Through Phase 3 GitOps
 
 ```mermaid
 flowchart TB
+    subgraph Repository["GitHub monorepo and registry"]
+        Source["Demo source + VERSION"]
+        Release["Demo release workflow"]
+        GHCR["Immutable semver + SHA images"]
+        BotPR["Delivery App GitOps PR"]
+        Desired["Merged GitOps desired state"]
+        Source --> Release --> GHCR
+        Release --> BotPR --> Desired
+    end
     subgraph Host["Windows host"]
-        Git["Git for Windows"]
         Dev["scripts/dev.ps1"]
         Tools["Repository-local tools"]
         Docker["Docker Desktop"]
+        Dev --> Tools
+        Dev --> Docker
     end
     subgraph Cluster["kind: steadystate"]
-        CP["Control plane"]
-        Workers["0-2 workers"]
         Calico["Calico CNI"]
-        Manager["SteadyState controller manager"]
+        Argo["Argo CD root + projects + child Applications"]
         TeamCR["Team CR"]
         Boundary["Team Namespace / quota / RBAC / NetworkPolicy"]
-        AppCR["Application CR"]
-        Deployment["Deployment"]
-        Service["Service"]
-        ConfigMap["ConfigMap"]
-        Route["HTTPRoute"]
+        AppCR["SteadyState Application CR"]
+        Manager["SteadyState controller manager"]
+        Children["Deployment / Service / ConfigMap / HTTPRoute"]
         EG["Envoy Gateway / shared Gateway"]
+        Argo --> TeamCR
+        Argo --> AppCR
+        Argo --> Manager
+        TeamCR --> Manager --> Boundary
+        AppCR --> Manager --> Children --> EG
     end
-    Dev --> Tools
-    Dev --> Docker
     Docker --> Cluster
-    CP --> Calico
-    Workers --> Calico
-    TeamCR --> Manager
-    Manager --> Boundary
-    Boundary --> AppCR
-    AppCR --> Manager
-    Manager --> Deployment
-    Manager --> Service
-    Manager --> ConfigMap
-    Manager --> Route
-    Deployment --> Service --> Route --> EG
+    Desired --> Argo
+    GHCR --> Children
     Dev -->|"127.0.0.1:8080 to NodePort 30080"| EG
-    Git -. "never uses WSL" .-> Dev
+    Dev -->|"argocd.localtest.me"| Argo
 ```
 
 ## Profiles
@@ -50,7 +50,7 @@ flowchart TB
 
 Every profile disables kindnet and installs Calico, making NetworkPolicy behavior observable. Envoy Gateway provides the maintained Gateway API implementation for north-south traffic.
 
-Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. GitOps, progressive delivery, policy admission, observability, and stateful recovery remain later phases.
+Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Progressive delivery, policy admission, observability, and stateful recovery remain later phases.
 
 ## Team tenancy contract
 
@@ -63,6 +63,20 @@ Applications are authorized from the Namespace boundary, never from the descript
 `test-isolation` treats Calico readiness as a prerequisite rather than assuming a timeout proves NetworkPolicy enforcement. On a standard-profile cluster it creates payments and orders Teams and runs both Applications concurrently within their independent quotas. An orders Pod must time out against the payments Service ClusterIP, while both applications must remain reachable through their distinct shared-Gateway hostnames. The orders ServiceAccount is authorized for own-namespace Secrets and denied in payments. Forbidden repositories and Applications outside verified Team namespaces must report their exact rejection conditions without creating children, and ResourceQuota admission must reject a Pod above the Team ceiling. Finally, deleting orders must remove its Namespace while payments retains the same Namespace UID and remains Ready and reachable.
 
 The command writes evidence only after every assertion passes. Hosted Nightly validation checks the evidence revision, profile, unique named checks, and result before uploading the JSON, rendered fixtures, and cluster diagnostics.
+
+## GitOps revision and sync contract
+
+The root Argo Application renders the small `gitops/clusters/local` Helm chart. Its resolved `$ARGOCD_APP_REVISION` becomes the `gitRevision` value for every child, preventing a root, platform, and tenant graph from mixing commits. Platform configuration and the operator use automated prune and self-heal. The tenant Application uses automated self-heal without prune; safe Git-driven Team deletion remains a later lifecycle design. `CreateNamespace` is intentionally absent because the Team controller must establish and own `team-payments` before the namespaced Application is admitted.
+
+Sync waves establish AppProjects at `-30`, Argo configuration at `-20`, the operator at `-10`, the tenant child at `0`, the Team CR at `-1`, and the SteadyState Application CR at `0`. Kustomize substitutes the exact Argo source revision into `steadystate.dev/source-revision` on the Team and Application leaves. Argo ignores controller-owned status and finalizers with `RespectIgnoreDifferences=true`.
+
+The root project can create only AppProjects and Argo Applications in `argocd`. The platform project permits the exact cluster- and namespace-scoped kinds needed by Argo configuration and `config/default`. The tenant project permits only cluster-scoped Teams and namespaced SteadyState Applications from this repository into `team-*`; orphan warnings are disabled because generated application children belong to the operator.
+
+## Argo health and ownership contract
+
+Argo uses annotation-based resource tracking. Lua health customizations require current observed generations: a Team is Healthy only with `Ready=True`; a SteadyState Application is Healthy only with `Phase=Healthy` and `Ready=True`, while `Phase=Degraded` maps to Degraded. The Argo Application customization forwards child health so the app-of-apps root waits truthfully.
+
+Argo owns platform configuration, the operator installation, Team CRs, and Application CRs. It never owns the generated Deployment, Service, ConfigMap, or HTTPRoute. Those children retain controller owner references and remain solely reconciled by SteadyState. This prevents competing field managers and lets an operator outage leave the tenant Argo Application Healthy while the data plane and CR UIDs remain stable.
 
 ## Application ownership contract
 
