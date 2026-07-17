@@ -146,11 +146,48 @@ function Wait-RouteWeights {
         if ($LASTEXITCODE -eq 0 -and $raw) {
             $route = (($raw -join [Environment]::NewLine) | ConvertFrom-Json)
             $backends = @($route.spec.rules[0].backendRefs)
-            if ($backends.Count -eq 2 -and [int]$backends[0].weight -eq $Stable -and [int]$backends[1].weight -eq $Canary) { return }
+            $conditions = @($route.status.parents | ForEach-Object { $_.conditions })
+            $accepted = @($conditions | Where-Object {
+                $_.type -eq 'Accepted' -and $_.status -eq 'True' -and [long]$_.observedGeneration -eq [long]$route.metadata.generation
+            }).Count -gt 0
+            $resolved = @($conditions | Where-Object {
+                $_.type -eq 'ResolvedRefs' -and $_.status -eq 'True' -and [long]$_.observedGeneration -eq [long]$route.metadata.generation
+            }).Count -gt 0
+            if ($backends.Count -eq 2 -and [int]$backends[0].weight -eq $Stable -and [int]$backends[1].weight -eq $Canary -and $accepted -and $resolved) { return }
         }
         Start-Sleep -Seconds 2
     } while ((Get-Date) -lt $deadline)
     throw "HTTPRoute did not reach weights stable=$Stable canary=$Canary."
+}
+
+function Wait-GatewayResponses {
+    param([string[]]$AllowedVersions, [int]$TimeoutSeconds = 120)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $consecutive = 0
+    do {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/" -Headers @{ Host = 'phase4-foundation.steadystate.localtest.me' } -TimeoutSec 5
+            $body = $response.Content | ConvertFrom-Json
+            if ($response.StatusCode -eq 200 -and $body.version -in $AllowedVersions) {
+                $consecutive++
+                if ($consecutive -ge 5) { return }
+            } else {
+                $consecutive = 0
+            }
+        } catch {
+            $consecutive = 0
+        }
+        Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+    throw "Gateway did not return five consecutive expected responses for versions: $($AllowedVersions -join ', ')."
+}
+
+function Save-FoundationSnapshots {
+    param([Parameter(Mandatory)][string]$Name)
+    $snapshotRoot = Join-Path $ArtifactRoot 'snapshots'
+    New-Item -ItemType Directory -Force -Path $snapshotRoot | Out-Null
+    & kubectl get rollout,replicaset,pod,service,endpoint,httproute -n steadystate-rollouts-proof -o yaml *> (Join-Path $snapshotRoot "$Name.yaml")
+    & kubectl logs -n argo-rollouts deployment/argo-rollouts --all-containers --tail=1000 *> (Join-Path $snapshotRoot "$Name-argo-rollouts.log")
 }
 
 function Measure-Traffic {
@@ -205,26 +242,29 @@ function Invoke-TestFoundation {
 
         Invoke-External kubectl apply -f (Join-Path $Root 'tests/progressive-delivery/foundation-baseline.yaml')
         Invoke-External kubectl-argo-rollouts status foundation -n steadystate-rollouts-proof --timeout 300s
+        Wait-GatewayResponses -AllowedVersions @('stable')
         Invoke-External kubectl apply -f (Join-Path $Root 'tests/progressive-delivery/foundation-candidate.yaml')
 
         $started = Get-Date
         Wait-RouteWeights -Stable 90 -Canary 10
+        Wait-GatewayResponses -AllowedVersions @('stable','candidate')
         $measurements.Add((Measure-Traffic -ExpectedCanaryPercent 10))
         $checks.Add([ordered]@{name='gateway-plugin-enforced-90-10';status='passed';elapsedSeconds=[Math]::Round(((Get-Date)-$started).TotalSeconds,3)})
 
         Invoke-External kubectl-argo-rollouts promote foundation -n steadystate-rollouts-proof
         $started = Get-Date
         Wait-RouteWeights -Stable 50 -Canary 50
+        Wait-GatewayResponses -AllowedVersions @('stable','candidate')
         $measurements.Add((Measure-Traffic -ExpectedCanaryPercent 50))
         $checks.Add([ordered]@{name='envoy-traffic-followed-50-50';status='passed';elapsedSeconds=[Math]::Round(((Get-Date)-$started).TotalSeconds,3)})
 
         Invoke-External kubectl-argo-rollouts promote foundation -n steadystate-rollouts-proof --full
         Invoke-External kubectl-argo-rollouts status foundation -n steadystate-rollouts-proof --timeout 300s
         Wait-RouteWeights -Stable 100 -Canary 0
+        Wait-GatewayResponses -AllowedVersions @('candidate')
         $checks.Add([ordered]@{name='rollout-promoted-stable-100';status='passed';elapsedSeconds=0})
 
-        New-Item -ItemType Directory -Force -Path (Join-Path $ArtifactRoot 'snapshots') | Out-Null
-        & kubectl get rollout,replicaset,pod,service,httproute -n steadystate-rollouts-proof -o yaml *> (Join-Path $ArtifactRoot 'snapshots/foundation.yaml')
+        Save-FoundationSnapshots -Name foundation
         & kubectl get prometheus,alertmanager,servicemonitor -n monitoring -o yaml *> (Join-Path $ArtifactRoot 'snapshots/monitoring.yaml')
         $evidence = [ordered]@{
             schemaVersion = 1
@@ -245,6 +285,9 @@ function Invoke-TestFoundation {
         if (-not $EvidencePath) { $EvidencePath = Join-Path $ArtifactRoot 'evidence.json' }
         Write-Utf8 -Path $EvidencePath -Content (($evidence | ConvertTo-Json -Depth 8) + [Environment]::NewLine)
         Write-Host "Hosted foundation compatibility passed. Evidence: $EvidencePath"
+    } catch {
+        try { Save-FoundationSnapshots -Name foundation-failure } catch { Write-Warning "Could not capture foundation failure snapshots: $($_.Exception.Message)" }
+        throw
     } finally {
         & kubectl delete namespace steadystate-rollouts-proof --ignore-not-found=true --wait=true --timeout=180s
     }

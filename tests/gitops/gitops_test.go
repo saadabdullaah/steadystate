@@ -609,6 +609,9 @@ func TestPhase4FoundationWorkflowContracts(t *testing.T) {
 		"Measure-Traffic -ExpectedCanaryPercent 50",
 		"Samples = 500",
 		"[Math]::Abs($observed - $ExpectedCanaryPercent) -gt 8",
+		"Wait-GatewayResponses -AllowedVersions @('stable')",
+		"observedGeneration -eq [long]$route.metadata.generation",
+		"Save-FoundationSnapshots -Name foundation-failure",
 		"finally",
 		"delete namespace steadystate-rollouts-proof",
 	} {
