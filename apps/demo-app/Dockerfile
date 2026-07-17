@@ -8,6 +8,8 @@ COPY apps/demo-app ./apps/demo-app
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/demo-app ./apps/demo-app
 
 FROM scratch
+ARG INJECT_ERROR_RATE=0
+ENV INJECT_ERROR_RATE=${INJECT_ERROR_RATE}
 USER 65532:65532
 COPY --from=builder /out/demo-app /demo-app
 ENTRYPOINT ["/demo-app"]
