@@ -60,3 +60,28 @@ func TeamAllowEnvoyNetworkPolicy(team *platformv1alpha1.Team) *networkingv1.Netw
 		},
 	}
 }
+
+// TeamAllowMonitoringNetworkPolicy permits only Prometheus to scrape the named application HTTP port.
+func TeamAllowMonitoringNetworkPolicy(team *platformv1alpha1.Team) *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: teamObjectMeta(team, AllowMonitoringPolicyName),
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{{
+				From: []networkingv1.NetworkPolicyPeer{{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+						"kubernetes.io/metadata.name": "monitoring",
+					}},
+					PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+						"app.kubernetes.io/name": "prometheus",
+					}},
+				}},
+				Ports: []networkingv1.NetworkPolicyPort{{
+					Protocol: ptr.To(corev1.ProtocolTCP),
+					Port:     ptr.To(intstr.FromString("http")),
+				}},
+			}},
+		},
+	}
+}

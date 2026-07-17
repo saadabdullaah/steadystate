@@ -43,6 +43,7 @@ var _ = Describe("Team reconciler", Ordered, func() {
 			&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: resources.DefaultDenyPolicyName, Namespace: resources.TeamNamespaceName(team)}},
 			&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: resources.AllowDNSPolicyName, Namespace: resources.TeamNamespaceName(team)}},
 			&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: resources.AllowEnvoyPolicyName, Namespace: resources.TeamNamespaceName(team)}},
+			&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: resources.AllowMonitoringPolicyName, Namespace: resources.TeamNamespaceName(team)}},
 		}
 		for _, object := range objects {
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed(), object.GetName())

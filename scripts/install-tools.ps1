@@ -138,6 +138,14 @@ if ($IsWindowsHost) {
     $helmExtract = Join-Path $ToolsRoot 'helm-extract'
     Expand-Archive -LiteralPath $helmArchive -DestinationPath $helmExtract -Force
     Copy-Item -Force (Join-Path $helmExtract 'windows-amd64/helm.exe') (Join-Path $BinDir 'helm.exe')
+
+    Install-DirectBinary -Name 'kubectl-argo-rollouts' -Url "https://github.com/argoproj/argo-rollouts/releases/download/v$($v.ARGO_ROLLOUTS_VERSION)/kubectl-argo-rollouts-windows-amd64" -ExpectedSha256 $v.ARGO_ROLLOUTS_CLI_WINDOWS_AMD64_SHA256
+
+    $k6Archive = Join-Path $DownloadDir "k6-v$($v.K6_VERSION)-windows-amd64.zip"
+    Get-VerifiedFile -Url "https://github.com/grafana/k6/releases/download/v$($v.K6_VERSION)/k6-v$($v.K6_VERSION)-windows-amd64.zip" -Destination $k6Archive -ExpectedSha256 $v.K6_WINDOWS_AMD64_SHA256
+    $k6Extract = Join-Path $ToolsRoot 'k6-extract'
+    Expand-Archive -LiteralPath $k6Archive -DestinationPath $k6Extract -Force
+    Copy-Item -Force (Join-Path $k6Extract "k6-v$($v.K6_VERSION)-windows-amd64/k6.exe") (Join-Path $BinDir 'k6.exe')
 } else {
     $goArchive = Join-Path $DownloadDir "go$($v.GO_VERSION).linux-amd64.tar.gz"
     Get-VerifiedFile -Url "https://go.dev/dl/go$($v.GO_VERSION).linux-amd64.tar.gz" -Destination $goArchive -ExpectedSha256 $v.GO_LINUX_AMD64_SHA256
@@ -162,6 +170,16 @@ if ($IsWindowsHost) {
     & tar -xzf $helmArchive -C $ToolsRoot
     Copy-Item -Force (Join-Path $ToolsRoot 'linux-amd64/helm') (Join-Path $BinDir 'helm')
     & chmod +x (Join-Path $BinDir 'helm')
+
+    Install-DirectBinary -Name 'kubectl-argo-rollouts' -Url "https://github.com/argoproj/argo-rollouts/releases/download/v$($v.ARGO_ROLLOUTS_VERSION)/kubectl-argo-rollouts-linux-amd64" -ExpectedSha256 $v.ARGO_ROLLOUTS_CLI_LINUX_AMD64_SHA256
+
+    $k6Archive = Join-Path $DownloadDir "k6-v$($v.K6_VERSION)-linux-amd64.tar.gz"
+    Get-VerifiedFile -Url "https://github.com/grafana/k6/releases/download/v$($v.K6_VERSION)/k6-v$($v.K6_VERSION)-linux-amd64.tar.gz" -Destination $k6Archive -ExpectedSha256 $v.K6_LINUX_AMD64_SHA256
+    $k6Extract = Join-Path $ToolsRoot 'k6-extract'
+    New-Item -ItemType Directory -Force -Path $k6Extract | Out-Null
+    & tar -xzf $k6Archive -C $k6Extract
+    Copy-Item -Force (Join-Path $k6Extract "k6-v$($v.K6_VERSION)-linux-amd64/k6") (Join-Path $BinDir 'k6')
+    & chmod +x (Join-Path $BinDir 'k6')
 }
 
 if (-not $BaseOnly) {

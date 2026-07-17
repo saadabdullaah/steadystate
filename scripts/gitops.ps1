@@ -275,7 +275,7 @@ function Invoke-Test {
     Add-PassedCheck $checks 'pinned-argocd-ready-dex-absent' $started "Pinned manifest $(Split-Path -Leaf $manifest) is running and all five Dex objects are absent."
 
     $applications = @{}
-    foreach ($name in @('argocd-configuration','steadystate-operator','payments','steadystate-root')) {
+    foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root')) {
         $started = Get-Date
         $applications[$name] = Wait-ArgoApplication -Name $name
         Add-PassedCheck $checks "argocd-application-$name-healthy" $started "$name is Synced and Healthy."
@@ -360,7 +360,7 @@ function Invoke-Undeploy {
 
     if ($argoApplicationsExist) {
         Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s
-        Invoke-External kubectl delete application.argoproj.io payments -n argocd --ignore-not-found=true --wait=true --timeout=60s
+        Invoke-External kubectl delete application.argoproj.io payments monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=120s
     }
     if ($steadyStateApplicationsExist) {
         Invoke-External kubectl delete applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s
@@ -373,6 +373,13 @@ function Invoke-Undeploy {
         Invoke-External kubectl delete application.argoproj.io argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s
     }
     Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true --wait=true --timeout=180s
+    Invoke-External kubectl delete namespace monitoring argo-rollouts --ignore-not-found=true --wait=true --timeout=180s
+    Invoke-External kubectl delete customresourcedefinition `
+        rollouts.argoproj.io analysisruns.argoproj.io analysistemplates.argoproj.io clusteranalysistemplates.argoproj.io experiments.argoproj.io `
+        alertmanagerconfigs.monitoring.coreos.com alertmanagers.monitoring.coreos.com podmonitors.monitoring.coreos.com probes.monitoring.coreos.com `
+        prometheusagents.monitoring.coreos.com prometheuses.monitoring.coreos.com prometheusrules.monitoring.coreos.com scrapeconfigs.monitoring.coreos.com `
+        servicemonitors.monitoring.coreos.com thanosrulers.monitoring.coreos.com `
+        --ignore-not-found=true --wait=true --timeout=180s
     Invoke-External kubectl delete -n argocd -f $manifest --ignore-not-found=true --wait=false
     Invoke-External kubectl delete namespace argocd --ignore-not-found=true --wait=true --timeout=180s
     Write-Host 'Argo CD and SteadyState GitOps-managed demo resources are undeployed.'

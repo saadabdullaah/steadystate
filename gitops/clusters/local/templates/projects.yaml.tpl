@@ -26,14 +26,20 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-30"
 spec:
-  description: Argo configuration and the SteadyState operator.
+  description: Argo configuration, monitoring, Rollouts, and the SteadyState operator.
   sourceRepos:
     - {{ .Values.repoURL | quote }}
+    - https://argoproj.github.io/argo-helm
+    - https://prometheus-community.github.io/helm-charts
   destinations:
     - server: https://kubernetes.default.svc
       namespace: argocd
     - server: https://kubernetes.default.svc
       namespace: steadystate-system
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+    - server: https://kubernetes.default.svc
+      namespace: argo-rollouts
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
@@ -47,7 +53,11 @@ spec:
     - group: ""
       kind: ConfigMap
     - group: ""
+      kind: Secret
+    - group: ""
       kind: ServiceAccount
+    - group: ""
+      kind: Service
     - group: apps
       kind: Deployment
     - group: gateway.networking.k8s.io
@@ -58,6 +68,12 @@ spec:
       kind: Role
     - group: rbac.authorization.k8s.io
       kind: RoleBinding
+    - group: monitoring.coreos.com
+      kind: Alertmanager
+    - group: monitoring.coreos.com
+      kind: Prometheus
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject

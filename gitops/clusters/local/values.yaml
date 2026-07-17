@@ -3,3 +3,5 @@ gitRevision: main
 bootstrapRoot: false
 rootTargetRevision: main
 operatorImage: ghcr.io/saadabdullaah/steadystate-operator:v0.3.0
+argoRolloutsChartVersion: 2.41.0
+kubePrometheusStackChartVersion: 87.16.1

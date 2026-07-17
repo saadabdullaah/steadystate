@@ -56,18 +56,27 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"--set-string", "gitRevision="+testRevision,
 	)
 	objects := decodeManifests(t, rendered)
-	if len(objects) != 6 {
-		t.Fatalf("root chart rendered %d objects, want 6", len(objects))
+	if len(objects) != 8 {
+		t.Fatalf("root chart rendered %d objects, want 8", len(objects))
 	}
 
-	for _, name := range []string{"root", "platform", "tenant"} {
+	for _, name := range []string{"root", "tenant"} {
 		project := findObject(t, objects, "AppProject", name)
 		assertAnnotation(t, project, "argocd.argoproj.io/sync-wave", "-30")
 		assertOnlyRepository(t, project)
 	}
+	platformProject := findObject(t, objects, "AppProject", "platform")
+	assertAnnotation(t, platformProject, "argocd.argoproj.io/sync-wave", "-30")
+	assertExactSet(t, stringSlice(t, platformProject, "spec", "sourceRepos"), []string{
+		repositoryURL,
+		"https://argoproj.github.io/argo-helm",
+		"https://prometheus-community.github.io/helm-charts",
+	})
 
 	expectedWaves := map[string]string{
 		"argocd-configuration": "-20",
+		"monitoring":           "-18",
+		"argo-rollouts":        "-17",
 		"steadystate-operator": "-10",
 		"payments":             "0",
 	}
@@ -81,6 +90,9 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	assertString(t, argocd, "gitops/platform", "spec", "source", "path")
 	assertString(t, argocd, testRevision, "spec", "source", "targetRevision")
 	assertAutomated(t, argocd, true)
+
+	assertExternalChartApplication(t, objects, "monitoring", "https://prometheus-community.github.io/helm-charts", "kube-prometheus-stack", "87.16.1", "gitops/platform/monitoring/values.yaml", "monitoring")
+	assertExternalChartApplication(t, objects, "argo-rollouts", "https://argoproj.github.io/argo-helm", "argo-rollouts", "2.41.0", "gitops/platform/rollouts/values.yaml", "argo-rollouts")
 
 	operator := findObject(t, objects, "Application", "steadystate-operator")
 	assertString(t, operator, repositoryURL, "spec", "source", "repoURL")
@@ -155,6 +167,30 @@ func TestProjectRestrictions(t *testing.T) {
 			t.Fatalf("platform project unexpectedly permits %s", forbidden)
 		}
 	}
+	assertExactSet(t, platformKinds, []string{
+		"/Namespace",
+		"apiextensions.k8s.io/CustomResourceDefinition",
+		"rbac.authorization.k8s.io/ClusterRole",
+		"rbac.authorization.k8s.io/ClusterRoleBinding",
+		"/ConfigMap",
+		"/Secret",
+		"/ServiceAccount",
+		"/Service",
+		"apps/Deployment",
+		"gateway.networking.k8s.io/HTTPRoute",
+		"networking.k8s.io/NetworkPolicy",
+		"rbac.authorization.k8s.io/Role",
+		"rbac.authorization.k8s.io/RoleBinding",
+		"monitoring.coreos.com/Alertmanager",
+		"monitoring.coreos.com/Prometheus",
+		"monitoring.coreos.com/ServiceMonitor",
+	})
+	platformDestinations := nestedSlice(t, platform, "spec", "destinations")
+	actualDestinations := make([]string, 0, len(platformDestinations))
+	for _, raw := range platformDestinations {
+		actualDestinations = append(actualDestinations, raw.(map[string]any)["namespace"].(string))
+	}
+	assertExactSet(t, actualDestinations, []string{"argocd", "steadystate-system", "monitoring", "argo-rollouts"})
 
 	tenant := findObject(t, objects, "AppProject", "tenant")
 	assertExactSet(t, resourceKinds(t, tenant, "clusterResourceWhitelist"), []string{"platform.steadystate.dev/Team"})
@@ -249,6 +285,49 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	parent := parentRefs[0].(map[string]any)
 	assertString(t, parent, "steadystate", "name")
 	assertString(t, parent, "steadystate-system", "namespace")
+	findObject(t, objects, "Namespace", "monitoring")
+	findObject(t, objects, "Namespace", "argo-rollouts")
+}
+
+func TestProgressiveDeliveryValuesAreFrozenAndMinimal(t *testing.T) {
+	root := repositoryRoot(t)
+	rollouts := string(readFile(t, filepath.Join(root, "gitops", "platform", "rollouts", "values.yaml")))
+	for _, token := range []string{
+		"gatewayapi-plugin-linux-amd64",
+		"v0.16.0",
+		"3f129e6a1ea948932f440b16dfb9eae636a065857eb27311928e5790593103c1",
+		"gatewayAPI: false",
+		"dashboard:\n  enabled: false",
+		"- httproutes",
+		"- patch",
+	} {
+		if !strings.Contains(rollouts, token) {
+			t.Errorf("Rollouts values are missing %q", token)
+		}
+	}
+	for _, provider := range []string{"istio", "smi", "ambassador", "awsLoadBalancerController", "awsAppMesh", "traefik", "apisix", "contour", "glooPlatform"} {
+		if !strings.Contains(rollouts, provider+": false") {
+			t.Errorf("provider %s is not disabled", provider)
+		}
+	}
+
+	monitoring := string(readFile(t, filepath.Join(root, "gitops", "platform", "monitoring", "values.yaml")))
+	for _, token := range []string{
+		"retention: 6h",
+		"scrapeInterval: 15s",
+		"evaluationInterval: 15s",
+		"serviceMonitorNamespaceSelector: {}",
+		"ruleNamespaceSelector: {}",
+		"nodeExporter:\n  enabled: false",
+		"prometheus-node-exporter:\n  enabled: false",
+		"defaultRules:\n  create: false",
+		"GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: \"true\"",
+		"auth.anonymous:",
+	} {
+		if !strings.Contains(monitoring, token) {
+			t.Errorf("monitoring values are missing %q", token)
+		}
+	}
 }
 
 func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
@@ -283,7 +362,7 @@ func TestGitOpsCommandsAreMirrored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops"} {
+	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery"} {
 		if !strings.Contains(string(makefile), command) {
 			t.Errorf("Makefile is missing %s", command)
 		}
@@ -320,7 +399,7 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 
 	for _, command := range []string{
 		"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s",
-		"payments -n argocd --ignore-not-found=true --wait=true --timeout=60s",
+		"payments monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=120s",
 		"applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s",
 		"teams.platform.steadystate.dev --all --ignore-not-found=true --wait=true --timeout=180s",
 		"namespace steadystate-unmanaged --ignore-not-found=true --wait=true --timeout=120s",
@@ -485,6 +564,61 @@ func TestArgoVersionAndChecksumPins(t *testing.T) {
 	if !regexp.MustCompile("(?m)^ARGO_CD_MANIFEST_SHA256=69114b8c9eb48a1d08598e6f654a0869b10ae902456ea4b70796cb563760f5ec$").MatchString(text) {
 		t.Fatal("Argo CD manifest checksum is not pinned")
 	}
+	for _, pin := range []string{
+		`ARGO_ROLLOUTS_CHART_VERSION=2.41.0`,
+		`ARGO_ROLLOUTS_VERSION=1.9.0`,
+		`GATEWAY_API_PLUGIN_VERSION=0.16.0`,
+		`KUBE_PROMETHEUS_STACK_VERSION=87.16.1`,
+		`K6_VERSION=2.1.0`,
+		`ARGO_ROLLOUTS_CHART_SHA256=ff53d617efb369cd07acc595309e7fa73a602576375e0a52a78dab1e2d970df5`,
+		`GATEWAY_API_PLUGIN_LINUX_AMD64_SHA256=3f129e6a1ea948932f440b16dfb9eae636a065857eb27311928e5790593103c1`,
+		`KUBE_PROMETHEUS_STACK_CHART_SHA256=153c69faae66a313dc07ed36f77741fd17cc7da86d3d7790b34bf4d4902fe7f4`,
+	} {
+		if !regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(pin) + `$`).MatchString(text) {
+			t.Errorf("missing frozen Phase 4 pin %s", pin)
+		}
+	}
+}
+
+func TestPhase4FoundationWorkflowContracts(t *testing.T) {
+	root := repositoryRoot(t)
+	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase4.yml")))
+	script := string(readFile(t, filepath.Join(root, "scripts", "progressive-delivery.ps1")))
+	for _, token := range []string{
+		"name: Phase 4 acceptance",
+		"timeout-minutes: 75",
+		"cancel-in-progress: false",
+		"phase4-foundation-${{ github.sha }}",
+		"if-no-files-found: error",
+		"Capture foundation diagnostics",
+		"Undeploy GitOps foundation",
+		"Destroy cluster",
+	} {
+		if !strings.Contains(workflow, token) {
+			t.Errorf("Phase 4 workflow is missing %q", token)
+		}
+	}
+	for _, token := range []string{
+		"gateway-plugin-enforced-90-10",
+		"envoy-traffic-followed-50-50",
+		"rollout-promoted-stable-100",
+		"Measure-Traffic -ExpectedCanaryPercent 10",
+		"Measure-Traffic -ExpectedCanaryPercent 50",
+		"Samples = 500",
+		"[Math]::Abs($observed - $ExpectedCanaryPercent) -gt 8",
+		"finally",
+		"delete namespace steadystate-rollouts-proof",
+	} {
+		if !strings.Contains(script, token) {
+			t.Errorf("Phase 4 foundation script is missing %q", token)
+		}
+	}
+	diagnostics := strings.Index(workflow, "Capture foundation diagnostics")
+	upload := strings.Index(workflow, "Upload foundation artifact")
+	cleanup := strings.Index(workflow, "Undeploy GitOps foundation")
+	if diagnostics < 0 || diagnostics >= upload || upload >= cleanup {
+		t.Fatal("Phase 4 diagnostics, artifact, and cleanup ordering is invalid")
+	}
 }
 
 func run(t *testing.T, directory, name string, arguments ...string) []byte {
@@ -565,6 +699,27 @@ func assertOnlyRepository(t *testing.T, project map[string]any) {
 	}
 }
 
+func assertExternalChartApplication(t *testing.T, objects []map[string]any, name, chartRepo, chart, revision, valuesPath, namespace string) {
+	t.Helper()
+	application := findObject(t, objects, "Application", name)
+	assertAutomated(t, application, true)
+	assertString(t, application, namespace, "spec", "destination", "namespace")
+	sources := nestedSlice(t, application, "spec", "sources")
+	if len(sources) != 2 {
+		t.Fatalf("%s has %d sources, want 2", name, len(sources))
+	}
+	chartSource := sources[0].(map[string]any)
+	assertString(t, chartSource, chartRepo, "repoURL")
+	assertString(t, chartSource, chart, "chart")
+	assertString(t, chartSource, revision, "targetRevision")
+	valueFiles := stringSlice(t, chartSource, "helm", "valueFiles")
+	assertExactSet(t, valueFiles, []string{"$values/" + valuesPath})
+	valuesSource := sources[1].(map[string]any)
+	assertString(t, valuesSource, repositoryURL, "repoURL")
+	assertString(t, valuesSource, testRevision, "targetRevision")
+	assertString(t, valuesSource, "values", "ref")
+}
+
 func assertAutomated(t *testing.T, application map[string]any, expectPrune bool) {
 	t.Helper()
 	selfHeal, found, err := unstructured.NestedBool(application, "spec", "syncPolicy", "automated", "selfHeal")
@@ -590,6 +745,24 @@ func nestedSlice(t *testing.T, object map[string]any, fields ...string) []any {
 		t.Fatalf("%s missing: found=%v err=%v", strings.Join(fields, "."), found, err)
 	}
 	return value
+}
+
+func stringSlice(t *testing.T, object map[string]any, fields ...string) []string {
+	t.Helper()
+	value, found, err := unstructured.NestedStringSlice(object, fields...)
+	if err != nil || !found {
+		t.Fatalf("%s missing: found=%v err=%v", strings.Join(fields, "."), found, err)
+	}
+	return value
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return content
 }
 
 func resourceKinds(t *testing.T, project map[string]any, field string) []string {
