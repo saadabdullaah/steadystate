@@ -7,3 +7,4 @@
 | [0003](0003-envoy-gateway-and-gateway-api.md) | Use Envoy Gateway and Gateway API |
 | [0004](0004-deterministic-application-reconciliation.md) | Use deterministic, watch-driven Application reconciliation |
 | [0005](0005-label-based-team-tenancy.md) | Use label-based Team tenancy and finalizer-controlled Namespace deletion |
+| [0006](0006-argo-cd-app-of-apps-ownership.md) | Use Argo CD app-of-apps with exact revision inheritance and explicit ownership boundaries |
