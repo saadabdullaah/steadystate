@@ -629,6 +629,9 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"$lastObserved -ge 99",
 		"CanaryAnalysisFailed",
 		"Wait-CandidateAlert",
+		"Get-MonitoringServiceName alertmanager",
+		"Get-MonitoringServiceName prometheus",
+		"app=kube-prometheus-stack-$Component",
 		"Measure-StableWindow",
 		"Assert-K6NoFailures 'promotion'",
 		"Assert-K6NoFailures 'final-migration'",
@@ -646,6 +649,15 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	clusterCleanup := strings.Index(workflow, "Undeploy GitOps")
 	if diagnostics < 0 || diagnostics >= upload || upload >= branchCleanup || branchCleanup >= clusterCleanup {
 		t.Fatal("Phase 4 diagnostics, artifact, and cleanup ordering is invalid")
+	}
+	for _, condition := range []string{
+		"id: promotion-verification",
+		"id: rollback-verification",
+		"steps.rollback-verification.outcome == 'success'",
+	} {
+		if !strings.Contains(workflow, condition) {
+			t.Errorf("Phase 4 workflow is missing truthful recording gate %q", condition)
+		}
 	}
 	gitDelivery := strings.Index(script, "} elseif ($Stage -eq 'Promote')")
 	if gitDelivery < 0 {

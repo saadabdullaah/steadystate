@@ -115,6 +115,7 @@ jobs:
         run: vhs docs/demonstrations/phase4-canary-promotion.tape
 
       - name: Verify promotion recording result
+        id: promotion-verification
         shell: pwsh
         run: |
           $state = Get-Content -Raw -LiteralPath .artifacts/phase4/acceptance/state.json | ConvertFrom-Json
@@ -132,6 +133,7 @@ jobs:
         run: vhs docs/demonstrations/phase4-automatic-rollback.tape
 
       - name: Verify rollback recording result
+        id: rollback-verification
         shell: pwsh
         run: |
           $evidence = Get-Content -Raw -LiteralPath .artifacts/phase4/acceptance/evidence.json | ConvertFrom-Json
@@ -146,7 +148,7 @@ jobs:
         run: ./scripts/dev.ps1 diagnostics
 
       - name: Capture failed-run evidence
-        if: always() && steps.prepare.outcome != 'skipped' && steps.rollback.outcome != 'success'
+        if: always() && steps.prepare.outcome != 'skipped' && (steps.promotion-verification.outcome != 'success' || steps.rollback-verification.outcome != 'success')
         continue-on-error: true
         shell: pwsh
         env:
@@ -157,7 +159,7 @@ jobs:
         run: ./scripts/phase4-acceptance.ps1 -Stage CaptureFailure -Profile standard
 
       - name: Verify acceptance evidence
-        if: steps.rollback.outcome == 'success'
+        if: steps.rollback-verification.outcome == 'success'
         shell: pwsh
         run: |
           foreach ($path in @(
@@ -224,7 +226,7 @@ jobs:
             '.artifacts/phase4/acceptance/state.json',
             '.artifacts/phase4/acceptance/registry.json'
           )
-          if ('${{ steps.rollback.outcome }}' -eq 'success') {
+          if ('${{ steps.rollback-verification.outcome }}' -eq 'success') {
             $required += @(
               'docs/demonstrations/phase4-canary-promotion.gif',
               'docs/demonstrations/phase4-automatic-rollback.gif',

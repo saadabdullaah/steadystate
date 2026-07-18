@@ -375,12 +375,20 @@ function Save-Snapshot {
     Save-Kubectl (Join-Path $ArtifactRoot "snapshots/$Name-argo.json") @('get','applications.argoproj.io','-n','argocd','-o','json')
 }
 
-function Get-ServiceName {
-    param([Parameter(Mandatory)][string]$Label)
-    $services = Get-KubernetesObject @('get','service','-n','monitoring','-l',$Label)
-    $name = @($services.items | Select-Object -First 1).metadata.name
-    if (-not $name) { throw "Monitoring service not found for $Label." }
-    return [string]$name
+function Get-MonitoringServiceName {
+    param([Parameter(Mandatory)][ValidateSet('alertmanager','prometheus')][string]$Component)
+    # The frozen kube-prometheus-stack chart labels these Services with its
+    # legacy `app` label. app.kubernetes.io/name is present on the selected
+    # Pods, but not on the Service metadata queried by kubectl -l.
+    $label = "app=kube-prometheus-stack-$Component"
+    $services = Get-KubernetesObject @('get','service','-n','monitoring','-l',$label)
+    $matches = @($services.items)
+    if ($matches.Count -ne 1) { throw "Expected exactly one $Component Service with $label; found $($matches.Count)." }
+    $expectedPort = if ($Component -eq 'alertmanager') { 9093 } else { 9090 }
+    if (@($matches[0].spec.ports | Where-Object {[int]$_.port -eq $expectedPort}).Count -ne 1) {
+        throw "$Component Service does not expose the expected port $expectedPort."
+    }
+    return [string]$matches[0].metadata.name
 }
 
 function Get-ServiceAPI {
@@ -391,7 +399,7 @@ function Get-ServiceAPI {
 
 function Wait-CandidateAlert {
     param([int]$TimeoutSeconds = 120)
-    $service = Get-ServiceName 'app.kubernetes.io/name=alertmanager'
+    $service = Get-MonitoringServiceName alertmanager
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         $alerts = @(Get-ServiceAPI $service 9093 '/api/v2/alerts')
@@ -419,7 +427,7 @@ function Save-FinalEvidence {
             if ($LASTEXITCODE -ne 0) { throw 'Final GitOps root rendering failed.' }
             Write-Utf8 (Join-Path $ArtifactRoot 'rendered/root.yaml') (($rootRender -join [Environment]::NewLine) + [Environment]::NewLine)
         }
-        $prometheus = Get-ServiceName 'app.kubernetes.io/name=prometheus'
+        $prometheus = Get-MonitoringServiceName prometheus
         $query = [uri]::EscapeDataString('sum(container_memory_working_set_bytes{namespace="monitoring",container!="",image!=""})')
         $memory = Get-ServiceAPI $prometheus 9090 "/api/v1/query?query=$query"
         Write-Utf8 (Join-Path $ArtifactRoot 'metrics/prometheus-working-set.json') (($memory | ConvertTo-Json -Depth 20) + [Environment]::NewLine)
