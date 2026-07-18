@@ -239,6 +239,8 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	}
 	required := []string{
 		"application.resourceTrackingMethod",
+		"timeout.reconciliation",
+		"timeout.reconciliation.jitter",
 		"resource.customizations.health.platform.steadystate.dev_Application",
 		"resource.customizations.health.platform.steadystate.dev_Team",
 		"resource.customizations.health.argoproj.io_Application",
@@ -268,6 +270,9 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	}
 	if data["application.resourceTrackingMethod"] != "annotation" {
 		t.Fatal("Argo resource tracking must be annotation-based")
+	}
+	if data["timeout.reconciliation"] != "30s" || data["timeout.reconciliation.jitter"] != "0s" {
+		t.Fatal("Argo Git reconciliation must be pinned to 30 seconds without jitter")
 	}
 
 	parameters := findObject(t, objects, "ConfigMap", "argocd-cmd-params-cm")

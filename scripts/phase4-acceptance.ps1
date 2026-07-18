@@ -517,6 +517,8 @@ try {
             Save-Snapshot 'after-promotion'
             Write-Host 'PHASE4_PROMOTION_RESULT_PASSED' -ForegroundColor Cyan
         } catch {
+            $state.failure = $_.Exception.Message
+            Save-State $state
             Write-Host 'PHASE4_PROMOTION_RESULT_FAILED' -ForegroundColor Red
             throw
         } finally { Stop-Load $load }
@@ -581,7 +583,13 @@ try {
         } finally { Stop-Load $load }
     } else {
         $state = Read-State
-        $message = if ($env:PHASE4_FAILURE_MESSAGE) { [string]$env:PHASE4_FAILURE_MESSAGE } else { 'A hosted Phase 4 acceptance stage failed.' }
+        $message = if ($state.failure) {
+            [string]$state.failure
+        } elseif ($env:PHASE4_FAILURE_MESSAGE) {
+            [string]$env:PHASE4_FAILURE_MESSAGE
+        } else {
+            'A hosted Phase 4 acceptance stage failed.'
+        }
         Save-FinalEvidence $state failed $message
         Write-Host 'PHASE4_FAILURE_EVIDENCE_CAPTURED' -ForegroundColor Yellow
     }
