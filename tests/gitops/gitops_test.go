@@ -635,6 +635,10 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"applications.platform.steadystate.dev,rollout",
 		"canary-to-rolling-git-detected",
 		"Measure-StableWindow",
+		"& /bin/kill -s INT $Process.Id",
+		"promotionResult='pending'",
+		"$state.promotionResult = 'passed'",
+		"Assert-K6Summary 'rollback'",
 		"Assert-K6NoFailures 'promotion'",
 		"Assert-K6NoFailures 'final-migration'",
 		"monitoringWorkingSetBytes",
@@ -655,6 +659,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, condition := range []string{
 		"id: promotion-verification",
 		"id: rollback-verification",
+		"$state.promotionResult -ne 'passed'",
 		"steps.rollback-verification.outcome == 'success'",
 	} {
 		if !strings.Contains(workflow, condition) {

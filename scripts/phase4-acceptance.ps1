@@ -323,18 +323,41 @@ export function handleSummary(data) { return { '$summaryPath': JSON.stringify(da
 function Stop-Load {
     param($Process)
     if ($Process -and -not $Process.HasExited) {
-        Stop-Process -Id $Process.Id -ErrorAction SilentlyContinue
-        $null = $Process.WaitForExit(15000)
+        if ($env:OS -eq 'Windows_NT') {
+            Stop-Process -Id $Process.Id -ErrorAction SilentlyContinue
+        } else {
+            # k6 runs handleSummary only during an orderly shutdown. PowerShell's
+            # Stop-Process terminates it too abruptly on Linux, which can discard
+            # otherwise valid acceptance evidence after the migration passed.
+            & /bin/kill -s INT $Process.Id
+            if ($LASTEXITCODE -ne 0) { Stop-Process -Id $Process.Id -ErrorAction SilentlyContinue }
+        }
+        if (-not $Process.WaitForExit(15000)) {
+            Stop-Process -Id $Process.Id -ErrorAction SilentlyContinue
+            $null = $Process.WaitForExit(5000)
+        }
     }
 }
 
-function Assert-K6NoFailures {
+function Read-K6Summary {
     param([Parameter(Mandatory)][string]$Name)
     $path = Join-Path $ArtifactRoot "$Name-k6-summary.json"
     $deadline = (Get-Date).AddSeconds(15)
     while (-not (Test-Path -LiteralPath $path -PathType Leaf) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "k6 did not write $Name summary evidence." }
     $summary = Get-Content -Raw -LiteralPath $path -Encoding UTF8 | ConvertFrom-Json
+    if ([double]$summary.metrics.http_reqs.values.count -le 0) { throw "$Name k6 summary contains no measured requests." }
+    return $summary
+}
+
+function Assert-K6Summary {
+    param([Parameter(Mandatory)][string]$Name)
+    $null = Read-K6Summary $Name
+}
+
+function Assert-K6NoFailures {
+    param([Parameter(Mandatory)][string]$Name)
+    $summary = Read-K6Summary $Name
     $failureRate = [double]$summary.metrics.http_req_failed.values.rate
     if ($failureRate -ne 0) { throw "$Name observed an HTTP failure rate of $failureRate." }
 }
@@ -463,7 +486,7 @@ try {
     if ($Stage -eq 'Prepare') {
         $sourceCommit = Invoke-ExternalText git log -1 --format=%H -- apps/demo-app/VERSION
         $sourceTag = "sha-$sourceCommit"
-        $state = [ordered]@{schemaVersion=1;result='running';sourceSHA=$SourceSHA;ephemeralBranch=$BranchName;profile=$Profile;startedAt=(Get-Date).ToUniversalTime().ToString('o');sourceTag=$sourceTag;commits=[ordered]@{};timestamps=[ordered]@{};registry=[ordered]@{};releaseTuples=[ordered]@{};activeRelease=[ordered]@{};measurements=@();stableWindows=@();checks=@();failure=$null}
+        $state = [ordered]@{schemaVersion=1;result='running';promotionResult='pending';sourceSHA=$SourceSHA;ephemeralBranch=$BranchName;profile=$Profile;startedAt=(Get-Date).ToUniversalTime().ToString('o');sourceTag=$sourceTag;commits=[ordered]@{};timestamps=[ordered]@{};registry=[ordered]@{};releaseTuples=[ordered]@{};activeRelease=[ordered]@{};measurements=@();stableWindows=@();checks=@();failure=$null}
         $botLogin = "$AppSlug[bot]"
         $botID = Invoke-ExternalText gh api "/users/$botLogin" --jq .id
         Invoke-External git config user.name $botLogin
@@ -521,10 +544,14 @@ try {
             Add-Check $state 'runtime-digest-and-revision-match-promotion' $promotionStarted 'The active digest matches anonymous GHCR metadata and the active revision matches the Git commit.'
             Stop-Load $load; $load = $null
             Assert-K6NoFailures 'promotion'
+            $state.promotionResult = 'passed'
+            $state.timestamps.promotionEvidenceVerifiedAt = (Get-Date).ToUniversalTime().ToString('o')
+            Save-State $state
             Add-Check $state 'promotion-path-no-routing-outage' $stageStarted 'Continuous k6 traffic observed no failed requests during migration and promotion.'
             Save-Snapshot 'after-promotion'
             Write-Host 'PHASE4_PROMOTION_RESULT_PASSED' -ForegroundColor Cyan
         } catch {
+            $state.promotionResult = 'failed'
             $state.failure = $_.Exception.Message
             Save-State $state
             Write-Host 'PHASE4_PROMOTION_RESULT_FAILED' -ForegroundColor Red
@@ -564,7 +591,8 @@ try {
             $state.activeRelease = [ordered]@{version=$GoodTag;digest=[string]$application.status.resolvedImageDigest;revision=$state.commits.recovery}
             $state.releaseTuples.recovery = $state.activeRelease
             Add-Check $state 'recovery-commit-restored-healthy' $recoveryStarted 'A Git recovery commit restored Kubernetes and Argo health and advanced the active revision.'
-            Stop-Load $load
+            Stop-Load $load; $load = $null
+            Assert-K6Summary 'rollback'
             $load = Start-Load 'final-migration'
             $deliveryStarted = Get-Date
             Set-DemoManifest -Tag $GoodTag -Strategy rolling -Snapshot canary-to-rolling

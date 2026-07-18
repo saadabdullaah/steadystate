@@ -120,7 +120,9 @@ jobs:
         run: |
           $state = Get-Content -Raw -LiteralPath .artifacts/phase4/acceptance/state.json | ConvertFrom-Json
           $passed = @($state.checks | Where-Object {$_.name -eq 'good-canary-promoted-automatically' -and $_.status -eq 'passed'})
-          if ($passed.Count -ne 1) { throw 'The recorded promotion stage did not pass.' }
+          if ($state.promotionResult -ne 'passed' -or $passed.Count -ne 1) {
+            throw "The recorded promotion stage did not pass completely: $($state.failure)"
+          }
 
       - name: Record automatic rollback and Git recovery
         id: rollback
