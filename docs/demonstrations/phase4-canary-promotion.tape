@@ -15,5 +15,5 @@ Set PlaybackSpeed 8.0
 
 Type "pwsh -NoProfile -File scripts/phase4-recording.ps1 -Stage Promote -Profile standard"
 Enter
-Wait+Line /PHASE4_PROMOTION_RESULT_(PASSED|FAILED)/
+Wait+Screen /PHASE4_PROMOTION_RESULT_(PASSED|FAILED)/
 Sleep 3s
