@@ -72,7 +72,8 @@ function Wait-Application {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         $application = Get-JsonObject @('get','applications.platform.steadystate.dev',$ApplicationName,'-n',$Namespace)
-        if ($application -and $application.status.phase -eq $Phase) {
+        $generationCurrent = $application -and $application.status -and ([int64]$application.status.observedGeneration -eq [int64]$application.metadata.generation)
+        if ($generationCurrent -and $application.status.phase -eq $Phase) {
             $ready = @($application.status.conditions | Where-Object type -eq 'Ready' | Select-Object -First 1)
             $reasonMatches = -not $Reason -or ($ready.Count -eq 1 -and $ready[0].reason -eq $Reason)
             $readyMatches = if ($Phase -eq 'Healthy') { $ready.Count -eq 1 -and $ready[0].status -eq 'True' } else { $ready.Count -eq 1 -and $ready[0].status -eq 'False' }

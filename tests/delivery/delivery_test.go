@@ -136,6 +136,10 @@ func TestPhase4DemoProgressiveDeliveryContract(t *testing.T) {
 			t.Errorf("Phase 3 acceptance rolling override is missing %q", value)
 		}
 	}
+	phase4 := read(t, filepath.Join(root, "scripts", "phase4-controller-test.ps1"))
+	if !strings.Contains(phase4, "$application.status.observedGeneration -eq [int64]$application.metadata.generation") {
+		t.Fatal("Phase 4 acceptance must reject stale Application status generations")
+	}
 }
 
 func TestDemoVersionBumpGate(t *testing.T) {
