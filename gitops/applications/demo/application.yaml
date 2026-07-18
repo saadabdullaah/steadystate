@@ -23,14 +23,23 @@ spec:
       cpu: 200m
       memory: 128Mi
   deployment:
-    strategy: rolling
+    strategy: canary
+    steps:
+      - weight: 10
+        pause: 30s
+      - weight: 25
+        pause: 30s
+      - weight: 50
+        pause: 30s
+      - weight: 100
+        pause: 30s
     automaticRollback: true
   reliability:
     availabilityTarget: "99.9%"
     maximumP95Latency: 250ms
     maximumErrorRate: "1%"
   observability:
-    metrics: false
+    metrics: true
     logs: false
     traces: false
   security:

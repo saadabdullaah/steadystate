@@ -48,6 +48,10 @@ jobs:
         id: foundation
         shell: pwsh
         run: ./scripts/dev.ps1 test-progressive-delivery -Profile standard -EvidencePath .artifacts/phase4/foundation/evidence.json
+      - name: Prove controller progression and reversible migrations
+        id: controller
+        shell: pwsh
+        run: ./scripts/phase4-controller-test.ps1 -Profile standard -EvidencePath .artifacts/phase4/controller/evidence.json
       - name: Capture foundation diagnostics
         if: always()
         shell: pwsh
@@ -81,6 +85,22 @@ jobs:
               throw 'A weighted traffic measurement is outside the compatibility boundary.'
             }
           }
+          $controller = Get-Content -Raw -LiteralPath .artifacts/phase4/controller/evidence.json | ConvertFrom-Json
+          if ($controller.schemaVersion -ne 1 -or $controller.result -ne 'passed' -or $controller.sourceRevision -ne $env:GITHUB_SHA) {
+            throw 'The Phase 4 controller evidence is invalid.'
+          }
+          $controllerRequired = @(
+            'operator-and-team-ready',
+            'rolling-baseline-healthy',
+            'rolling-to-canary-zero-downtime',
+            'bad-canary-automatic-rollback',
+            'recovery-commit-healthy',
+            'canary-to-rolling-zero-downtime'
+          )
+          $controllerPassed = @($controller.checks | Where-Object status -eq 'passed' | ForEach-Object name)
+          foreach ($name in $controllerRequired) {
+            if ($name -notin $controllerPassed) { throw "Missing passed controller check: $name" }
+          }
           $diagnostics = @(Get-ChildItem -LiteralPath .artifacts/diagnostics -Recurse -File -ErrorAction SilentlyContinue)
           if ($diagnostics.Count -eq 0) { throw 'Foundation diagnostics are missing.' }
       - name: Upload foundation artifact
@@ -90,6 +110,7 @@ jobs:
           name: phase4-foundation-${{ github.sha }}
           path: |
             .artifacts/phase4/foundation/
+            .artifacts/phase4/controller/
             .artifacts/diagnostics/
           retention-days: 30
           if-no-files-found: error

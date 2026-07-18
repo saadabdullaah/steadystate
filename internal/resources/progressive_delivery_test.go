@@ -59,6 +59,9 @@ func TestProgressiveDeliveryResourceContracts(t *testing.T) {
 	if _, found, err := unstructured.NestedFieldNoCopy(rolloutObject.Object, "spec", "template"); err != nil || found {
 		t.Fatalf("workloadRef transport must omit the empty typed template: found=%t err=%v", found, err)
 	}
+	if _, found, err := unstructured.NestedFieldNoCopy(rolloutObject.Object, "spec", "selector"); err != nil || found {
+		t.Fatalf("workloadRef transport must omit the null typed selector: found=%t err=%v", found, err)
+	}
 	workloadName, found, err := unstructured.NestedString(rolloutObject.Object, "spec", "workloadRef", "name")
 	if err != nil || !found || workloadName != application.Name {
 		t.Fatalf("workloadRef transport lost the typed reference: name=%q found=%t err=%v", workloadName, found, err)

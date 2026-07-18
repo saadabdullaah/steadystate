@@ -23,7 +23,36 @@ env:
   IMAGE: ghcr.io/saadabdullaah/steadystate-demo-app
 
 jobs:
+  impact:
+    name: detect-demo-runtime-impact
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.impact.outputs.release }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect declared demo release
+        id: impact
+        shell: pwsh
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            'release=true' >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          $changed = @(git diff --name-only $env:BEFORE_SHA $env:GITHUB_SHA)
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the pushed demo release range.' }
+          $release = if ('apps/demo-app/VERSION' -in $changed) { 'true' } else { 'false' }
+          "release=$release" >> $env:GITHUB_OUTPUT
+
   release:
+    needs: impact
+    if: needs.impact.outputs.release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -101,15 +101,9 @@ func validateDeployment(app *platformv1alpha1.Application) error {
 	return nil
 }
 
-// UnsupportedFeatures returns the Phase 1 capabilities requested by this Application.
+// UnsupportedFeatures returns capabilities that are not active in the current platform phase.
 func UnsupportedFeatures(app *platformv1alpha1.Application) []string {
 	features := make([]string, 0, 6)
-	if app.Spec.Deployment.Strategy == platformv1alpha1.DeploymentStrategyCanary {
-		features = append(features, "deployment.strategy=canary")
-	}
-	if app.Spec.Observability.Metrics {
-		features = append(features, "observability.metrics")
-	}
 	if app.Spec.Observability.Logs {
 		features = append(features, "observability.logs")
 	}

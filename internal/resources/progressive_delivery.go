@@ -23,8 +23,7 @@ const (
 	prometheusRuleAPIVersion = "monitoring.coreos.com/v1"
 )
 
-// Rollout builds the typed Argo Rollout for a canary Application. Runtime
-// reconciliation remains gated until the controller checkpoint.
+// Rollout builds the typed Argo Rollout for a canary Application.
 func Rollout(application *platformv1alpha1.Application) *rolloutsv1alpha1.Rollout {
 	pluginConfig, err := json.Marshal(map[string]string{
 		"httpRoute": CanaryHTTPRouteName(application),
@@ -92,15 +91,17 @@ func Rollout(application *platformv1alpha1.Application) *rolloutsv1alpha1.Rollou
 }
 
 // RolloutObject converts the typed Rollout contract into the object sent to
-// Kubernetes. RolloutSpec.Template is a non-pointer Go struct, so the typed
-// JSON encoder emits an empty template even when workloadRef is selected. The
-// upstream API requires that field to be absent for workloadRef Rollouts.
+// Kubernetes. The typed JSON encoder emits an empty template and a null
+// selector even when workloadRef is selected. The upstream API requires the
+// template to be absent and prunes the null selector, so both must be removed
+// to keep reconciliation idempotent.
 func RolloutObject(application *platformv1alpha1.Application) *unstructured.Unstructured {
 	object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(Rollout(application))
 	if err != nil {
 		panic(fmt.Sprintf("convert typed Rollout to unstructured object: %v", err))
 	}
 	unstructured.RemoveNestedField(object, "spec", "template")
+	unstructured.RemoveNestedField(object, "spec", "selector")
 	return &unstructured.Unstructured{Object: object}
 }
 

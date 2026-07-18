@@ -58,6 +58,10 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 		"all good and bad semver/SHA tags must exist or all must be absent",
 		"go test -race ./apps/demo-app/...",
 		"manifest unknown|not found",
+		"detect-demo-runtime-impact",
+		"needs: impact",
+		"if: needs.impact.outputs.release == 'true'",
+		"'apps/demo-app/VERSION' -in $changed",
 	}
 	for _, value := range required {
 		if !strings.Contains(workflow, value) {
@@ -110,6 +114,31 @@ func TestDemoTelemetryImageContract(t *testing.T) {
 		if !strings.Contains(dockerfile, value) {
 			t.Errorf("demo image contract is missing %q", value)
 		}
+	}
+}
+
+func TestPhase4DemoProgressiveDeliveryContract(t *testing.T) {
+	root := repositoryRoot(t)
+	manifest := read(t, filepath.Join(root, "gitops", "applications", "demo", "application.yaml"))
+	for _, value := range []string{"strategy: canary", "automaticRollback: true", "metrics: true"} {
+		if !strings.Contains(manifest, value) {
+			t.Errorf("Phase 4 demo manifest is missing %q", value)
+		}
+	}
+	for _, weight := range []string{"10", "25", "50", "100"} {
+		if strings.Count(manifest, "- weight: "+weight+"\n        pause: 30s") != 1 {
+			t.Errorf("Phase 4 demo manifest must contain exactly one %s%%/30s step", weight)
+		}
+	}
+	phase3 := read(t, filepath.Join(root, "scripts", "phase3-acceptance.ps1"))
+	for _, value := range []string{"strategy: rolling", "strategy: canary", "metrics: false", "metrics: true"} {
+		if !strings.Contains(phase3, value) {
+			t.Errorf("Phase 3 acceptance rolling override is missing %q", value)
+		}
+	}
+	phase4 := read(t, filepath.Join(root, "scripts", "phase4-controller-test.ps1"))
+	if !strings.Contains(phase4, "$application.status.observedGeneration -eq [int64]$application.metadata.generation") {
+		t.Fatal("Phase 4 acceptance must reject stale Application status generations")
 	}
 }
 
