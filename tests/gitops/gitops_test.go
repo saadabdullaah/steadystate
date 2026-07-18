@@ -614,7 +614,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	}
 	for _, token := range []string{
 		"acceptance/phase4-",
-		"[ValidateSet('Prepare','Promote','Rollback','CaptureFailure')]",
+		"[ValidateSet('Prepare','Promote','Rollback','Finalize','CaptureFailure')]",
 		"sha-$sourceCommit",
 		"This delivery commit must change only spec.image.tag.",
 		"Invoke-External kubectl kustomize (Split-Path -Parent $ManifestPath) | Out-Null",
@@ -637,7 +637,9 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"Measure-StableWindow",
 		"& /bin/kill -s INT $Process.Id",
 		"promotionResult='pending'",
+		"rollbackResult='pending'",
 		"$state.promotionResult = 'passed'",
+		"$state.rollbackResult = 'passed'",
 		"Assert-K6Summary 'rollback'",
 		"Assert-K6NoFailures 'promotion'",
 		"Assert-K6NoFailures 'final-migration'",
@@ -660,6 +662,9 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"id: promotion-verification",
 		"id: rollback-verification",
 		"$state.promotionResult -ne 'passed'",
+		"$state.rollbackResult -ne 'passed'",
+		"-Stage Finalize",
+		"id: rollback-verification\n        timeout-minutes: 5",
 		"steps.rollback-verification.outcome == 'success'",
 	} {
 		if !strings.Contains(workflow, condition) {

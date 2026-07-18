@@ -136,8 +136,14 @@ jobs:
 
       - name: Verify rollback recording result
         id: rollback-verification
+        timeout-minutes: 5
         shell: pwsh
         run: |
+          $state = Get-Content -Raw -LiteralPath .artifacts/phase4/acceptance/state.json | ConvertFrom-Json
+          if ($state.rollbackResult -ne 'passed' -or $state.failure) {
+            throw "The recorded rollback stage did not pass completely: $($state.failure)"
+          }
+          ./scripts/phase4-acceptance.ps1 -Stage Finalize -Profile standard -EvidencePath .artifacts/phase4/acceptance/evidence.json
           $evidence = Get-Content -Raw -LiteralPath .artifacts/phase4/acceptance/evidence.json | ConvertFrom-Json
           if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed' -or $evidence.failure) {
             throw 'The recorded rollback and recovery stage did not pass.'
@@ -152,6 +158,7 @@ jobs:
       - name: Capture failed-run evidence
         if: always() && steps.prepare.outcome != 'skipped' && (steps.promotion-verification.outcome != 'success' || steps.rollback-verification.outcome != 'success')
         continue-on-error: true
+        timeout-minutes: 5
         shell: pwsh
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}

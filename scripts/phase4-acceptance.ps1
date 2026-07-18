@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Prepare','Promote','Rollback','CaptureFailure')][string]$Stage,
+    [Parameter(Mandatory)][ValidateSet('Prepare','Promote','Rollback','Finalize','CaptureFailure')][string]$Stage,
     [int]$HttpPort = 8080,
     [ValidateSet('minimal','standard','full')][string]$Profile = 'standard',
     [string]$EvidencePath = '.artifacts/phase4/acceptance/evidence.json'
@@ -45,7 +45,7 @@ function Get-KubernetesObject {
     param([Parameter(Mandatory)][string[]]$Arguments)
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $raw = @(& kubectl @Arguments -o json 2>$null)
+    $raw = @(& kubectl @Arguments --request-timeout=15s -o json 2>$null)
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previous
     if ($exitCode -ne 0 -or -not $raw) { return $null }
@@ -386,7 +386,7 @@ function Get-RegistryMetadata {
 function Save-Kubectl {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string[]]$Arguments, [switch]$AllowFailure)
     $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    $output = @(& kubectl @Arguments 2>&1); $exitCode = $LASTEXITCODE
+    $output = @(& kubectl @Arguments --request-timeout=30s 2>&1); $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previous
     if ($exitCode -ne 0 -and -not $AllowFailure) { throw "kubectl $($Arguments -join ' ') failed." }
     Write-Utf8 $Path (($output -join [Environment]::NewLine) + [Environment]::NewLine)
@@ -416,7 +416,7 @@ function Get-MonitoringServiceName {
 
 function Get-ServiceAPI {
     param([Parameter(Mandatory)][string]$Service, [Parameter(Mandatory)][int]$Port, [Parameter(Mandatory)][string]$Path)
-    $raw = Invoke-ExternalText kubectl get --raw "/api/v1/namespaces/monitoring/services/http:$Service`:$Port/proxy$Path"
+    $raw = Invoke-ExternalText kubectl --request-timeout=15s get --raw "/api/v1/namespaces/monitoring/services/http:$Service`:$Port/proxy$Path"
     return ($raw | ConvertFrom-Json)
 }
 
@@ -478,7 +478,9 @@ function Save-FinalEvidence {
 if ($Profile -ne 'standard') { throw 'Phase 4 acceptance requires the standard profile.' }
 if ($SourceSHA -notmatch '^([0-9a-f]{40}|[0-9a-f]{64})$') { throw 'GITHUB_SHA must be a full Git object ID.' }
 if ($BranchName -notmatch '^acceptance/phase4-[0-9]+-[0-9]+$') { throw 'PHASE4_ACCEPTANCE_BRANCH is invalid.' }
-if (-not $env:GH_TOKEN -or -not $AppSlug) { throw 'The repository-scoped delivery App token and slug are required.' }
+if ($Stage -in @('Prepare','Promote','Rollback') -and (-not $env:GH_TOKEN -or -not $AppSlug)) {
+    throw 'The repository-scoped delivery App token and slug are required.'
+}
 
 Push-Location $Root
 try {
@@ -486,7 +488,7 @@ try {
     if ($Stage -eq 'Prepare') {
         $sourceCommit = Invoke-ExternalText git log -1 --format=%H -- apps/demo-app/VERSION
         $sourceTag = "sha-$sourceCommit"
-        $state = [ordered]@{schemaVersion=1;result='running';promotionResult='pending';sourceSHA=$SourceSHA;ephemeralBranch=$BranchName;profile=$Profile;startedAt=(Get-Date).ToUniversalTime().ToString('o');sourceTag=$sourceTag;commits=[ordered]@{};timestamps=[ordered]@{};registry=[ordered]@{};releaseTuples=[ordered]@{};activeRelease=[ordered]@{};measurements=@();stableWindows=@();checks=@();failure=$null}
+        $state = [ordered]@{schemaVersion=1;result='running';promotionResult='pending';rollbackResult='pending';sourceSHA=$SourceSHA;ephemeralBranch=$BranchName;profile=$Profile;startedAt=(Get-Date).ToUniversalTime().ToString('o');sourceTag=$sourceTag;commits=[ordered]@{};timestamps=[ordered]@{};registry=[ordered]@{};releaseTuples=[ordered]@{};activeRelease=[ordered]@{};measurements=@();stableWindows=@();checks=@();failure=$null}
         $botLogin = "$AppSlug[bot]"
         $botID = Invoke-ExternalText gh api "/users/$botLogin" --jq .id
         Invoke-External git config user.name $botLogin
@@ -616,14 +618,25 @@ try {
             $state.releaseTuples.final = $state.activeRelease
             Add-Check $state 'canary-to-rolling-zero-downtime' $migrationStarted 'Git-driven migration returned to Deployment ownership within five minutes without an outage.'
             Add-Check $state 'argo-and-application-health-agree' $recoveryStarted 'Argo health followed Degraded rollback, Healthy recovery, and Healthy final migration.'
-            Save-FinalEvidence $state passed
+            $state.rollbackResult = 'passed'
+            $state.timestamps.rollbackBehaviorVerifiedAt = (Get-Date).ToUniversalTime().ToString('o')
+            Save-State $state
             Write-Host 'PHASE4_ROLLBACK_RESULT_PASSED' -ForegroundColor Cyan
         } catch {
             $failure = $_.Exception.Message
-            try { Save-FinalEvidence $state failed $failure } catch { Write-Warning "Could not complete failure evidence: $($_.Exception.Message)" }
+            $state.rollbackResult = 'failed'
+            $state.failure = $failure
+            Save-State $state
             Write-Host 'PHASE4_ROLLBACK_RESULT_FAILED' -ForegroundColor Red
             throw
         } finally { Stop-Load $load }
+    } elseif ($Stage -eq 'Finalize') {
+        $state = Read-State
+        if ($state.promotionResult -ne 'passed' -or $state.rollbackResult -ne 'passed' -or $state.failure) {
+            throw "Cannot finalize incomplete Phase 4 acceptance: promotion=$($state.promotionResult), rollback=$($state.rollbackResult), failure=$($state.failure)"
+        }
+        Save-FinalEvidence $state passed
+        Write-Host 'PHASE4_FINALIZE_RESULT_PASSED' -ForegroundColor Cyan
     } else {
         $state = Read-State
         $message = if ($state.failure) {
