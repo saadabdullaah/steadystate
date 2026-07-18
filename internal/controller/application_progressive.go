@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	rolloutsv1alpha1 "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -27,6 +28,9 @@ import (
 const (
 	gatewayPluginInProgressLabel = "rollouts.argoproj.io/gatewayapi-canary"
 	gatewayPluginInProgressValue = "in-progress"
+	rollingMigrationLabelKey     = "steadystate.dev/rolling-migration"
+	rollingCutoverStartedAtKey   = "steadystate.dev/rolling-cutover-started-at"
+	rollingCutoverDrainDelay     = 15 * time.Second
 )
 
 type applicationRuntimeState struct {
@@ -37,6 +41,7 @@ type applicationRuntimeState struct {
 	migrating       bool
 	migrationDetail string
 	analysisFailure string
+	requeueAfter    time.Duration
 }
 
 func (r *ApplicationReconciler) reconcileRuntimeChildren(ctx context.Context, app *platformv1alpha1.Application) (*applicationRuntimeState, error) {
@@ -66,7 +71,7 @@ func (r *ApplicationReconciler) reconcileCanaryChildren(ctx context.Context, app
 		anchorApplication = servingApplicationAtVersion(app, app.Status.ActiveVersion)
 	}
 
-	state.deployment, state.mutated, err = r.reconcileSharedChildren(ctx, app, anchorApplication, holdServingDeployment && !rolloutExists)
+	state.deployment, state.mutated, err = r.reconcileSharedChildren(ctx, app, anchorApplication, holdServingDeployment && !rolloutExists, false)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +160,7 @@ func (r *ApplicationReconciler) reconcileRollingChildren(ctx context.Context, ap
 		state.migrationDetail = "scaling and verifying the rolling Deployment before switching the HTTPRoute"
 	}
 
-	state.deployment, changed, err = r.reconcileSharedChildren(ctx, app, app, true)
+	state.deployment, changed, err = r.reconcileSharedChildren(ctx, app, app, true, rolloutExists)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +183,18 @@ func (r *ApplicationReconciler) reconcileRollingChildren(ctx context.Context, ap
 	if rolloutExists && deploymentReady && routeUsesBaseService(state.route, app) {
 		routeReady, routeRejected := routeState(state.route)
 		if routeReady && !routeRejected {
+			drained, marked, remaining, drainErr := r.waitForRollingCutoverDrain(ctx, state.route)
+			if drainErr != nil {
+				return nil, fmt.Errorf("wait for rolling HTTPRoute cutover drain: %w", drainErr)
+			}
+			state.mutated = state.mutated || marked
+			if !drained {
+				state.rollout = rollout
+				state.migrating = true
+				state.migrationDetail = "waiting for the accepted rolling HTTPRoute to propagate before draining canary resources"
+				state.requeueAfter = remaining
+				return state, nil
+			}
 			changed, err = r.deleteProgressiveResources(ctx, app)
 			if err != nil {
 				return nil, err
@@ -192,7 +209,7 @@ func (r *ApplicationReconciler) reconcileRollingChildren(ctx context.Context, ap
 	return state, nil
 }
 
-func (r *ApplicationReconciler) reconcileSharedChildren(ctx context.Context, app, deploymentApplication *platformv1alpha1.Application, manageReplicas bool) (*appsv1.Deployment, bool, error) {
+func (r *ApplicationReconciler) reconcileSharedChildren(ctx context.Context, app, deploymentApplication *platformv1alpha1.Application, manageReplicas, isolateRollingMigration bool) (*appsv1.Deployment, bool, error) {
 	mutated := false
 	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: resources.ConfigMapName(app), Namespace: app.Namespace}}
 	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, configMap, func() error {
@@ -209,6 +226,9 @@ func (r *ApplicationReconciler) reconcileSharedChildren(ctx context.Context, app
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace}}
 	op, err = controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
 		desired := resources.Deployment(deploymentApplication)
+		if isolateRollingMigration {
+			applyRollingMigrationIdentity(app, desired, nil)
+		}
 		mergeLabels(&deployment.ObjectMeta, desired.Labels)
 		if deployment.CreationTimestamp.IsZero() {
 			deployment.Spec = desired.Spec
@@ -225,6 +245,9 @@ func (r *ApplicationReconciler) reconcileSharedChildren(ctx context.Context, app
 	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace}}
 	op, err = controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
 		desired := resources.Service(app)
+		if isolateRollingMigration {
+			applyRollingMigrationIdentity(app, nil, desired)
+		}
 		mergeLabels(&service.ObjectMeta, desired.Labels)
 		service.Spec.Selector = desired.Spec.Selector
 		service.Spec.Ports = desired.Spec.Ports
@@ -235,6 +258,54 @@ func (r *ApplicationReconciler) reconcileSharedChildren(ctx context.Context, app
 	}
 	mutated = mutated || op != controllerutil.OperationResultNone
 	return deployment, mutated, nil
+}
+
+func applyRollingMigrationIdentity(app *platformv1alpha1.Application, deployment *appsv1.Deployment, service *corev1.Service) {
+	value := strconv.FormatInt(app.Generation, 10)
+	if deployment != nil {
+		deployment.Spec.Template.Labels[rollingMigrationLabelKey] = value
+	}
+	if service != nil {
+		service.Spec.Selector[rollingMigrationLabelKey] = value
+	}
+}
+
+func (r *ApplicationReconciler) waitForRollingCutoverDrain(ctx context.Context, route *gatewayv1.HTTPRoute) (drained, changed bool, remaining time.Duration, err error) {
+	now := time.Now().UTC()
+	if remaining, tracked := rollingCutoverRemaining(route, now); tracked {
+		return remaining <= 0, false, remaining, nil
+	}
+	before := route.DeepCopy()
+	annotations := route.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[rollingCutoverStartedAtKey] = fmt.Sprintf("%d,%s", route.Generation, now.Format(time.RFC3339Nano))
+	route.SetAnnotations(annotations)
+	if patchErr := r.Patch(ctx, route, client.MergeFrom(before)); patchErr != nil {
+		return false, false, 0, patchErr
+	}
+	return false, true, rollingCutoverDrainDelay, nil
+}
+
+func rollingCutoverRemaining(route *gatewayv1.HTTPRoute, now time.Time) (time.Duration, bool) {
+	parts := strings.SplitN(route.Annotations[rollingCutoverStartedAtKey], ",", 2)
+	if len(parts) != 2 {
+		return 0, false
+	}
+	generation, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || generation != route.Generation {
+		return 0, false
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, parts[1])
+	if err != nil {
+		return 0, false
+	}
+	remaining := rollingCutoverDrainDelay - now.Sub(startedAt)
+	if remaining < 0 {
+		remaining = 0
+	}
+	return remaining, true
 }
 
 func (r *ApplicationReconciler) reconcileProgressiveResources(ctx context.Context, app *platformv1alpha1.Application, holdServingDeployment bool) (bool, error) {

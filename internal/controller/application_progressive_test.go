@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -113,6 +115,38 @@ func TestStrategyMigrationAndPluginWeightOwnership(t *testing.T) {
 	}
 	if *currentDeployment.Spec.Replicas != 0 {
 		t.Fatal("rolling migration did not restore operator replica ownership")
+	}
+}
+
+func TestRollingMigrationIsolatesReplacementAndDrainsAcceptedRoute(t *testing.T) {
+	t.Parallel()
+	app := unitCanaryApplication()
+	app.Generation = 42
+	deployment := resources.Deployment(app)
+	service := resources.Service(app)
+	applyRollingMigrationIdentity(app, deployment, service)
+	value := strconv.FormatInt(app.Generation, 10)
+	if deployment.Spec.Template.Labels[rollingMigrationLabelKey] != value || service.Spec.Selector[rollingMigrationLabelKey] != value {
+		t.Fatal("rolling replacement Deployment and base Service do not share an isolated migration identity")
+	}
+
+	route := resources.HTTPRoute(app)
+	route.Generation = 7
+	now := time.Date(2026, time.July, 18, 15, 0, 0, 0, time.UTC)
+	route.Annotations = map[string]string{
+		rollingCutoverStartedAtKey: fmt.Sprintf("%d,%s", route.Generation, now.Add(-10*time.Second).Format(time.RFC3339Nano)),
+	}
+	remaining, tracked := rollingCutoverRemaining(route, now)
+	if !tracked || remaining != 5*time.Second {
+		t.Fatalf("cutover drain remaining=%s tracked=%t, want 5s/true", remaining, tracked)
+	}
+	remaining, tracked = rollingCutoverRemaining(route, now.Add(6*time.Second))
+	if !tracked || remaining != 0 {
+		t.Fatalf("completed cutover drain remaining=%s tracked=%t, want 0/true", remaining, tracked)
+	}
+	route.Generation++
+	if _, tracked = rollingCutoverRemaining(route, now); tracked {
+		t.Fatal("stale cutover generation was reused")
 	}
 }
 
