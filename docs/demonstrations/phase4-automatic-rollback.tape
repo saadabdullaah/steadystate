@@ -9,11 +9,11 @@ Set Margin 24
 Set MarginFill "#111827"
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 5ms
-Set WaitTimeout 25m
+Set WaitTimeout 35m
 Set Framerate 2
 Set PlaybackSpeed 8.0
 
-Type "pwsh -NoProfile -File scripts/phase4-acceptance.ps1 -Stage Rollback -Profile standard -EvidencePath .artifacts/phase4/acceptance/evidence.json"
+Type "pwsh -NoProfile -File scripts/phase4-recording.ps1 -Stage Rollback -Profile standard -EvidencePath .artifacts/phase4/acceptance/evidence.json"
 Enter
-Wait+Screen /PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)/
+Wait+Line /PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)/
 Sleep 3s

@@ -13,7 +13,7 @@ Set WaitTimeout 20m
 Set Framerate 2
 Set PlaybackSpeed 8.0
 
-Type "pwsh -NoProfile -File scripts/phase4-acceptance.ps1 -Stage Promote -Profile standard"
+Type "pwsh -NoProfile -File scripts/phase4-recording.ps1 -Stage Promote -Profile standard"
 Enter
-Wait+Screen /PHASE4_PROMOTION_RESULT_(PASSED|FAILED)/
+Wait+Line /PHASE4_PROMOTION_RESULT_(PASSED|FAILED)/
 Sleep 3s

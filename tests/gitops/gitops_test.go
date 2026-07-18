@@ -592,6 +592,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	root := repositoryRoot(t)
 	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase4.yml")))
 	script := string(readFile(t, filepath.Join(root, "scripts", "phase4-acceptance.ps1")))
+	recordingScript := string(readFile(t, filepath.Join(root, "scripts", "phase4-recording.ps1")))
 	promotionTape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase4-canary-promotion.tape")))
 	rollbackTape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase4-automatic-rollback.tape")))
 	for _, token := range []string{
@@ -645,10 +646,24 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"Assert-K6NoFailures 'final-migration'",
 		"monitoringWorkingSetBytes",
 		"Save-FinalEvidence $state passed",
-		"Save-FinalEvidence $state failed $failure",
+		"Save-FinalEvidence $state failed $message",
 	} {
 		if !strings.Contains(script, token) {
 			t.Errorf("Phase 4 acceptance script is missing %q", token)
+		}
+	}
+	for _, token := range []string{
+		"[ValidateSet('Promote','Rollback')]",
+		"Start-Process",
+		"promotionResult",
+		"rollbackResult",
+		"WaitForExit(10000)",
+		"Stop-Process",
+		"${MarkerPrefix}_PASSED",
+		"${MarkerPrefix}_FAILED",
+	} {
+		if !strings.Contains(recordingScript, token) {
+			t.Errorf("Phase 4 recording wrapper is missing %q", token)
 		}
 	}
 	diagnostics := strings.Index(workflow, "Capture acceptance diagnostics")
@@ -686,9 +701,9 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		timeout string
 	}{
 		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m"},
-		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 25m"},
+		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 35m"},
 	} {
-		for _, token := range []string{tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", tape.result} {
+		for _, token := range []string{tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-recording.ps1", "Wait+Line", tape.result} {
 			if !strings.Contains(tape.content, token) {
 				t.Errorf("Phase 4 VHS tape is missing %q", token)
 			}
