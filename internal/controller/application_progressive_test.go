@@ -148,6 +148,30 @@ func TestBootstrapRolloutUsesRouterFreePinnedContract(t *testing.T) {
 	}
 }
 
+func TestActivatedRolloutDoesNotReturnToBootstrapWhenRouteStatusLags(t *testing.T) {
+	t.Parallel()
+	app := unitCanaryApplication()
+	app.Status.ActiveVersion = "v0.3.0"
+	rollout := resources.Rollout(app)
+	rollout.Status.StableRS = "stable-hash"
+
+	if shouldHoldServingDeployment(app, rollout, true, false) {
+		t.Fatal("route generation lag incorrectly returned an active Rollout to bootstrap")
+	}
+
+	rollout.Spec.Strategy.Canary.TrafficRouting = nil
+	rollout.Spec.Strategy.Canary.Steps = nil
+	if !shouldHoldServingDeployment(app, rollout, true, false) {
+		t.Fatal("router-free Rollout did not retain the serving Deployment while route acceptance was pending")
+	}
+	if shouldHoldServingDeployment(app, rollout, true, true) {
+		t.Fatal("accepted canary route did not release the router-free bootstrap hold")
+	}
+	if !shouldHoldServingDeployment(app, rollout, false, true) {
+		t.Fatal("missing Rollout did not preserve the last healthy Deployment during reconstruction")
+	}
+}
+
 func unitCanaryApplication() *platformv1alpha1.Application {
 	app := unitApplication()
 	app.Spec.Image.Tag = "v0.4.0"

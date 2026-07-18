@@ -61,8 +61,7 @@ func (r *ApplicationReconciler) reconcileCanaryChildren(ctx context.Context, app
 	canaryRouteConfigured := routeExists && routeUsesCanaryServices(currentRoute, app)
 	currentRouteReady, currentRouteRejected := routeState(currentRoute)
 	canaryRouteReady := canaryRouteConfigured && currentRouteReady && !currentRouteRejected
-	reconstructing := !rolloutExists || (rollout.Status.StableRS == "" && app.Status.ActiveVersion != "")
-	holdServingDeployment := app.Status.ActiveVersion != "" && (reconstructing || !canaryRouteReady)
+	holdServingDeployment := shouldHoldServingDeployment(app, rollout, rolloutExists, canaryRouteReady)
 	if holdServingDeployment {
 		anchorApplication = servingApplicationAtVersion(app, app.Status.ActiveVersion)
 	}
@@ -116,6 +115,27 @@ func (r *ApplicationReconciler) reconcileCanaryChildren(ctx context.Context, app
 		return nil, err
 	}
 	return state, nil
+}
+
+func shouldHoldServingDeployment(app *platformv1alpha1.Application, rollout *rolloutsv1alpha1.Rollout, rolloutExists, canaryRouteReady bool) bool {
+	if app.Status.ActiveVersion == "" {
+		return false
+	}
+	if !rolloutExists || rollout.Status.StableRS == "" {
+		return true
+	}
+	// Route status briefly trails every plugin-owned weight update because each
+	// update advances the HTTPRoute generation. Once traffic routing is active,
+	// that expected lag must not put the Rollout back into its router-free
+	// bootstrap contract and restart the canary from its first step.
+	return !canaryRouteReady && !rolloutTrafficRoutingActive(rollout)
+}
+
+func rolloutTrafficRoutingActive(rollout *rolloutsv1alpha1.Rollout) bool {
+	return rollout != nil &&
+		rollout.Spec.Strategy.Canary != nil &&
+		rollout.Spec.Strategy.Canary.TrafficRouting != nil &&
+		len(rollout.Spec.Strategy.Canary.Steps) > 0
 }
 
 func (r *ApplicationReconciler) reconcileRollingChildren(ctx context.Context, app *platformv1alpha1.Application) (*applicationRuntimeState, error) {
