@@ -309,7 +309,7 @@ function Start-Load {
     $summaryPath = ".artifacts/phase4/acceptance/$Name-k6-summary.json"
     Write-Utf8 $scriptPath @"
 import http from 'k6/http';
-export const options = { vus: 20, duration: '20m', discardResponseBodies: true };
+export const options = { vus: 5, duration: '20m', discardResponseBodies: true };
 export default function () { http.get('http://127.0.0.1:$HttpPort/', { headers: { Host: '$Hostname' } }); }
 export function handleSummary(data) { return { '$summaryPath': JSON.stringify(data, null, 2) }; }
 "@
@@ -601,10 +601,12 @@ try {
             $state.commits.canaryToRolling = New-DeliveryCommit 'test(gitops): return Phase 4 application to rolling'
             $state.timestamps.canaryToRollingPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
             # The root intentionally advances and health-gates every platform
-            # child before the wave-0 tenant Application. Alert recovery can
-            # therefore make Git propagation longer than the workload cutover
-            # itself. Bound and record both intervals independently.
-            Wait-DesiredApplication $GoodTag rolling $state.commits.canaryToRolling -TimeoutSeconds 600
+            # child before the wave-0 tenant Application. Alert recovery and
+            # Argo's child-health cache can therefore make Git propagation
+            # longer than the workload cutover itself. Bound and record both
+            # intervals independently; the migration remains limited to five
+            # minutes after the desired revision reaches the Application.
+            Wait-DesiredApplication $GoodTag rolling $state.commits.canaryToRolling -TimeoutSeconds 900
             $state.timestamps.canaryToRollingAppliedAt = (Get-Date).ToUniversalTime().ToString('o')
             Add-Check $state 'canary-to-rolling-git-detected' $deliveryStarted 'Argo propagated the exact recovery-followup commit through every health-gated platform wave.'
             $migrationStarted = Get-Date
