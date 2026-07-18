@@ -195,6 +195,7 @@ jobs:
             'bad-canary-aborted-and-preserved-active-tuple',
             'three-stable-only-windows-after-abort',
             'recovery-commit-restored-healthy',
+            'canary-to-rolling-git-detected',
             'canary-to-rolling-zero-downtime',
             'argo-and-application-health-agree'
           )

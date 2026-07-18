@@ -632,6 +632,8 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"Get-MonitoringServiceName alertmanager",
 		"Get-MonitoringServiceName prometheus",
 		"app=kube-prometheus-stack-$Component",
+		"applications.platform.steadystate.dev,rollout",
+		"canary-to-rolling-git-detected",
 		"Measure-StableWindow",
 		"Assert-K6NoFailures 'promotion'",
 		"Assert-K6NoFailures 'final-migration'",
@@ -671,11 +673,12 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, tape := range []struct {
 		content string
 		result  string
+		timeout string
 	}{
-		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)"},
-		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)"},
+		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m"},
+		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 25m"},
 	} {
-		for _, token := range []string{"Set WaitTimeout 20m", "Set Framerate 2", "Set PlaybackSpeed 8.0", tape.result} {
+		for _, token := range []string{tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", tape.result} {
 			if !strings.Contains(tape.content, token) {
 				t.Errorf("Phase 4 VHS tape is missing %q", token)
 			}

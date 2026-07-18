@@ -371,7 +371,7 @@ function Save-Kubectl {
 
 function Save-Snapshot {
     param([Parameter(Mandatory)][string]$Name)
-    Save-Kubectl (Join-Path $ArtifactRoot "snapshots/$Name.yaml") @('get','application,rollout,analysisrun,analysistemplate,deployment,replicaset,pod,service,endpoints,servicemonitor,prometheusrule,httproute','-n',$Namespace,'-o','yaml')
+    Save-Kubectl (Join-Path $ArtifactRoot "snapshots/$Name.yaml") @('get','applications.platform.steadystate.dev,rollout,analysisrun,analysistemplate,deployment,replicaset,pod,service,endpoints,servicemonitor,prometheusrule,httproute','-n',$Namespace,'-o','yaml')
     Save-Kubectl (Join-Path $ArtifactRoot "snapshots/$Name-argo.json") @('get','applications.argoproj.io','-n','argocd','-o','json')
 }
 
@@ -566,11 +566,18 @@ try {
             Add-Check $state 'recovery-commit-restored-healthy' $recoveryStarted 'A Git recovery commit restored Kubernetes and Argo health and advanced the active revision.'
             Stop-Load $load
             $load = Start-Load 'final-migration'
-            $migrationStarted = Get-Date
+            $deliveryStarted = Get-Date
             Set-DemoManifest -Tag $GoodTag -Strategy rolling -Snapshot canary-to-rolling
             $state.commits.canaryToRolling = New-DeliveryCommit 'test(gitops): return Phase 4 application to rolling'
             $state.timestamps.canaryToRollingPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
-            Wait-DesiredApplication $GoodTag rolling $state.commits.canaryToRolling
+            # The root intentionally advances and health-gates every platform
+            # child before the wave-0 tenant Application. Alert recovery can
+            # therefore make Git propagation longer than the workload cutover
+            # itself. Bound and record both intervals independently.
+            Wait-DesiredApplication $GoodTag rolling $state.commits.canaryToRolling -TimeoutSeconds 600
+            $state.timestamps.canaryToRollingAppliedAt = (Get-Date).ToUniversalTime().ToString('o')
+            Add-Check $state 'canary-to-rolling-git-detected' $deliveryStarted 'Argo propagated the exact recovery-followup commit through every health-gated platform wave.'
+            $migrationStarted = Get-Date
             $application = Wait-Application Healthy -Version $GoodTag -Revision $state.commits.canaryToRolling -Digest $state.registry.good.runtimeDigest -TimeoutSeconds 300
             Wait-GatewayVersion $GoodTag
             if (Get-KubernetesObject @('get','rollout',$ApplicationName,'-n',$Namespace)) { throw 'Rollout remains after canary-to-rolling migration.' }
