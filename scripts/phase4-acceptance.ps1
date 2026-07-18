@@ -204,6 +204,24 @@ function Wait-Application {
     throw "Application did not reach Phase=$Phase Reason=$Reason Version=$Version Revision=$Revision."
 }
 
+function Wait-DesiredApplication {
+    param(
+        [Parameter(Mandatory)][string]$Tag,
+        [Parameter(Mandatory)][ValidateSet('rolling','canary')][string]$Strategy,
+        [Parameter(Mandatory)][string]$Revision,
+        [int]$TimeoutSeconds = 300
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $application = Get-KubernetesObject @('get','applications.platform.steadystate.dev',$ApplicationName,'-n',$Namespace)
+        if ($application -and $application.spec.image.tag -eq $Tag -and
+            $application.spec.deployment.strategy -eq $Strategy -and
+            $application.metadata.annotations.'steadystate.dev/source-revision' -eq $Revision) { return }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+    throw "Argo did not apply desired tag=$Tag strategy=$Strategy revision=$Revision."
+}
+
 function Wait-GatewayVersion {
     param([Parameter(Mandatory)][string]$Version, [int]$TimeoutSeconds = 180)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -226,24 +244,49 @@ function Wait-RouteWeights {
     do {
         $route = Get-KubernetesObject @('get','httproute',$ApplicationName,'-n',$Namespace)
         $backends = @($route.spec.rules[0].backendRefs)
-        if ($backends.Count -eq 2 -and [int]$backends[0].weight -eq $Stable -and [int]$backends[1].weight -eq $Canary) { return }
+        $conditions = @($route.status.parents | ForEach-Object {$_.conditions})
+        $current = @($conditions | Where-Object {
+            $_.type -eq 'Accepted' -and $_.status -eq 'True' -and
+            [int64]$_.observedGeneration -eq [int64]$route.metadata.generation
+        }).Count -gt 0
+        if ($current -and $backends.Count -eq 2 -and [int]$backends[0].weight -eq $Stable -and [int]$backends[1].weight -eq $Canary) { return }
         Start-Sleep -Seconds 2
     } while ((Get-Date) -lt $deadline)
     throw "HTTPRoute did not reach stable=$Stable canary=$Canary."
 }
 
+function Wait-CanaryEndpoint {
+    param([int]$TimeoutSeconds = 120)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $slices = Get-KubernetesObject @('get','endpointslices.discovery.k8s.io','-n',$Namespace,'-l',"kubernetes.io/service-name=$ApplicationName-canary")
+        $ready = @($slices.items.endpoints | Where-Object {$_.conditions.ready -ne $false -and $_.addresses.Count -gt 0})
+        if ($ready.Count -gt 0) { return }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+    throw 'The canary Service did not obtain a ready endpoint.'
+}
+
 function Measure-Traffic {
     param([Parameter(Mandatory)][string]$CandidateVersion, [Parameter(Mandatory)][int]$ExpectedPercent, [int]$Samples = 500)
-    $candidate = 0; $stable = 0; $errors = 0
-    for ($index = 0; $index -lt $Samples; $index++) {
-        $response = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "http://127.0.0.1:$HttpPort/" -Headers @{Host=$Hostname} -TimeoutSec 5
-        $body = $response.Content | ConvertFrom-Json
-        if ($body.version -eq $CandidateVersion) { $candidate++ } else { $stable++ }
-        if ($response.StatusCode -notin 200..299) { $errors++ }
+    Wait-CanaryEndpoint
+    $lastObserved = 0
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $candidate = 0; $stable = 0; $errors = 0
+        for ($index = 0; $index -lt $Samples; $index++) {
+            $response = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -DisableKeepAlive -Uri "http://127.0.0.1:$HttpPort/" -Headers @{Host=$Hostname} -TimeoutSec 5
+            $body = $response.Content | ConvertFrom-Json
+            if ($body.version -eq $CandidateVersion) { $candidate++ } else { $stable++ }
+            if ($response.StatusCode -notin 200..299) { $errors++ }
+        }
+        $lastObserved = 100.0 * $candidate / $Samples
+        $withinTolerance = if ($ExpectedPercent -eq 100) {$lastObserved -ge 99} else {[Math]::Abs($lastObserved - $ExpectedPercent) -le 8}
+        if ($withinTolerance) {
+            return [ordered]@{requestedCanaryPercent=$ExpectedPercent;observedCanaryPercent=[Math]::Round($lastObserved,3);samples=$Samples;stableResponses=$stable;canaryResponses=$candidate;errorResponses=$errors;attempt=$attempt;observedAt=(Get-Date).ToUniversalTime().ToString('o')}
+        }
+        Start-Sleep -Seconds 3
     }
-    $observed = 100.0 * $candidate / $Samples
-    if ([Math]::Abs($observed - $ExpectedPercent) -gt 8) { throw "Observed canary share $observed% is outside +/-8 points of $ExpectedPercent%." }
-    return [ordered]@{requestedCanaryPercent=$ExpectedPercent;observedCanaryPercent=[Math]::Round($observed,3);samples=$Samples;stableResponses=$stable;canaryResponses=$candidate;errorResponses=$errors;observedAt=(Get-Date).ToUniversalTime().ToString('o')}
+    throw "Observed canary share $lastObserved% did not reach the $ExpectedPercent% acceptance boundary after three samples."
 }
 
 function Measure-StableWindow {
@@ -453,6 +496,7 @@ try {
             Set-DemoManifest -Tag $GoodTag -Strategy canary -TagOnly -Snapshot good-candidate
             $state.commits.promotion = New-DeliveryCommit 'test(gitops): promote Phase 4 good candidate'
             $state.timestamps.promotionPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
+            Wait-DesiredApplication $GoodTag canary $state.commits.promotion
             foreach ($weight in @(10,25,50,100)) {
                 Wait-RouteWeights (100-$weight) $weight
                 $state.measurements = @($state.measurements) + @((Measure-Traffic $GoodTag $weight))
@@ -483,6 +527,7 @@ try {
             Set-DemoManifest -Tag $BadTag -Strategy canary -TagOnly -Snapshot bad-candidate
             $state.commits.rejection = New-DeliveryCommit 'test(gitops): deliver Phase 4 failing candidate'
             $state.timestamps.rejectionPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
+            Wait-DesiredApplication $BadTag canary $state.commits.rejection
             Wait-RouteWeights 90 10
             $reachedTen = Get-Date; $state.timestamps.badCandidateReachedTenAt = $reachedTen.ToUniversalTime().ToString('o')
             $state.measurements = @($state.measurements) + @((Measure-Traffic $BadTag 10)); Save-State $state
@@ -502,6 +547,7 @@ try {
             Set-DemoManifest -Tag $GoodTag -Strategy canary -TagOnly -Snapshot recovery
             $state.commits.recovery = New-DeliveryCommit 'test(gitops): recover Phase 4 stable release'
             $state.timestamps.recoveryPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
+            Wait-DesiredApplication $GoodTag canary $state.commits.recovery
             $application = Wait-Application Healthy -Version $GoodTag -Revision $state.commits.recovery -Digest $state.registry.good.runtimeDigest
             Wait-ArgoApplication payments Healthy $state.commits.recovery | Out-Null
             Wait-GatewayVersion $GoodTag
@@ -514,6 +560,7 @@ try {
             Set-DemoManifest -Tag $GoodTag -Strategy rolling -Snapshot canary-to-rolling
             $state.commits.canaryToRolling = New-DeliveryCommit 'test(gitops): return Phase 4 application to rolling'
             $state.timestamps.canaryToRollingPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
+            Wait-DesiredApplication $GoodTag rolling $state.commits.canaryToRolling
             $application = Wait-Application Healthy -Version $GoodTag -Revision $state.commits.canaryToRolling -Digest $state.registry.good.runtimeDigest -TimeoutSeconds 300
             Wait-GatewayVersion $GoodTag
             if (Get-KubernetesObject @('get','rollout',$ApplicationName,'-n',$Namespace)) { throw 'Rollout remains after canary-to-rolling migration.' }

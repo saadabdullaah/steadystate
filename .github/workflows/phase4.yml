@@ -114,6 +114,13 @@ jobs:
           PHASE4_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: vhs docs/demonstrations/phase4-canary-promotion.tape
 
+      - name: Verify promotion recording result
+        shell: pwsh
+        run: |
+          $state = Get-Content -Raw -LiteralPath .artifacts/phase4/acceptance/state.json | ConvertFrom-Json
+          $passed = @($state.checks | Where-Object {$_.name -eq 'good-canary-promoted-automatically' -and $_.status -eq 'passed'})
+          if ($passed.Count -ne 1) { throw 'The recorded promotion stage did not pass.' }
+
       - name: Record automatic rollback and Git recovery
         id: rollback
         shell: bash
@@ -123,6 +130,14 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PHASE4_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: vhs docs/demonstrations/phase4-automatic-rollback.tape
+
+      - name: Verify rollback recording result
+        shell: pwsh
+        run: |
+          $evidence = Get-Content -Raw -LiteralPath .artifacts/phase4/acceptance/evidence.json | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed' -or $evidence.failure) {
+            throw 'The recorded rollback and recovery stage did not pass.'
+          }
 
       - name: Capture acceptance diagnostics
         if: always()
@@ -187,6 +202,9 @@ jobs:
           foreach ($measurement in @($evidence.measurements)) {
             if ($measurement.samples -lt 500 -or [Math]::Abs([double]$measurement.observedCanaryPercent - [double]$measurement.requestedCanaryPercent) -gt 8) {
               throw 'A traffic measurement violates its sample or tolerance contract.'
+            }
+            if ([int]$measurement.requestedCanaryPercent -eq 100 -and [double]$measurement.observedCanaryPercent -lt 99) {
+              throw 'The 100% canary window did not measure at least 99% candidate traffic.'
             }
           }
           if (@($evidence.stableWindows).Count -ne 3 -or @($evidence.stableWindows | Where-Object durationSeconds -lt 30).Count -gt 0) {
