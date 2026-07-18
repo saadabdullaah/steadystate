@@ -94,6 +94,7 @@ function Set-DemoManifest {
         pause: 30s
 "@
     } else { '' }
+    if ($steps) { $steps += [Environment]::NewLine }
     $metrics = if ($Strategy -eq 'canary') { 'true' } else { 'false' }
     $content = @"
 apiVersion: platform.steadystate.dev/v1alpha1
@@ -137,6 +138,7 @@ $steps    automaticRollback: true
     networkIsolation: false
 "@
     Write-Utf8 -Path $ManifestPath -Content $content
+    Invoke-External kubectl kustomize (Split-Path -Parent $ManifestPath) | Out-Null
     $changed = @(git diff --name-only)
     if ($changed.Count -ne 1 -or $changed[0] -ne 'gitops/applications/demo/application.yaml') {
         throw "Acceptance changed unexpected tracked files: $($changed -join ', ')"
@@ -470,6 +472,9 @@ try {
             Add-Check $state 'promotion-path-no-routing-outage' $stageStarted 'Continuous k6 traffic observed no failed requests during migration and promotion.'
             Save-Snapshot 'after-promotion'
             Write-Host 'PHASE4_PROMOTION_RESULT_PASSED' -ForegroundColor Cyan
+        } catch {
+            Write-Host 'PHASE4_PROMOTION_RESULT_FAILED' -ForegroundColor Red
+            throw
         } finally { Stop-Load $load }
     } elseif ($Stage -eq 'Rollback') {
         $state = Read-State; $load = Start-Load 'rollback'; $failure = $null

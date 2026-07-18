@@ -612,6 +612,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"[ValidateSet('Prepare','Promote','Rollback','CaptureFailure')]",
 		"sha-$sourceCommit",
 		"This delivery commit must change only spec.image.tag.",
+		"Invoke-External kubectl kustomize (Split-Path -Parent $ManifestPath) | Out-Null",
 		"Invoke-External git commit -m $Message | Out-Host",
 		"Measure-Traffic $GoodTag $weight",
 		"Measure-Traffic $BadTag 10",
