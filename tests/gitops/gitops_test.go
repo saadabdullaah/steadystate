@@ -583,71 +583,80 @@ func TestArgoVersionAndChecksumPins(t *testing.T) {
 	}
 }
 
-func TestPhase4FoundationWorkflowContracts(t *testing.T) {
+func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	root := repositoryRoot(t)
 	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase4.yml")))
-	script := string(readFile(t, filepath.Join(root, "scripts", "progressive-delivery.ps1")))
-	controllerScript := string(readFile(t, filepath.Join(root, "scripts", "phase4-controller-test.ps1")))
+	script := string(readFile(t, filepath.Join(root, "scripts", "phase4-acceptance.ps1")))
+	promotionTape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase4-canary-promotion.tape")))
+	rollbackTape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase4-automatic-rollback.tape")))
 	for _, token := range []string{
 		"name: Phase 4 acceptance",
 		"timeout-minutes: 75",
 		"cancel-in-progress: false",
-		"phase4-foundation-${{ github.sha }}",
+		"phase4-acceptance-${{ github.sha }}",
 		"if-no-files-found: error",
-		"Capture foundation diagnostics",
-		"Undeploy GitOps foundation",
+		"Capture acceptance diagnostics",
+		"Delete ephemeral acceptance branch",
+		"Undeploy GitOps",
 		"Destroy cluster",
+		"permission-contents: write",
+		"docs/demonstrations/phase4-canary-promotion.gif",
+		"docs/demonstrations/phase4-automatic-rollback.gif",
 	} {
 		if !strings.Contains(workflow, token) {
 			t.Errorf("Phase 4 workflow is missing %q", token)
 		}
 	}
 	for _, token := range []string{
-		"gateway-plugin-enforced-90-10",
-		"envoy-traffic-followed-50-50",
-		"rollout-promoted-stable-100",
-		"Measure-Traffic -ExpectedCanaryPercent 10",
-		"Measure-Traffic -ExpectedCanaryPercent 50",
+		"acceptance/phase4-",
+		"[ValidateSet('Prepare','Promote','Rollback','CaptureFailure')]",
+		"sha-$sourceCommit",
+		"This delivery commit must change only spec.image.tag.",
+		"Invoke-External git commit -m $Message | Out-Host",
+		"Measure-Traffic $GoodTag $weight",
+		"Measure-Traffic $BadTag 10",
 		"Samples = 500",
-		"[Math]::Abs($observed - $ExpectedCanaryPercent) -gt 8",
-		"Wait-GatewayResponses -AllowedVersions @('stable')",
-		"observedGeneration -eq [long]$route.metadata.generation",
-		"Save-FoundationSnapshots -Name foundation-failure",
-		"finally",
-		"delete namespace steadystate-rollouts-proof",
+		"[Math]::Abs($observed - $ExpectedPercent) -gt 8",
+		"CanaryAnalysisFailed",
+		"Wait-CandidateAlert",
+		"Measure-StableWindow",
+		"Assert-K6NoFailures 'promotion'",
+		"Assert-K6NoFailures 'final-migration'",
+		"monitoringWorkingSetBytes",
+		"Save-FinalEvidence $state passed",
+		"Save-FinalEvidence $state failed $failure",
 	} {
 		if !strings.Contains(script, token) {
-			t.Errorf("Phase 4 foundation script is missing %q", token)
+			t.Errorf("Phase 4 acceptance script is missing %q", token)
 		}
 	}
-	diagnostics := strings.Index(workflow, "Capture foundation diagnostics")
-	upload := strings.Index(workflow, "Upload foundation artifact")
-	cleanup := strings.Index(workflow, "Undeploy GitOps foundation")
-	if diagnostics < 0 || diagnostics >= upload || upload >= cleanup {
+	diagnostics := strings.Index(workflow, "Capture acceptance diagnostics")
+	upload := strings.Index(workflow, "Upload Phase 4 acceptance artifact")
+	branchCleanup := strings.Index(workflow, "Delete ephemeral acceptance branch")
+	clusterCleanup := strings.Index(workflow, "Undeploy GitOps")
+	if diagnostics < 0 || diagnostics >= upload || upload >= branchCleanup || branchCleanup >= clusterCleanup {
 		t.Fatal("Phase 4 diagnostics, artifact, and cleanup ordering is invalid")
 	}
-	for _, token := range []string{
-		"Prove controller progression and reversible migrations",
-		".artifacts/phase4/controller/",
-		"rolling-to-canary-zero-downtime",
-		"bad-canary-automatic-rollback",
-		"canary-to-rolling-zero-downtime",
-	} {
-		if !strings.Contains(workflow, token) {
-			t.Errorf("Phase 4 controller workflow is missing %q", token)
+	gitDelivery := strings.Index(script, "} elseif ($Stage -eq 'Promote')")
+	if gitDelivery < 0 {
+		t.Fatal("could not locate the Phase 4 Git-only delivery interval")
+	}
+	for _, mutation := range []string{"kubectl apply", "kubectl patch", "kubectl delete"} {
+		if strings.Contains(script[gitDelivery:], mutation) {
+			t.Errorf("Phase 4 delivery interval contains Kubernetes mutation %q", mutation)
 		}
 	}
-	for _, token := range []string{
-		"Start-ContinuousLoad",
-		"Set-ApplicationSpec -Strategy canary -Tag $BadTag",
-		"CanaryAnalysisFailed",
-		"Assert-CanaryRouteStable",
-		"Set-ApplicationSpec -Strategy rolling -Tag $GoodTag",
-		"Save-Snapshots -Name 'failure'",
-		"Write-Evidence -Result failed",
+	for _, tape := range []struct {
+		content string
+		result  string
+	}{
+		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)"},
+		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)"},
 	} {
-		if !strings.Contains(controllerScript, token) {
-			t.Errorf("Phase 4 controller proof is missing %q", token)
+		for _, token := range []string{"Set WaitTimeout 20m", "Set Framerate 2", "Set PlaybackSpeed 8.0", tape.result} {
+			if !strings.Contains(tape.content, token) {
+				t.Errorf("Phase 4 VHS tape is missing %q", token)
+			}
 		}
 	}
 }
