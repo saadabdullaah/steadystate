@@ -92,6 +92,8 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	assertAutomated(t, argocd, true)
 
 	assertExternalChartApplication(t, objects, "monitoring", "https://prometheus-community.github.io/helm-charts", "kube-prometheus-stack", "87.16.1", "gitops/platform/monitoring/values.yaml", "monitoring")
+	monitoring := findObject(t, objects, "Application", "monitoring")
+	assertAnnotation(t, monitoring, "argocd.argoproj.io/ignore-healthcheck", "true")
 	assertExternalChartApplication(t, objects, "argo-rollouts", "https://argoproj.github.io/argo-helm", "argo-rollouts", "2.41.0", "gitops/platform/rollouts/values.yaml", "argo-rollouts")
 
 	operator := findObject(t, objects, "Application", "steadystate-operator")
@@ -617,6 +619,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"acceptance/phase4-",
 		"[ValidateSet('Prepare','Promote','Rollback','Finalize','CaptureFailure')]",
 		"sha-$sourceCommit",
+		"foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root'))",
 		"This delivery commit must change only spec.image.tag.",
 		"Invoke-External kubectl kustomize (Split-Path -Parent $ManifestPath) | Out-Null",
 		"Invoke-External git commit -m $Message | Out-Host",
