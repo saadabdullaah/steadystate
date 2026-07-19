@@ -2,9 +2,9 @@
 
 SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, and tested recovery without requiring a cloud account.
 
-Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, reversible rolling/canary migrations, and retained hosted evidence.
+Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`.
 
-> Status: Phases 0 through 3 are released. The Phase 4 release candidate is hosted-validated for `v0.4.0`; publication follows the exact-`main` CI, CodeQL, Nightly, and Phase 4 acceptance gates.
+> Status: Phases 0 through 4 are released through `v0.4.0`. Phase 5 is implemented as a `v0.5.0` release candidate and remains gated on its hosted acceptance artifact, exact-`main` regression workflows, tag, and release.
 
 ## Architecture
 
@@ -24,6 +24,13 @@ flowchart LR
     Rollouts["Argo Rollouts + Gateway plugin"] --> Children
     Prometheus["Prometheus"] --> Analysis
     Prometheus --> Rollouts
+    Alloy["Alloy"] --> Loki["Loki"]
+    OTel["OpenTelemetry Collector"] --> Tempo["Tempo"]
+    App --> Alloy
+    App --> OTel
+    Grafana["Grafana dashboards"] --> Prometheus
+    Grafana --> Loki
+    Grafana --> Tempo
     GHCR --> Children
     Children --> Gateway["Gateway API and Envoy Gateway"]
     Gateway --> App["Reachable application"]
@@ -126,6 +133,17 @@ The `phase4-acceptance` command is the staged Prepare/Promote/Rollback runner co
 
 [Hosted Phase 4 acceptance run 29681093123](https://github.com/saadabdullaah/steadystate/actions/runs/29681093123) passed all 12 release-candidate checks: zero-downtime rolling-to-canary migration, measured `10/25/50/100` traffic, automatic good promotion, alert-backed bad-candidate abort at 10%, three stable-only recovery windows, truthful status/provenance, and zero-downtime canary-to-rolling migration. Artifact `8440858967` contains both GIFs, schema-versioned evidence, k6 results, AnalysisRuns, alert and registry metadata, rendered resources, controller logs, and 158 diagnostic files; GitHub records SHA-256 `8ebecbfb3517f850e88eaac375fad2fe09efb5ab357a2564f7f54e1590337b95`.
 
+To verify the Phase 5 observability contracts and run the hosted-compatible test on an already deployed standard GitOps profile:
+
+```powershell
+.\scripts\dev.ps1 verify-observability
+.\scripts\dev.ps1 test-observability -Profile standard
+```
+
+The platform extends the existing Prometheus/Grafana installation with single-binary Loki and Tempo, a read-only Alloy log collector, and one OpenTelemetry Collector. Applications opt into metrics, logs, and traces independently. `logs=false` excludes Pods from Alloy discovery, `traces=false` removes the OTLP environment and trace egress policy, and `metrics=false` deletes the Application-owned ServiceMonitor and PrometheusRule. `ServiceHealth=True` is derived only from the active workload and accepted HTTPRoute, so it adds no controller polling or dependency on Prometheus.
+
+Grafana is available through `http://grafana.localtest.me:8080`; Prometheus, Loki, Tempo, and Alertmanager remain cluster-internal. The Phase 5 workflow records one request correlated by request ID and trace ID across all three data sources, proves telemetry opt-outs, fires the multi-window fast-burn alert with deterministic ten-percent failures, and enforces memory budgets before producing its GIF and schema-versioned evidence.
+
 Use `-Profile standard` for one worker or `-Profile full` for two workers. Override ports consistently when the defaults are occupied:
 
 ```powershell
@@ -146,13 +164,16 @@ make test-gitops PROFILE=standard
 make verify-progressive-delivery
 make test-progressive-delivery PROFILE=standard
 make phase4-acceptance PROFILE=standard
+make verify-observability
+make test-observability PROFILE=standard
+make phase5-acceptance PROFILE=standard
 make undeploy-gitops
 make destroy
 ```
 
 ## Automated demo delivery
 
-`apps/demo-app/VERSION` is the authoritative strict semver. A runtime-affecting demo change merged to `main` must bump it. The serialized Demo release workflow tests and publishes `linux/amd64` images to the public [SteadyState demo-app package](https://github.com/saadabdullaah/steadystate/pkgs/container/steadystate-demo-app) under immutable semver and full-source-SHA tags, verifies tag reuse by digest, and uses the repository-scoped delivery GitHub App only to open or update the GitOps manifest PR. Phase 4 additionally publishes immutable `-bad` semver and SHA variants from the same source for acceptance-only rollback proofs. No mutable `latest` tag is published, and normal application delivery begins only after the generated good-image PR is reviewed and merged.
+`apps/demo-app/VERSION` is the authoritative strict semver. A runtime-affecting demo change merged to `main` must bump it. The serialized Demo release workflow tests and publishes `linux/amd64` images to the public [SteadyState demo-app package](https://github.com/saadabdullaah/steadystate/pkgs/container/steadystate-demo-app) under immutable semver and full-source-SHA tags, verifies tag reuse by digest, and uses the repository-scoped delivery GitHub App only to open or update the GitOps manifest PR. Good and deterministic ten-percent-error variants remain immutable inputs for progressive-delivery and SLO acceptance. The `v0.5.0` binary adds JSON access logs and OTLP tracing without logging bodies, query strings, credentials, or request values. No mutable `latest` tag is published, and normal application delivery begins only after the generated good-image PR is reviewed and merged.
 
 ## Commands
 
@@ -177,6 +198,9 @@ make destroy
 | `verify-progressive-delivery` | Verify pinned Rollouts, Gateway plugin, monitoring, CRDs, GitOps values, and generated progressive-delivery contracts |
 | `test-progressive-delivery` | Prove the hosted-compatible Rollouts/Envoy weighted-routing and monitoring foundation on a standard cluster |
 | `phase4-acceptance` | Run one workflow-controlled Prepare, Promote, or Rollback stage of the Git-only hosted acceptance flow |
+| `verify-observability` | Verify chart checksums, deterministic GitOps renders, telemetry builders, SLO rules, datasources, and dashboards |
+| `test-observability` | Run the Phase 5 correlated telemetry, opt-out, SLO alert, regression, and memory-budget proof on a prepared cluster |
+| `phase5-acceptance` | Run one workflow-controlled Prepare, Test, Finalize, or failure-capture stage of Phase 5 acceptance |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |
 
@@ -187,6 +211,8 @@ make destroy
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Architecture decision records](docs/adr/README.md)
+- [Resource budgets and benchmarks](docs/benchmarks.md)
+- [Hosted evidence contracts](docs/evidence.md)
 
 ## License
 

@@ -148,3 +148,32 @@
 - Commit the hosted GIFs and documentation, then require the rerun of all five CI jobs, CodeQL, and branch Phase 4 acceptance before merging PR #27.
 - After the squash merge, run exact-`main` CI, 60-minute CodeQL, existing Nightly Integration, and Phase 4 acceptance; retain and verify the exact-main artifact before tagging and releasing `v0.4.0`.
 - Exact-main CI `29685492924`, CodeQL `29685492928`, and Phase 4 acceptance `29685512926` passed on merge `1ca1564`. Nightly `29685511924` exposed a standalone-operator regression before publication: unconditional optional-CRD watches prevented controller cache startup when Rollouts and monitoring CRDs were absent. The follow-up makes watch registration capability-aware, keeps rolling reconciliation independent of Phase 4 add-ons, and rejects unavailable canary capability before child mutation; the release remains gated on its follow-up PR and a clean exact-main Nightly rerun.
+
+### Release outcome
+
+- Merged the standalone rolling-controller correction in PR #28 at `f9ba51a`, revalidated the release gates, and retained it as the exact `v0.4.0` release commit.
+- Published [SteadyState v0.4.0 - Progressive Delivery and Automatic Rollback](https://github.com/saadabdullaah/steadystate/releases/tag/v0.4.0) on 2026-07-19.
+
+## 2026-07-19 - Phase 5 observability
+
+### Kubernetes 1.35 compatibility gate
+
+- Rebased every kind profile and kubectl expectation on Kubernetes `1.35.5` using `kindest/node:v1.35.5@sha256:ce977ae6d65918d0b58a5f8b5e940429c2ce42fa3a5619ec2bbc60b949c0ac95`.
+- Converted kubeadm patches to `v1beta3` map-form kubelet arguments while retaining Go `1.25.12`, kind `0.32.0`, and the existing Kubernetes Go modules.
+- Recorded the compatibility boundary in ADR-0008. Local commit `764fcaa` is the Phase 5 rebaseline checkpoint; hosted Phase 0-4 regression run identifiers will be recorded after the consolidated PR starts Actions.
+
+### GitOps observability foundation
+
+- Added checksum-pinned Loki `18.5.1`/`3.7.3`, Tempo `1.24.4`/`2.9.0`, OTel Collector `0.165.0`/`0.156.0`, and Alloy `1.10.1`/`1.17.1` Argo children at waves `-16` through `-13`.
+- Extended the existing Prometheus/Grafana plane rather than installing duplicates. Added explicit correlated datasources, a loopback-only Grafana HTTPRoute, 24-hour capped Loki/Tempo storage, label-filtered Alloy discovery, a bounded OTLP pipeline, project restrictions, checksum verification, and deterministic render tests.
+
+### Telemetry, service health, SLOs, and dashboards
+
+- Activated `observability.logs` and `observability.traces`; added deterministic Pod labels, OTLP environment, a collector-only egress NetworkPolicy, rolling metrics resources, opt-out deletion, and watch-derived `ServiceHealth`.
+- Added structured JSON access logs, secure request IDs, W3C Trace Context propagation, OTLP export, normalized routes, health/metrics exclusions, and redaction tests to the demo. Declared `VERSION=v0.5.0` while retaining the released `v0.4.0` GitOps image until the post-merge delivery bot PR.
+- Added request/error/availability/P95/burn recording rules, `14.4` fast and `6` slow multi-window alerts, fail-safe empty-vector behavior, and deterministic Application/platform Grafana dashboards.
+
+### Consolidated hosted closeout
+
+- Added the separate 60-minute Phase 5 workflow, real VHS tape, schema-versioned evidence, correlated Prometheus/Loki/Tempo queries, opt-out proof, ten-percent-error burn alert proof, Grafana/Alertmanager visibility, memory budgets, progressive-delivery regression, success/failure logs, rendered state, diagnostics, and bounded cleanup.
+- PR number, workflow runs, artifact ID/checksum, hosted GIF checksum, exact-main gates, bot delivery PR, tag, and release remain intentionally blank until GitHub produces them; publication must not claim completion before those gates pass.
