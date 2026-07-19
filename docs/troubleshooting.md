@@ -11,7 +11,7 @@ docker info
 
 ## Docker is too old or uses cgroup v1
 
-The Kubernetes 1.36 kind profile requires Docker Engine 24 or newer with cgroup v2. Upgrade Docker Desktop, confirm it uses the WSL2 Linux engine, restart it, and rerun `doctor`. SteadyState fails before cluster creation rather than silently falling back to an older Kubernetes release.
+The Kubernetes 1.35.5 kind profile requires Docker Engine 24 or newer with cgroup v2. Upgrade Docker Desktop, confirm it uses the WSL2 Linux engine, restart it, and rerun `doctor`. SteadyState fails before cluster creation rather than silently falling back to another Kubernetes release.
 
 ## Port 8080 or 8443 is occupied
 

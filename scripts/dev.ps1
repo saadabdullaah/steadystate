@@ -357,6 +357,8 @@ function Invoke-Diagnostics {
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'versions.env') -Destination (Join-Path $directory 'platform-versions.env')
+        & kubectl version -o yaml *> (Join-Path $directory 'kubernetes-version.yaml')
         & kubectl get nodes -o wide *> (Join-Path $directory 'nodes.txt')
         & kubectl get pods -A -o wide *> (Join-Path $directory 'pods.txt')
         & kubectl get gatewayclass,gateway,httproute -A -o yaml *> (Join-Path $directory 'gateway-api.yaml')
