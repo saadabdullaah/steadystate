@@ -608,8 +608,8 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"Undeploy GitOps",
 		"Destroy cluster",
 		"permission-contents: write",
-		"docs/demonstrations/phase4-canary-promotion.gif",
-		"docs/demonstrations/phase4-automatic-rollback.gif",
+		".artifacts/phase4/acceptance/phase4-canary-promotion.gif",
+		".artifacts/phase4/acceptance/phase4-automatic-rollback.gif",
 	} {
 		if !strings.Contains(workflow, token) {
 			t.Errorf("Phase 4 workflow is missing %q", token)
@@ -704,15 +704,26 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		content string
 		result  string
 		timeout string
+		output  string
 	}{
-		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m"},
-		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 35m"},
+		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
+		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 35m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
 	} {
-		for _, token := range []string{tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-recording.ps1", "Wait+Screen", tape.result} {
+		for _, token := range []string{tape.output, tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-recording.ps1", "Wait+Screen", tape.result} {
 			if !strings.Contains(tape.content, token) {
 				t.Errorf("Phase 4 VHS tape is missing %q", token)
 			}
 		}
+		if strings.Contains(tape.content, "Output docs/demonstrations/") {
+			t.Error("Phase 4 VHS output must not modify tracked demonstration files during Git delivery")
+		}
+	}
+}
+
+func TestCodeQLWorkflowAllowsHostedAnalysisToFinish(t *testing.T) {
+	workflow := string(readFile(t, filepath.Join(repositoryRoot(t), ".github", "workflows", "codeql.yml")))
+	if !strings.Contains(workflow, "timeout-minutes: 60") {
+		t.Fatal("CodeQL must retain the empirically required 60-minute job timeout")
 	}
 }
 

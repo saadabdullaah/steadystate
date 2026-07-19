@@ -146,4 +146,4 @@
 ### Publication gates
 
 - Commit the hosted GIFs and documentation, then require the rerun of all five CI jobs, CodeQL, and branch Phase 4 acceptance before merging PR #27.
-- After the squash merge, run exact-`main` CI, 40-minute CodeQL, existing Nightly Integration, and Phase 4 acceptance; retain and verify the exact-main artifact before tagging and releasing `v0.4.0`.
+- After the squash merge, run exact-`main` CI, 60-minute CodeQL, existing Nightly Integration, and Phase 4 acceptance; retain and verify the exact-main artifact before tagging and releasing `v0.4.0`.

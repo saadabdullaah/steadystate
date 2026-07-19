@@ -1,4 +1,4 @@
-Output docs/demonstrations/phase4-canary-promotion.gif
+Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif
 
 Set Shell bash
 Set FontSize 18
