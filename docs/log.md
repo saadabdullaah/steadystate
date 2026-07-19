@@ -108,3 +108,42 @@
 
 - Merge PR #21 only after its five required checks pass on the evidence-and-documentation commit.
 - Run CI, 40-minute CodeQL, and Nightly Integration on the exact merged `main` commit before publishing the annotated `v0.3.0` tag and GitHub release.
+
+## 2026-07-19 - Phase 4 progressive delivery and automatic rollback
+
+### Design gate and GitOps foundation
+
+- Merged PR #22 at `0088394` with frozen Rollouts `2.41.0`/controller `v1.9.0`, Gateway plugin `v0.16.0`, kube-prometheus-stack `87.16.1`, k6 `v2.1.0`, checksum enforcement, constrained projects/RBAC, trimmed monitoring, and ADR-0007.
+- Passed all five CI jobs in run `29587019868` and the hosted Envoy weighted-routing/monitoring compatibility proof in Phase 4 run `29587019867` on checkpoint head `2eda385`.
+- Retained artifact `8409663696` (`phase4-foundation-65c27ea...`, 1,817,039 bytes) with GitHub SHA-256 `092d95270cca1ee825404a60867be984c2b2d25f3b9014ca0f43d04e68b1df6c`.
+
+### Demo telemetry and immutable variants
+
+- Merged PR #23 at `0dfa317` with deterministic error/latency/crash injection, RED metrics, health exclusions, race-tested configuration boundaries, `VERSION=v0.4.0`, and immutable good/bad publication contracts.
+- Passed all five CI jobs in run `29588945870`; hosted foundation run `29588946834` retained artifact `8410432249` with GitHub SHA-256 `c6b4c51d858b1e7e4896ae440c89a75fdf0737c5161db63fa7b793e8619f8afd`.
+- Demo release run `29590086934` published public `v0.4.0`, `v0.4.0-bad`, and both full-source-SHA variants from merge `0dfa317`, verified immutable digests, and opened delivery PR #24.
+- Generated PR #24 passed all five CI jobs in run `29590193617` and merged at `89382cf`, changing only the normal demo GitOps image tag.
+
+### Deterministic progressive-delivery resources
+
+- Merged PR #25 at `32e74ac` with typed Rollout builders, stable/canary Services, weighted HTTPRoute integration, inline metric analysis, ServiceMonitor/PrometheusRule resources, suffix-safe names, vendored CRDs, scheme registration, least-privileged RBAC, and deterministic structural/golden coverage.
+- Passed all five CI jobs in run `29597577828` and hosted foundation run `29597577840`; artifact `8413934573` has GitHub SHA-256 `b16e5bab1be75d7491cfe394cb0eece3fff9a1414a17e2f20737287a2ceef873`.
+
+### Controller and reversible migration
+
+- Merged PR #26 at `7d3d5bb` with active canary reconciliation, Rollout/AnalysisRun/monitoring watches, truthful rollout status, provider/no-traffic fail-safe behavior, field-owner-aware drift repair, deleted-Rollout recovery from the last healthy tuple, and restart-safe rolling↔canary migration.
+- Passed all five CI jobs in run `29622523680` and the non-recorded hosted controller flow in Phase 4 run `29622523675`; artifact `8422801964` has GitHub SHA-256 `592dca3b34b0cd3d10798ecf328d2561af3133e103b80b29abf0e572cd8b1b59`.
+
+### Hosted acceptance closeout
+
+- PR #27 candidate `ff3e419` adds the separate bounded Phase 4 workflow, Git-only ephemeral delivery sequence, independent VHS execution/recording, success and failure diagnostics, strict artifact completeness, and unconditional branch/GitOps/cluster cleanup.
+- CI run `29681093152` passed quality, Windows, envtest, security, and kind-smoke. Phase 4 run `29681093123` passed all workflow steps, including both recordings, evidence verification, artifact upload, ephemeral branch deletion, GitOps teardown, and cluster destruction.
+- All 12 schema-versioned checks passed. Good traffic measured 11.8%, 26.2%, 52.0%, and 100.0% canary shares from 500 requests per window. The bad candidate measured 12.0% at its 10% step, fired its alert, aborted automatically, preserved the active tuple, and was followed by three 30-second stable-only windows containing 4,038, 4,262, and 4,364 successful requests.
+- Both strategy migrations completed without a routing failure. Final active state was `v0.4.0`, digest `sha256:b362da3460289de02c0f0d9ade9120ca3549de329c180bda2cfe40ea3c63233e`, at the exact final Git revision. The monitoring working set was 383,983,616 bytes, below the approximately 1.2 GiB budget.
+- Artifact `8440858967` (`phase4-acceptance-0e99a028...`, 6,379,903 compressed bytes) has GitHub SHA-256 `8ebecbfb3517f850e88eaac375fad2fe09efb5ab357a2564f7f54e1590337b95`. It retains both tapes/GIFs, JSON evidence, five traffic measurements, k6 scripts/output/summaries, AnalysisRuns, Alertmanager and registry metadata, rendered GitOps/resources, snapshots, controller logs, and 158 diagnostic files.
+- The promotion GIF is 461,583 bytes with SHA-256 `9a29885ce75065721f16f13ab6472de9d680ebd8ae504546c4ff17d798409b42`; the rollback/recovery GIF is 1,930,829 bytes with SHA-256 `17bc9d8188f5692f1c04423d57926b3e35fa4d94aa47c014dc533150d37960fc`. Evidence JSON SHA-256 is `0bbe40d446ea7216af27a8fe7eaabeae18d6b06bf83dcfd1a1d508bafc02eac9`.
+
+### Publication gates
+
+- Commit the hosted GIFs and documentation, then require the rerun of all five CI jobs, CodeQL, and branch Phase 4 acceptance before merging PR #27.
+- After the squash merge, run exact-`main` CI, 40-minute CodeQL, existing Nightly Integration, and Phase 4 acceptance; retain and verify the exact-main artifact before tagging and releasing `v0.4.0`.

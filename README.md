@@ -2,9 +2,9 @@
 
 SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, and tested recovery without requiring a cloud account.
 
-Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health.
+Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, reversible rolling/canary migrations, and retained hosted evidence.
 
-> Status: Phases 0 through 3 are complete. `v0.1.0` preserves the Application-operator baseline, `v0.2.0` is the Team-tenancy release, and the fully hosted-validated GitOps platform is the `v0.3.0` release line.
+> Status: Phases 0 through 3 are released. The Phase 4 release candidate is hosted-validated for `v0.4.0`; publication follows the exact-`main` CI, CodeQL, Nightly, and Phase 4 acceptance gates.
 
 ## Architecture
 
@@ -19,7 +19,11 @@ flowchart LR
     Argo --> Team["Team and Application CRs"]
     Argo --> Operator["SteadyState operator"]
     Team --> Operator
-    Operator --> Children["Deployment / Service / ConfigMap / HTTPRoute"]
+    Operator --> Children["Deployment or Rollout / Services / ConfigMap / HTTPRoute"]
+    Operator --> Analysis["AnalysisTemplate / ServiceMonitor / PrometheusRule"]
+    Rollouts["Argo Rollouts + Gateway plugin"] --> Children
+    Prometheus["Prometheus"] --> Analysis
+    Prometheus --> Rollouts
     GHCR --> Children
     Children --> Gateway["Gateway API and Envoy Gateway"]
     Gateway --> App["Reachable application"]
@@ -107,6 +111,21 @@ Argo CD manages its configuration, the operator, the payments Team, and the demo
 
 [Hosted Phase 3 acceptance run 29570255069](https://github.com/saadabdullaah/steadystate/actions/runs/29570255069) passed all 14 checks on `7f29303`. Artifact `8403532367` contains the 3,320,344-byte GIF, schema-versioned JSON, rendered GitOps state, registry metadata, Argo snapshots, controller logs, and cluster diagnostics; its SHA-256 is `0918fbb1c25b393291a6bd248d549f56027463d8befe3c495b7074b96b06f094`.
 
+To verify Phase 4 progressive delivery after deploying the standard GitOps profile:
+
+```powershell
+.\scripts\dev.ps1 verify-progressive-delivery
+.\scripts\dev.ps1 test-progressive-delivery -Profile standard -EvidencePath .artifacts/phase4/foundation.json
+```
+
+The `phase4-acceptance` command is the staged Prepare/Promote/Rollback runner composed by the repository's Phase 4 workflow; it requires the workflow's ephemeral branch and repository-scoped token context. The normal demo Application declares canary weights `10`, `25`, `50`, and `100`, each gated by Prometheus success-rate, P95-latency, and restart analysis. A good image promotes automatically. A failed analysis restores stable traffic, preserves the last healthy version/digest/revision tuple, and leaves desired state Degraded until a Git recovery commit. Strategy changes in either direction keep a verified data plane serving before obsolete resources are removed.
+
+![Phase 4 automatic canary promotion](docs/demonstrations/phase4-canary-promotion.gif)
+
+![Phase 4 automatic rollback and Git recovery](docs/demonstrations/phase4-automatic-rollback.gif)
+
+[Hosted Phase 4 acceptance run 29681093123](https://github.com/saadabdullaah/steadystate/actions/runs/29681093123) passed all 12 release-candidate checks: zero-downtime rolling-to-canary migration, measured `10/25/50/100` traffic, automatic good promotion, alert-backed bad-candidate abort at 10%, three stable-only recovery windows, truthful status/provenance, and zero-downtime canary-to-rolling migration. Artifact `8440858967` contains both GIFs, schema-versioned evidence, k6 results, AnalysisRuns, alert and registry metadata, rendered resources, controller logs, and 158 diagnostic files; GitHub records SHA-256 `8ebecbfb3517f850e88eaac375fad2fe09efb5ab357a2564f7f54e1590337b95`.
+
 Use `-Profile standard` for one worker or `-Profile full` for two workers. Override ports consistently when the defaults are occupied:
 
 ```powershell
@@ -124,13 +143,16 @@ make bootstrap PROFILE=minimal
 make test-isolation PROFILE=standard
 make deploy-gitops PROFILE=standard
 make test-gitops PROFILE=standard
+make verify-progressive-delivery
+make test-progressive-delivery PROFILE=standard
+make phase4-acceptance PROFILE=standard
 make undeploy-gitops
 make destroy
 ```
 
 ## Automated demo delivery
 
-`apps/demo-app/VERSION` is the authoritative strict semver. A runtime-affecting demo change merged to `main` must bump it. The serialized Demo release workflow tests and publishes `linux/amd64` images to the public [SteadyState demo-app package](https://github.com/saadabdullaah/steadystate/pkgs/container/steadystate-demo-app) under immutable semver and full-source-SHA tags, verifies tag reuse by digest, and uses the repository-scoped delivery GitHub App only to open or update the GitOps manifest PR. No mutable `latest` tag is published, and application delivery begins only after that PR is reviewed and merged.
+`apps/demo-app/VERSION` is the authoritative strict semver. A runtime-affecting demo change merged to `main` must bump it. The serialized Demo release workflow tests and publishes `linux/amd64` images to the public [SteadyState demo-app package](https://github.com/saadabdullaah/steadystate/pkgs/container/steadystate-demo-app) under immutable semver and full-source-SHA tags, verifies tag reuse by digest, and uses the repository-scoped delivery GitHub App only to open or update the GitOps manifest PR. Phase 4 additionally publishes immutable `-bad` semver and SHA variants from the same source for acceptance-only rollback proofs. No mutable `latest` tag is published, and normal application delivery begins only after the generated good-image PR is reviewed and merged.
 
 ## Commands
 
@@ -152,6 +174,9 @@ make destroy
 | `deploy-gitops` / `undeploy-gitops` | Reconcile or remove pinned Argo CD, its route, app-of-apps root, operator, Team, and demo Application |
 | `test-gitops` | Verify pinned Argo installation, Dex removal, UI routing, exact revision inheritance, health, and demo reachability |
 | `verify-gitops` | Render and structurally validate the Helm root, every Kustomize leaf, projects, sync policies, and ownership boundaries |
+| `verify-progressive-delivery` | Verify pinned Rollouts, Gateway plugin, monitoring, CRDs, GitOps values, and generated progressive-delivery contracts |
+| `test-progressive-delivery` | Prove the hosted-compatible Rollouts/Envoy weighted-routing and monitoring foundation on a standard cluster |
+| `phase4-acceptance` | Run one workflow-controlled Prepare, Promote, or Rollback stage of the Git-only hosted acceptance flow |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |
 
