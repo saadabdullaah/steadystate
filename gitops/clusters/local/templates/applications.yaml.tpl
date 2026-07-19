@@ -40,6 +40,9 @@ spec:
     - repoURL: {{ .Values.repoURL | quote }}
       targetRevision: {{ .Values.gitRevision | quote }}
       ref: values
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      path: gitops/platform/observability
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

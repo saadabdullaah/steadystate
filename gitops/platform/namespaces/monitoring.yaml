@@ -4,3 +4,4 @@ metadata:
   name: monitoring
   labels:
     app.kubernetes.io/part-of: steadystate
+    steadystate.dev/gateway-access: "true"

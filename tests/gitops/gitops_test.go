@@ -35,6 +35,7 @@ func TestGitOpsRendersDeterministically(t *testing.T) {
 
 	for _, path := range []string{
 		"gitops/platform",
+		"gitops/platform/observability",
 		"gitops/teams/payments",
 		"gitops/applications/demo",
 	} {
@@ -247,6 +248,11 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	if err != nil || !found || labels["steadystate.dev/gateway-access"] != "true" {
 		t.Fatalf("argocd namespace does not opt into the shared Gateway: %#v", labels)
 	}
+	monitoringNamespace := findObject(t, objects, "Namespace", "monitoring")
+	labels, found, err = unstructured.NestedStringMap(monitoringNamespace, "metadata", "labels")
+	if err != nil || !found || labels["steadystate.dev/gateway-access"] != "true" {
+		t.Fatalf("monitoring namespace does not opt into the shared Gateway: %#v", labels)
+	}
 
 	config := findObject(t, objects, "ConfigMap", "argocd-cm")
 	data, found, err := unstructured.NestedStringMap(config, "data")
@@ -306,15 +312,15 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	parent := parentRefs[0].(map[string]any)
 	assertString(t, parent, "steadystate", "name")
 	assertString(t, parent, "steadystate-system", "namespace")
-	findObject(t, objects, "Namespace", "monitoring")
 	findObject(t, objects, "Namespace", "argo-rollouts")
-	grafanaRoute := findObject(t, objects, "HTTPRoute", "grafana")
+	observabilityObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "platform", "observability")))
+	grafanaRoute := findObject(t, observabilityObjects, "HTTPRoute", "grafana")
 	hostnames, found, err = unstructured.NestedStringSlice(grafanaRoute, "spec", "hostnames")
 	if err != nil || !found || len(hostnames) != 1 || hostnames[0] != "grafana.localtest.me" {
 		t.Fatalf("unexpected Grafana hostnames: %#v", hostnames)
 	}
 	for _, name := range []string{"steadystate-application-dashboard", "steadystate-platform-dashboard"} {
-		dashboard := findObject(t, objects, "ConfigMap", name)
+		dashboard := findObject(t, observabilityObjects, "ConfigMap", name)
 		labels, found, err := unstructured.NestedStringMap(dashboard, "metadata", "labels")
 		if err != nil || !found || labels["grafana_dashboard"] != "1" {
 			t.Fatalf("dashboard %s is not selected by the Grafana sidecar", name)
@@ -954,8 +960,12 @@ func assertExternalChartApplication(t *testing.T, objects []map[string]any, name
 	assertAutomated(t, application, true)
 	assertString(t, application, namespace, "spec", "destination", "namespace")
 	sources := nestedSlice(t, application, "spec", "sources")
-	if len(sources) != 2 {
-		t.Fatalf("%s has %d sources, want 2", name, len(sources))
+	wantSources := 2
+	if name == "monitoring" {
+		wantSources = 3
+	}
+	if len(sources) != wantSources {
+		t.Fatalf("%s has %d sources, want %d", name, len(sources), wantSources)
 	}
 	chartSource := sources[0].(map[string]any)
 	assertString(t, chartSource, chartRepo, "repoURL")
@@ -968,6 +978,10 @@ func assertExternalChartApplication(t *testing.T, objects []map[string]any, name
 	assertString(t, valuesSource, testRevision, "targetRevision")
 	assertString(t, valuesSource, "values", "ref")
 	if name == "monitoring" {
+		observabilitySource := sources[2].(map[string]any)
+		assertString(t, observabilitySource, repositoryURL, "repoURL")
+		assertString(t, observabilitySource, testRevision, "targetRevision")
+		assertString(t, observabilitySource, "gitops/platform/observability", "path")
 		options := stringSlice(t, application, "spec", "syncPolicy", "syncOptions")
 		assertExactSet(t, options, []string{"ServerSideApply=true"})
 	}
