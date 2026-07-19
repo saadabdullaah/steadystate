@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: steadystate-platform-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  platform.json: |
+    {"annotations":{"list":[]},"editable":false,"graphTooltip":1,"panels":[{"datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":9,"w":12,"x":0,"y":0},"id":1,"targets":[{"expr":"kube_customresource_status_condition{customresource_group=\"platform.steadystate.dev\",condition=\"Ready\"}","refId":"A"}],"title":"Team and Application health","type":"table"},{"datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":9,"w":12,"x":12,"y":0},"id":2,"targets":[{"expr":"ALERTS{alertname=~\"SteadyState.*\",alertstate=\"firing\"}","refId":"A"}],"title":"Rollout and SLO alerts","type":"table"},{"datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"bytes"},"overrides":[]},"gridPos":{"h":9,"w":24,"x":0,"y":9},"id":3,"targets":[{"expr":"sum by (namespace) (container_memory_working_set_bytes{container!=\"\",image!=\"\"})","refId":"A"}],"title":"Platform resource footprint","type":"timeseries"}],"schemaVersion":41,"tags":["steadystate","platform"],"time":{"from":"now-1h","to":"now"},"title":"SteadyState Platform Overview","uid":"steadystate-platform","version":1}

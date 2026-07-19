@@ -5,3 +5,7 @@ rootTargetRevision: main
 operatorImage: ghcr.io/saadabdullaah/steadystate-operator:v0.3.0
 argoRolloutsChartVersion: 2.41.0
 kubePrometheusStackChartVersion: 87.16.1
+lokiChartVersion: 18.5.1
+alloyChartVersion: 1.10.1
+tempoChartVersion: 1.24.4
+otelCollectorChartVersion: 0.165.0

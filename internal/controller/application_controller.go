@@ -9,6 +9,7 @@ import (
 	rolloutsv1alpha1 "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -36,6 +37,7 @@ const ApplicationFinalizer = "steadystate.dev/finalizer"
 const (
 	conditionConfigurationReady  = "ConfigurationReady"
 	conditionSecurityPolicyReady = "SecurityPolicyReady"
+	conditionServiceHealth       = "ServiceHealth"
 	conditionRolloutHealthy      = "RolloutHealthy"
 	conditionReady               = "Ready"
 )
@@ -61,6 +63,7 @@ type ApplicationReconciler struct {
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors;prometheusrules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
@@ -168,7 +171,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	case app.Spec.Deployment.Strategy == platformv1alpha1.DeploymentStrategyCanary:
 		desiredStatus, routeRejected = canaryWorkloadStatus(app, runtimeState, digestResolution, sourceRevision)
 	case runtimeState.migrating:
-		desiredStatus = strategyMigrationStatus(app, runtimeState.migrationDetail)
+		desiredStatus = strategyMigrationStatus(app, runtimeState)
 	default:
 		desiredStatus, routeRejected = workloadStatus(app, runtimeState.deployment, runtimeState.route, digestResolution, sourceRevision)
 	}
@@ -249,6 +252,7 @@ func mutateDeployment(current, desired *appsv1.Deployment, manageReplicas bool) 
 			container.Image = desiredContainer.Image
 			container.Ports = desiredContainer.Ports
 			container.EnvFrom = desiredContainer.EnvFrom
+			container.Env = desiredContainer.Env
 			container.LivenessProbe = desiredContainer.LivenessProbe
 			container.ReadinessProbe = desiredContainer.ReadinessProbe
 			container.Resources = desiredContainer.Resources
@@ -280,6 +284,7 @@ func workloadStatus(app *platformv1alpha1.Application, deployment *appsv1.Deploy
 
 	deploymentReady, deploymentFailed := deploymentState(deployment, app.Spec.Runtime.Replicas.Min)
 	routeReady, routeRejected := routeState(route)
+	setServiceHealth(&status, app, deploymentReady && routeReady, routeRejected)
 	switch {
 	case deploymentFailed:
 		status.Phase = platformv1alpha1.ApplicationPhaseDegraded
@@ -338,6 +343,20 @@ func degradedStatus(app *platformv1alpha1.Application, reason, message string) p
 	return status
 }
 
+func setServiceHealth(status *platformv1alpha1.ApplicationStatus, app *platformv1alpha1.Application, available, routeRejected bool) {
+	if available {
+		setCondition(status, app.Generation, conditionServiceHealth, metav1.ConditionTrue, "ServiceAvailable", "The active workload is available and its HTTPRoute is accepted with resolved references")
+		return
+	}
+	reason := "ServiceUnavailable"
+	message := "Waiting for an available active workload and an accepted HTTPRoute"
+	if routeRejected {
+		reason = "RouteRejected"
+		message = "HTTPRoute was rejected or has unresolved references"
+	}
+	setCondition(status, app.Generation, conditionServiceHealth, metav1.ConditionFalse, reason, message)
+}
+
 func baseStatus(app *platformv1alpha1.Application) platformv1alpha1.ApplicationStatus {
 	status := *app.Status.DeepCopy()
 	status.ObservedGeneration = app.Generation
@@ -349,6 +368,9 @@ func setCondition(status *platformv1alpha1.ApplicationStatus, generation int64, 
 }
 
 func deploymentState(deployment *appsv1.Deployment, desired int32) (ready, failed bool) {
+	if deployment == nil {
+		return false, false
+	}
 	for _, condition := range deployment.Status.Conditions {
 		if condition.Type == appsv1.DeploymentProgressing && condition.Status == corev1.ConditionFalse && condition.Reason == "ProgressDeadlineExceeded" {
 			return false, true
@@ -469,6 +491,7 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
+		Owns(&networkingv1.NetworkPolicy{}).
 		Owns(&gatewayv1.HTTPRoute{}).
 		Watches(&appsv1.ReplicaSet{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).

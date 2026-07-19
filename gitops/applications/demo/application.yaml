@@ -40,8 +40,8 @@ spec:
     maximumErrorRate: "1%"
   observability:
     metrics: true
-    logs: false
-    traces: false
+    logs: true
+    traces: true
   security:
     requireSignedImage: false
     runAsNonRoot: true

@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"strconv"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +18,15 @@ func Deployment(application *platformv1alpha1.Application) *appsv1.Deployment {
 	selectors := SelectorLabels(application)
 	templateLabels := Labels(application)
 	templateLabels[VersionLabelKey] = application.Spec.Image.Tag
+	templateLabels[LogsLabelKey] = strconv.FormatBool(application.Spec.Observability.Logs)
+	templateLabels[TracesLabelKey] = strconv.FormatBool(application.Spec.Observability.Traces)
+	environment := []corev1.EnvVar{}
+	if application.Spec.Observability.Traces {
+		environment = append(environment,
+			corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: "otel-collector.monitoring.svc.cluster.local:4317"},
+			corev1.EnvVar{Name: "OTEL_SERVICE_NAME", Value: application.Name},
+		)
+	}
 	replicas := application.Spec.Runtime.Replicas.Min
 	if application.Spec.Deployment.Strategy == platformv1alpha1.DeploymentStrategyCanary {
 		replicas = 0
@@ -46,6 +57,7 @@ func Deployment(application *platformv1alpha1.Application) *appsv1.Deployment {
 						EnvFrom: []corev1.EnvFromSource{{ConfigMapRef: &corev1.ConfigMapEnvSource{
 							LocalObjectReference: corev1.LocalObjectReference{Name: ConfigMapName(application)},
 						}}},
+						Env:            environment,
 						LivenessProbe:  httpProbe("/healthz", application.Spec.Runtime.Port),
 						ReadinessProbe: httpProbe("/readyz", application.Spec.Runtime.Port),
 						Resources: corev1.ResourceRequirements{

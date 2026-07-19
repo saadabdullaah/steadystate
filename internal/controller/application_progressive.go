@@ -11,6 +11,7 @@ import (
 	rolloutsv1alpha1 "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -46,10 +47,22 @@ type applicationRuntimeState struct {
 }
 
 func (r *ApplicationReconciler) reconcileRuntimeChildren(ctx context.Context, app *platformv1alpha1.Application) (*applicationRuntimeState, error) {
+	var state *applicationRuntimeState
+	var err error
 	if app.Spec.Deployment.Strategy == platformv1alpha1.DeploymentStrategyCanary {
-		return r.reconcileCanaryChildren(ctx, app)
+		state, err = r.reconcileCanaryChildren(ctx, app)
+	} else {
+		state, err = r.reconcileRollingChildren(ctx, app)
 	}
-	return r.reconcileRollingChildren(ctx, app)
+	if err != nil {
+		return nil, err
+	}
+	changed, err := r.reconcileObservabilityResources(ctx, app)
+	if err != nil {
+		return nil, err
+	}
+	state.mutated = state.mutated || changed
+	return state, nil
 }
 
 func (r *ApplicationReconciler) reconcileCanaryChildren(ctx context.Context, app *platformv1alpha1.Application) (*applicationRuntimeState, error) {
@@ -345,7 +358,7 @@ func (r *ApplicationReconciler) reconcileProgressiveResources(ctx context.Contex
 			return mutated, fmt.Errorf("hold serving Deployment during migration: %w", err)
 		}
 	}
-	for _, desired := range []*unstructured.Unstructured{resources.ServiceMonitor(app), resources.PrometheusRule(app), rolloutObject} {
+	for _, desired := range []*unstructured.Unstructured{rolloutObject} {
 		changed, reconcileErr := r.reconcileUnstructured(ctx, app, desired)
 		if reconcileErr != nil {
 			return mutated, reconcileErr
@@ -353,6 +366,57 @@ func (r *ApplicationReconciler) reconcileProgressiveResources(ctx context.Contex
 		mutated = mutated || changed
 	}
 	return mutated, nil
+}
+
+func (r *ApplicationReconciler) reconcileObservabilityResources(ctx context.Context, app *platformv1alpha1.Application) (bool, error) {
+	mutated := false
+	for _, desired := range []*unstructured.Unstructured{resources.ServiceMonitor(app), resources.PrometheusRule(app)} {
+		if app.Spec.Observability.Metrics {
+			changed, err := r.reconcileUnstructured(ctx, app, desired)
+			if err != nil {
+				return mutated, err
+			}
+			mutated = mutated || changed
+			continue
+		}
+		changed, err := r.deleteOwnedObject(ctx, desired)
+		if err != nil {
+			return mutated, err
+		}
+		mutated = mutated || changed
+	}
+
+	policy := resources.OTelEgressNetworkPolicy(app)
+	if !app.Spec.Observability.Traces {
+		changed, err := r.deleteOwnedObject(ctx, policy)
+		return mutated || changed, err
+	}
+	current := policy.DeepCopy()
+	current.Spec = networkingv1.NetworkPolicySpec{}
+	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, current, func() error {
+		desired := resources.OTelEgressNetworkPolicy(app)
+		mergeLabels(&current.ObjectMeta, desired.Labels)
+		current.Spec = desired.Spec
+		return controllerutil.SetControllerReference(app, current, r.Scheme)
+	})
+	if err != nil {
+		return mutated, fmt.Errorf("trace egress NetworkPolicy: %w", err)
+	}
+	return mutated || op != controllerutil.OperationResultNone, nil
+}
+
+func (r *ApplicationReconciler) deleteOwnedObject(ctx context.Context, object client.Object) (bool, error) {
+	key := client.ObjectKeyFromObject(object)
+	if err := r.Get(ctx, key, object); err != nil {
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := r.Delete(ctx, object); err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	return true, nil
 }
 
 func configureBootstrapRollout(rolloutObject *unstructured.Unstructured) error {
@@ -455,8 +519,6 @@ func (r *ApplicationReconciler) deleteProgressiveResources(ctx context.Context, 
 	objects := []client.Object{
 		resources.RolloutObject(app),
 		&rolloutsv1alpha1.AnalysisTemplate{ObjectMeta: metav1.ObjectMeta{Name: resources.AnalysisTemplateName(app), Namespace: app.Namespace}},
-		resources.ServiceMonitor(app),
-		resources.PrometheusRule(app),
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: resources.StableServiceName(app), Namespace: app.Namespace}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: resources.CanaryServiceName(app), Namespace: app.Namespace}},
 	}
@@ -551,6 +613,9 @@ func canaryWorkloadStatus(app *platformv1alpha1.Application, state *applicationR
 	setCandidateVersion(&status, app)
 
 	routeReady, routeRejected := routeState(state.route)
+	deploymentReady, _ := deploymentState(state.deployment, app.Spec.Runtime.Replicas.Min)
+	rolloutAvailable := state.rollout != nil && state.rollout.Status.AvailableReplicas >= app.Spec.Runtime.Replicas.Min
+	setServiceHealth(&status, app, routeReady && (deploymentReady || rolloutAvailable), routeRejected)
 	if routeRejected {
 		status.Phase = platformv1alpha1.ApplicationPhaseDegraded
 		setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionFalse, "RouteRejected", "HTTPRoute was rejected or has unresolved references")
@@ -632,14 +697,18 @@ func canaryWorkloadStatus(app *platformv1alpha1.Application, state *applicationR
 	return status, false
 }
 
-func strategyMigrationStatus(app *platformv1alpha1.Application, detail string) platformv1alpha1.ApplicationStatus {
+func strategyMigrationStatus(app *platformv1alpha1.Application, state *applicationRuntimeState) platformv1alpha1.ApplicationStatus {
 	status := baseStatus(app)
 	status.Phase = platformv1alpha1.ApplicationPhaseProgressing
 	setCandidateVersion(&status, app)
 	setCondition(&status, app.Generation, conditionConfigurationReady, metav1.ConditionTrue, "ResourcesReconciled", "Migration resources are reconciled")
 	setCondition(&status, app.Generation, conditionSecurityPolicyReady, metav1.ConditionTrue, "Hardened", "Workload security settings are applied")
-	setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionUnknown, "StrategyMigration", detail)
-	setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, "StrategyMigration", detail)
+	deploymentReady, _ := deploymentState(state.deployment, app.Spec.Runtime.Replicas.Min)
+	routeReady, routeRejected := routeState(state.route)
+	rolloutAvailable := state.rollout != nil && state.rollout.Status.AvailableReplicas >= app.Spec.Runtime.Replicas.Min
+	setServiceHealth(&status, app, routeReady && (deploymentReady || rolloutAvailable), routeRejected)
+	setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionUnknown, "StrategyMigration", state.migrationDetail)
+	setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, "StrategyMigration", state.migrationDetail)
 	return status
 }
 

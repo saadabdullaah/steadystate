@@ -47,6 +47,7 @@ func TestSuffixedNamesAreDNSLabelSafe(t *testing.T) {
 		{name: AnalysisTemplateName(app), suffix: "-analysis"},
 		{name: ServiceMonitorName(app), suffix: "-monitor"},
 		{name: PrometheusRuleName(app), suffix: "-alerts"},
+		{name: OTelEgressPolicyName(app), suffix: "-otel-egress"},
 	} {
 		if len(named.name) > 63 || !strings.HasSuffix(named.name, named.suffix) {
 			t.Fatalf("suffix-safe name %q is invalid", named.name)
@@ -73,6 +74,19 @@ func TestGeneratedResources(t *testing.T) {
 	}
 	if deployment.Spec.Template.Labels[VersionLabelKey] != "v1.2.3" {
 		t.Fatalf("Deployment template lacks version identity: %#v", deployment.Spec.Template.Labels)
+	}
+	if deployment.Spec.Template.Labels[LogsLabelKey] != "false" || deployment.Spec.Template.Labels[TracesLabelKey] != "false" || len(container.Env) != 0 {
+		t.Fatalf("disabled telemetry mutated the workload: labels=%#v env=%#v", deployment.Spec.Template.Labels, container.Env)
+	}
+	app.Spec.Observability.Logs = true
+	app.Spec.Observability.Traces = true
+	traced := Deployment(app)
+	if traced.Spec.Template.Labels[LogsLabelKey] != "true" || traced.Spec.Template.Labels[TracesLabelKey] != "true" || len(traced.Spec.Template.Spec.Containers[0].Env) != 2 {
+		t.Fatalf("enabled telemetry contract is incomplete: %#v", traced.Spec.Template)
+	}
+	policy := OTelEgressNetworkPolicy(app)
+	if policy.Name != "payments-otel-egress" || policy.Spec.Egress[0].Ports[0].Port.IntVal != 4317 {
+		t.Fatalf("unexpected trace egress policy: %#v", policy)
 	}
 	if container.LivenessProbe.HTTPGet.Path != "/healthz" || container.ReadinessProbe.HTTPGet.Path != "/readyz" || *container.SecurityContext.AllowPrivilegeEscalation || !*container.SecurityContext.ReadOnlyRootFilesystem || !*container.SecurityContext.RunAsNonRoot {
 		t.Fatalf("Deployment hardening or probes are incomplete: %#v", container)

@@ -155,7 +155,7 @@ func CanaryHTTPRoute(application *platformv1alpha1.Application) *gatewayv1.HTTPR
 
 // AnalysisTemplate builds the Prometheus metric gates used after every canary pause.
 func AnalysisTemplate(application *platformv1alpha1.Application) *rolloutsv1alpha1.AnalysisTemplate {
-	errorThreshold := 1 - percentageFraction(application.Spec.Reliability.MaximumErrorRate)
+	errorThreshold := 1 - percentageFraction(string(application.Spec.Reliability.MaximumErrorRate))
 	latencyThreshold := application.Spec.Reliability.MaximumP95Latency.Seconds()
 	return &rolloutsv1alpha1.AnalysisTemplate{
 		TypeMeta: metav1.TypeMeta{APIVersion: "argoproj.io/v1alpha1", Kind: "AnalysisTemplate"},
@@ -236,13 +236,22 @@ func ServiceMonitor(application *platformv1alpha1.Application) *unstructured.Uns
 	}}
 }
 
-// PrometheusRule builds basic candidate alerts from the same reliability thresholds as analysis.
+// PrometheusRule builds candidate and steady-state SLO recording/alert rules.
 func PrometheusRule(application *platformv1alpha1.Application) *unstructured.Unstructured {
-	errorLimit := percentageFraction(application.Spec.Reliability.MaximumErrorRate)
+	errorLimit := percentageFraction(string(application.Spec.Reliability.MaximumErrorRate))
 	latencyLimit := application.Spec.Reliability.MaximumP95Latency.Seconds()
+	errorBudget := 1 - percentageFraction(string(application.Spec.Reliability.AvailabilityTarget))
+	if errorBudget <= 0 {
+		errorBudget = 0.000001
+	}
 	labels := map[string]any{
 		"application": application.Name, "namespace": application.Namespace, "version": application.Spec.Image.Tag, "severity": "warning",
 	}
+	recordLabels := map[string]any{"application": application.Name, "namespace": application.Namespace}
+	fastLabels := cloneAnyMap(recordLabels)
+	fastLabels["severity"] = "critical"
+	slowLabels := cloneAnyMap(recordLabels)
+	slowLabels["severity"] = "warning"
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": prometheusRuleAPIVersion,
 		"kind":       "PrometheusRule",
@@ -250,14 +259,25 @@ func PrometheusRule(application *platformv1alpha1.Application) *unstructured.Uns
 			"name": PrometheusRuleName(application), "namespace": application.Namespace, "labels": stringMapAny(Labels(application)),
 		},
 		"spec": map[string]any{"groups": []any{map[string]any{
-			"name": fmt.Sprintf("steadystate.%s.%s.candidate", application.Namespace, application.Name),
+			"name": fmt.Sprintf("steadystate.%s.%s.service", application.Namespace, application.Name),
 			"rules": []any{
+				recordingRule("steadystate:application_request_rate:5m", requestRateQuery(application, "5m"), recordLabels),
+				recordingRule("steadystate:application_error_rate:5m", errorRatioQuery(application, "5m"), recordLabels),
+				recordingRule("steadystate:application_availability:5m", availabilityQuery(application, "5m"), recordLabels),
+				recordingRule("steadystate:application_p95_latency_seconds:5m", applicationP95Query(application, "5m"), recordLabels),
+				recordingRule("steadystate:application_error_budget_burn:5m", burnRateQuery(application, "5m", errorBudget), recordLabels),
 				alertRule("SteadyStateCandidateHighErrorRate", candidateErrorRateAlertQuery(application, errorLimit), labels, "Candidate error rate exceeds the Application reliability target."),
 				alertRule("SteadyStateCandidateHighP95Latency", candidateP95AlertQuery(application, latencyLimit), labels, "Candidate P95 latency exceeds the Application reliability target."),
 				alertRule("SteadyStateCandidateRestarts", candidateRestartAlertQuery(application), labels, "Candidate containers restarted during the analysis window."),
+				alertRule("SteadyStateAvailabilityFastBurn", burnPairQuery(application, "5m", "1h", errorBudget, 14.4), fastLabels, "Availability error budget is burning at the fast multi-window threshold."),
+				alertRule("SteadyStateAvailabilitySlowBurn", burnPairQuery(application, "30m", "6h", errorBudget, 6), slowLabels, "Availability error budget is burning at the slow multi-window threshold."),
 			},
 		}}},
 	}}
+}
+
+func recordingRule(name, expression string, labels map[string]any) map[string]any {
+	return map[string]any{"record": name, "expr": expression, "labels": cloneAnyMap(labels)}
 }
 
 func alertRule(name, expression string, labels map[string]any, summary string) map[string]any {
@@ -280,8 +300,37 @@ func candidateRestartAlertQuery(application *platformv1alpha1.Application) strin
 	return fmt.Sprintf(`sum(clamp_min(increase(kube_pod_container_status_restarts_total{namespace=%q,container="application"}[1m]), 0) * on(namespace,pod) group_left() kube_pod_labels{namespace=%q,label_app_kubernetes_io_instance=%q,label_steadystate_dev_version=%q}) > 0`, application.Namespace, application.Namespace, application.Name, application.Spec.Image.Tag)
 }
 
-func percentageFraction(value platformv1alpha1.Percentage) float64 {
-	parsed, _ := strconv.ParseFloat(strings.TrimSuffix(string(value), "%"), 64)
+func applicationSelector(application *platformv1alpha1.Application) string {
+	return fmt.Sprintf(`application=%q,namespace=%q`, application.Name, application.Namespace)
+}
+
+func requestRateQuery(application *platformv1alpha1.Application, window string) string {
+	return fmt.Sprintf(`sum(rate(http_requests_total{%s}[%s]))`, applicationSelector(application), window)
+}
+
+func errorRatioQuery(application *platformv1alpha1.Application, window string) string {
+	selector := applicationSelector(application)
+	return fmt.Sprintf(`clamp_max(1 - (sum(rate(http_requests_total{%s,status=~"2.."}[%s])) / clamp_min(sum(rate(http_requests_total{%s}[%s])), 0.000001)), 1)`, selector, window, selector, window)
+}
+
+func availabilityQuery(application *platformv1alpha1.Application, window string) string {
+	return fmt.Sprintf(`1 - (%s)`, errorRatioQuery(application, window))
+}
+
+func applicationP95Query(application *platformv1alpha1.Application, window string) string {
+	return fmt.Sprintf(`histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{%s}[%s]))) or vector(1000000000)`, applicationSelector(application), window)
+}
+
+func burnRateQuery(application *platformv1alpha1.Application, window string, budget float64) string {
+	return fmt.Sprintf(`(%s) / %s`, errorRatioQuery(application, window), formatNumber(budget))
+}
+
+func burnPairQuery(application *platformv1alpha1.Application, shortWindow, longWindow string, budget, threshold float64) string {
+	return fmt.Sprintf(`(%s > %s) and (%s > %s)`, burnRateQuery(application, shortWindow, budget), formatNumber(threshold), burnRateQuery(application, longWindow, budget), formatNumber(threshold))
+}
+
+func percentageFraction(value string) float64 {
+	parsed, _ := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 64)
 	return parsed / 100
 }
 

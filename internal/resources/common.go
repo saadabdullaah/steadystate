@@ -22,6 +22,8 @@ const (
 	AllowEnvoyPolicyName      = "steadystate-allow-envoy-gateway"
 	AllowMonitoringPolicyName = "steadystate-allow-monitoring"
 	VersionLabelKey           = "steadystate.dev/version"
+	LogsLabelKey              = "steadystate.dev/logs"
+	TracesLabelKey            = "steadystate.dev/traces"
 	ServiceRoleLabelKey       = "steadystate.dev/service-role"
 	GatewayPluginName         = "argoproj-labs/gatewayAPI"
 	PrometheusAddress         = "http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090"
@@ -78,6 +80,11 @@ func ServiceMonitorName(application *platformv1alpha1.Application) string {
 // PrometheusRuleName returns the per-Application PrometheusRule name.
 func PrometheusRuleName(application *platformv1alpha1.Application) string {
 	return suffixedName(application.Name, "-alerts")
+}
+
+// OTelEgressPolicyName returns the trace-export NetworkPolicy name.
+func OTelEgressPolicyName(application *platformv1alpha1.Application) string {
+	return suffixedName(application.Name, "-otel-egress")
 }
 
 func suffixedName(name, suffix string) string {

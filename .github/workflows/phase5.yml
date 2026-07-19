@@ -1,0 +1,169 @@
+name: Phase 5 acceptance
+
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "31 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase5-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: telemetry-slo-and-dashboards
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install and verify pinned platform tools
+        shell: pwsh
+        run: |
+          ./scripts/install-tools.ps1 -BaseOnly
+          ./scripts/dev.ps1 check-versions
+          ./scripts/dev.ps1 verify-observability
+
+      - name: Load pinned recording versions
+        shell: pwsh
+        run: |
+          $entries = @{}
+          Get-Content scripts/versions.env | ForEach-Object { if ($_ -match '^([^#=]+)=(.+)$') { $entries[$Matches[1]]=$Matches[2] } }
+          foreach ($name in @('VHS_VERSION','TTYD_VERSION','VHS_LINUX_X86_64_SHA256','TTYD_LINUX_X86_64_SHA256','GO_BUILDER_IMAGE')) {
+            if (-not $entries[$name]) { throw "$name is missing." }
+            "$name=$($entries[$name])" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Install pinned recording tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          install_dir="$RUNNER_TEMP/steadystate-recording/bin"
+          mkdir -p "$install_dir"
+          archive="$RUNNER_TEMP/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          curl --fail --location --retry 3 --output "$archive" "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          echo "${VHS_LINUX_X86_64_SHA256}  ${archive}" | sha256sum --check --strict
+          tar --extract --gzip --strip-components=1 --file "$archive" --directory "$install_dir"
+          curl --fail --location --retry 3 --output "$install_dir/ttyd" "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
+          echo "${TTYD_LINUX_X86_64_SHA256}  ${install_dir}/ttyd" | sha256sum --check --strict
+          chmod 0755 "$install_dir/vhs" "$install_dir/ttyd"
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Bootstrap standard profile
+        shell: pwsh
+        run: ./scripts/dev.ps1 bootstrap -Profile standard
+
+      - name: Build and load good and ten-percent-error images
+        shell: pwsh
+        run: |
+          ./scripts/dev.ps1 build-images
+          docker build --platform linux/amd64 --pull --build-arg "GO_BUILDER=$env:GO_BUILDER_IMAGE" --build-arg INJECT_ERROR_RATE=0.10 --file apps/demo-app/Dockerfile --tag ghcr.io/saadabdullaah/steadystate-demo-app:v0.1.0-bad .
+          ./scripts/dev.ps1 load-images
+          kind load docker-image ghcr.io/saadabdullaah/steadystate-demo-app:v0.1.0-bad --name steadystate
+
+      - name: Deploy exact-revision GitOps observability
+        shell: pwsh
+        run: |
+          ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA
+          ./scripts/dev.ps1 test-gitops -Profile standard
+
+      - name: Verify hosted observability foundation
+        id: prepare
+        shell: pwsh
+        run: ./scripts/phase5-acceptance.ps1 -Stage Prepare
+
+      - name: Record correlated request and SLO proof
+        id: recording
+        shell: bash
+        env:
+          CI: ""
+          COLORTERM: truecolor
+        run: vhs docs/demonstrations/phase5-request-telemetry.tape
+
+      - name: Finalize acceptance evidence
+        id: finalize
+        shell: pwsh
+        run: |
+          ./scripts/phase5-acceptance.ps1 -Stage Finalize
+          $evidence = Get-Content -Raw .artifacts/phase5/acceptance/evidence.json | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed' -or $evidence.sourceSHA -ne $env:GITHUB_SHA) { throw 'Phase 5 evidence is invalid.' }
+
+      - name: Capture diagnostics
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/dev.ps1 diagnostics
+
+      - name: Capture failure evidence
+        if: always() && steps.prepare.outcome != 'skipped' && steps.finalize.outcome != 'success'
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          PHASE5_FAILURE_MESSAGE: prepare=${{ steps.prepare.outcome }}, recording=${{ steps.recording.outcome }}, finalize=${{ steps.finalize.outcome }}
+        run: ./scripts/phase5-acceptance.ps1 -Stage CaptureFailure
+
+      - name: Verify artifact completeness
+        if: always() && steps.prepare.outcome != 'skipped'
+        shell: pwsh
+        run: |
+          $required = @(
+            'docs/demonstrations/phase5-request-telemetry.tape',
+            '.artifacts/phase5/acceptance/state.json',
+            '.artifacts/phase5/acceptance/evidence.json',
+            '.artifacts/phase5/acceptance/rendered/gitops-platform.yaml',
+            '.artifacts/phase5/acceptance/snapshots/observability.yaml',
+            '.artifacts/phase5/acceptance/logs/operator.log'
+          )
+          if ('${{ steps.finalize.outcome }}' -eq 'success') {
+            $required += @(
+              '.artifacts/phase5/acceptance/phase5-request-telemetry.gif',
+              '.artifacts/phase5/acceptance/queries/prometheus.json',
+              '.artifacts/phase5/acceptance/queries/loki.json',
+              '.artifacts/phase5/acceptance/queries/tempo.json',
+              '.artifacts/phase5/acceptance/alerts/alertmanager.json',
+              '.artifacts/phase5/acceptance/alerts/grafana-fast-burn.json'
+            )
+          }
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item $path).Length -le 0) { throw "Missing or empty artifact: $path" }
+          }
+          if (@(Get-ChildItem .artifacts/diagnostics -Recurse -File -ErrorAction SilentlyContinue).Count -eq 0) { throw 'Cluster diagnostics are missing.' }
+
+      - name: Upload Phase 5 acceptance artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase5-acceptance-${{ github.sha }}
+          path: |
+            docs/demonstrations/phase5-request-telemetry.tape
+            .artifacts/phase5/acceptance/
+            .artifacts/diagnostics/
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
+
+      - name: Undeploy GitOps
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 7
+        shell: pwsh
+        run: ./scripts/dev.ps1 undeploy-gitops
+
+      - name: Destroy cluster
+        if: always()
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/dev.ps1 destroy

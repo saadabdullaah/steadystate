@@ -1,0 +1,37 @@
+fullnameOverride: tempo
+replicas: 1
+
+tempo:
+  reportingEnabled: false
+  retention: 24h
+  memBallastSizeMbs: 0
+  metricsGenerator:
+    enabled: false
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  extraVolumeMounts:
+    - name: tempo-data
+      mountPath: /var/tempo
+
+extraVolumes:
+  - name: tempo-data
+    emptyDir:
+      sizeLimit: 2Gi
+persistence:
+  enabled: false
+tempoQuery:
+  enabled: false
+serviceMonitor:
+  enabled: false

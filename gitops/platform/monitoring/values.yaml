@@ -21,6 +21,7 @@ alertmanager:
 
 grafana:
   enabled: true
+  defaultDatasourceEnabled: false
   defaultDashboardsEnabled: false
   env:
     GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "true"
@@ -40,13 +41,51 @@ grafana:
       cpu: 200m
       memory: 320Mi
   sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: monitoring
     resources:
       requests:
         cpu: 10m
         memory: 24Mi
-      limits:
-        cpu: 50m
-        memory: 64Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+  additionalDataSources:
+    - name: Prometheus
+      uid: prometheus
+      type: prometheus
+      access: proxy
+      url: http://monitoring-kube-prometheus-prometheus:9090
+      isDefault: true
+      jsonData:
+        timeInterval: 15s
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki:3100
+      jsonData:
+        derivedFields:
+          - name: TraceID
+            matcherRegex: '"trace_id":"([a-f0-9]+)"'
+            datasourceUid: tempo
+            url: '$${__value.raw}'
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      access: proxy
+      url: http://tempo:3200
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: -5m
+          spanEndTimeShift: 5m
+          filterByTraceID: true
+          filterBySpanID: false
+          customQuery: true
+          query: '{trace_id="$${__trace.traceId}"}'
 
 kubeApiServer:
   enabled: false

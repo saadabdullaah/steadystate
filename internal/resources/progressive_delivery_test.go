@@ -137,14 +137,14 @@ func TestMonitoringResourceContracts(t *testing.T) {
 		t.Fatalf("unexpected PrometheusRule groups: %#v err=%v", groups, err)
 	}
 	rules := groups[0].(map[string]any)["rules"].([]any)
-	if len(rules) != 3 {
-		t.Fatalf("PrometheusRule has %d candidate alerts", len(rules))
+	if len(rules) != 10 {
+		t.Fatalf("PrometheusRule has %d recording and alert rules", len(rules))
 	}
 	rendered, err := json.Marshal(rules)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, token := range []string{"SteadyStateCandidateHighErrorRate", "SteadyStateCandidateHighP95Latency", "SteadyStateCandidateRestarts", `"version":"v0.4.0"`, "0.01", "0.25", "label_steadystate_dev_version"} {
+	for _, token := range []string{"steadystate:application_request_rate:5m", "steadystate:application_error_rate:5m", "steadystate:application_availability:5m", "steadystate:application_p95_latency_seconds:5m", "steadystate:application_error_budget_burn:5m", "SteadyStateCandidateHighErrorRate", "SteadyStateCandidateHighP95Latency", "SteadyStateCandidateRestarts", "SteadyStateAvailabilityFastBurn", "SteadyStateAvailabilitySlowBurn", `"version":"v0.4.0"`, "14.4", "0.25", "label_steadystate_dev_version", "vector(1000000000)"} {
 		if !strings.Contains(string(rendered), token) {
 			t.Errorf("PrometheusRule is missing %q: %s", token, rendered)
 		}
@@ -196,7 +196,7 @@ func TestProgressiveResourcesGoldenDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(payload))
-	const want = "6cdd3d3af44836550b8778ed7dbb03837180290d1c2e4f8ddb427903c8574562"
+	const want = "097617cfb4990438eb4ca812aa57ea5c64dd774ad46a07cba0c3eb19a730cfdf"
 	if digest != want {
 		t.Fatalf("progressive resource golden digest=%s, want %s", digest, want)
 	}

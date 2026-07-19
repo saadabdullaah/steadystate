@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -11,6 +11,8 @@ param(
     [string]$EvidencePath,
     [ValidateSet('Prepare','Promote','Rollback')]
     [string]$AcceptanceStage = $(if ($env:PHASE4_ACCEPTANCE_STAGE) { $env:PHASE4_ACCEPTANCE_STAGE } else { 'Rollback' }),
+    [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
+    [string]$Phase5AcceptanceStage = $(if ($env:PHASE5_ACCEPTANCE_STAGE) { $env:PHASE5_ACCEPTANCE_STAGE } else { 'Test' }),
     [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' })
 )
 
@@ -503,10 +505,12 @@ try {
             & (Join-Path $PSScriptRoot 'check-text.ps1')
             & (Join-Path $PSScriptRoot 'check-vendored.ps1')
             Assert-Tools
-            $goFiles = @(Get-ChildItem -Path $Root -Recurse -File -Filter '*.go' | Where-Object {
-                $_.FullName -notlike "$(Join-Path $Root '.tools')*" -and
-                $_.FullName -notlike "$(Join-Path $Root '.git')*"
-            } | ForEach-Object { $_.FullName })
+            # Ask Git for repository source paths instead of recursively walking
+            # ignored artifact trees, which may contain archived diagnostic paths
+            # that are intentionally incomplete after extraction.
+            $relativeGoFiles = @(& git ls-files --cached --others --exclude-standard -- '*.go')
+            if ($LASTEXITCODE -ne 0) { throw 'git ls-files failed while collecting Go sources' }
+            $goFiles = @($relativeGoFiles | ForEach-Object { Join-Path $Root $_ })
             $unformatted = if ($goFiles) { @(& gofmt -l @goFiles) } else { @() }
             if ($LASTEXITCODE -ne 0) { throw 'gofmt failed' }
             if ($unformatted) { throw "Go files require formatting: $($unformatted -join ', ')" }
@@ -547,6 +551,21 @@ try {
             $arguments = @{Stage=$AcceptanceStage;HttpPort=$HttpPort;Profile=$Profile}
             if ($EvidencePath) { $arguments.EvidencePath = $EvidencePath }
             & (Join-Path $PSScriptRoot 'phase4-acceptance.ps1') @arguments
+        }
+        'verify-observability' {
+            Invoke-GitOpsCommand -Mode Verify
+            Assert-Tools
+            Invoke-External go test ./internal/resources ./tests/gitops
+        }
+        'test-observability' {
+            Assert-Cluster
+            & (Join-Path $PSScriptRoot 'phase5-acceptance.ps1') -Stage Test -HttpPort $HttpPort
+        }
+        'phase5-acceptance' {
+            Assert-Cluster
+            $arguments = @{Stage=$Phase5AcceptanceStage;HttpPort=$HttpPort}
+            if ($EvidencePath) { $arguments.EvidencePath = $EvidencePath }
+            & (Join-Path $PSScriptRoot 'phase5-acceptance.ps1') @arguments
         }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }

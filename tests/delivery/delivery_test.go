@@ -15,8 +15,8 @@ func TestDemoVersionContract(t *testing.T) {
 	if !regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`).MatchString(version) {
 		t.Fatalf("demo VERSION %q is not strict semver", version)
 	}
-	if version != "v0.4.0" {
-		t.Fatalf("Phase 4 must declare v0.4.0, got %q", version)
+	if version != "v0.5.0" {
+		t.Fatalf("Phase 5 must declare v0.5.0, got %q", version)
 	}
 	manifest := read(t, filepath.Join(root, "gitops", "applications", "demo", "application.yaml"))
 	tagPattern := regexp.MustCompile(`(?m)^    tag: (v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
@@ -25,8 +25,8 @@ func TestDemoVersionContract(t *testing.T) {
 		t.Fatal("the demo manifest must contain exactly one strict semver image tag")
 	}
 	manifestVersion := tagMatches[0][1]
-	if manifestVersion != version && manifestVersion != "v0.3.0" {
-		t.Fatalf("demo manifest tag %q must be the released v0.3.0 baseline or match VERSION %q", manifestVersion, version)
+	if manifestVersion != version && manifestVersion != "v0.4.0" {
+		t.Fatalf("demo manifest tag %q must be the released v0.4.0 baseline or match VERSION %q", manifestVersion, version)
 	}
 }
 
@@ -139,6 +139,23 @@ func TestPhase4DemoProgressiveDeliveryContract(t *testing.T) {
 	phase4 := read(t, filepath.Join(root, "scripts", "phase4-controller-test.ps1"))
 	if !strings.Contains(phase4, "$application.status.observedGeneration -eq [int64]$application.metadata.generation") {
 		t.Fatal("Phase 4 acceptance must reject stale Application status generations")
+	}
+}
+
+func TestPhase5DemoObservabilityContract(t *testing.T) {
+	t.Parallel()
+	root := repositoryRoot(t)
+	manifest := read(t, filepath.Join(root, "gitops", "applications", "demo", "application.yaml"))
+	for _, value := range []string{"metrics: true", "logs: true", "traces: true"} {
+		if !strings.Contains(manifest, value) {
+			t.Errorf("Phase 5 demo manifest is missing %q", value)
+		}
+	}
+	source := read(t, filepath.Join(root, "apps", "demo-app", "main.go"))
+	for _, value := range []string{"X-Request-ID", "trace_id", "span_id", "OTEL_EXPORTER_OTLP_ENDPOINT", "http.route"} {
+		if !strings.Contains(source, value) {
+			t.Errorf("Phase 5 demo telemetry source is missing %q", value)
+		}
 	}
 }
 
