@@ -192,6 +192,19 @@ kubectl get pods -n team-payments -l app.kubernetes.io/name=demo -o wide
 
 Confirm the desired Pod is Ready, the HTTPRoute has stable and canary backends, and the Gateway plugin's in-progress label is present while weights are changing. A canary step waits for its pause, Prometheus scrape, and two successful analysis measurements. Do not patch weights or Service selectors: those fields are temporarily owned by the Gateway plugin and Rollouts. Run `verify-progressive-delivery` if the generated structure or plugin permissions look wrong.
 
+## Application reports ProgressiveDeliveryUnavailable
+
+The standalone operator supports rolling Applications without installing Argo Rollouts or Prometheus Operator CRDs. Canary Applications require all five progressive APIs. Install them through `deploy-gitops`, verify them with `verify-progressive-delivery`, and restart the operator so startup discovery registers their watches:
+
+```powershell
+kubectl get crd rollouts.argoproj.io analysisruns.argoproj.io analysistemplates.argoproj.io
+kubectl get crd servicemonitors.monitoring.coreos.com prometheusrules.monitoring.coreos.com
+kubectl rollout restart deployment/steadystate-controller-manager -n steadystate-system
+kubectl rollout status deployment/steadystate-controller-manager -n steadystate-system --timeout=180s
+```
+
+Do not install partial CRD sets or change a rolling Application merely to clear the condition. Missing progressive APIs must not stop the rolling controller or mutate canary children.
+
 ## Analysis is Failed, Error, or Inconclusive
 
 ```powershell

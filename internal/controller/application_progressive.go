@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -478,8 +479,11 @@ func (r *ApplicationReconciler) deleteProgressiveResources(ctx context.Context, 
 
 func (r *ApplicationReconciler) getRollout(ctx context.Context, app *platformv1alpha1.Application) (*rolloutsv1alpha1.Rollout, bool, error) {
 	rollout := &rolloutsv1alpha1.Rollout{}
+	if !r.hasProgressiveDelivery() {
+		return rollout, false, nil
+	}
 	err := r.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, rollout)
-	if apierrors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 		return rollout, false, nil
 	}
 	return rollout, err == nil, err
