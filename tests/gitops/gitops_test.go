@@ -319,6 +319,10 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	if err != nil || !found || len(hostnames) != 1 || hostnames[0] != "grafana.localtest.me" {
 		t.Fatalf("unexpected Grafana hostnames: %#v", hostnames)
 	}
+	rules := nestedSlice(t, grafanaRoute, "spec", "rules")
+	matches := nestedSlice(t, rules[0].(map[string]any), "matches")
+	assertString(t, matches[0].(map[string]any), "PathPrefix", "path", "type")
+	assertString(t, matches[0].(map[string]any), "/", "path", "value")
 	for _, name := range []string{"steadystate-application-dashboard", "steadystate-platform-dashboard"} {
 		dashboard := findObject(t, observabilityObjects, "ConfigMap", name)
 		labels, found, err := unstructured.NestedStringMap(dashboard, "metadata", "labels")
@@ -370,6 +374,7 @@ func TestProgressiveDeliveryValuesAreFrozenAndMinimal(t *testing.T) {
 		"prometheus-node-exporter:\n  enabled: false",
 		"defaultRules:\n  create: false",
 		"GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: \"true\"",
+		"defaultDatasourceEnabled: false",
 		"auth.anonymous:",
 		"prometheusOperator:\n  tls:\n    enabled: false",
 		"memory: 320Mi",

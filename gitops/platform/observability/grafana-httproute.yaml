@@ -12,7 +12,11 @@ spec:
   hostnames:
     - grafana.localtest.me
   rules:
-    - backendRefs:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
         - group: ""
           kind: Service
           name: monitoring-grafana

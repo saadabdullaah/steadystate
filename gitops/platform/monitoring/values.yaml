@@ -21,7 +21,6 @@ alertmanager:
 
 grafana:
   enabled: true
-  defaultDatasourceEnabled: false
   defaultDashboardsEnabled: false
   env:
     GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "true"
@@ -41,6 +40,8 @@ grafana:
       cpu: 200m
       memory: 320Mi
   sidecar:
+    datasources:
+      defaultDatasourceEnabled: false
     dashboards:
       enabled: true
       label: grafana_dashboard
