@@ -168,7 +168,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	} else if runtimeState.mutated || statusChanged {
 		r.event(app, corev1.EventTypeNormal, "Reconciled", "Application resources and status were reconciled")
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: runtimeState.requeueAfter}, nil
 }
 
 type applicationTenancyFailure struct {

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -9,6 +9,8 @@ param(
     [int]$HttpPort = $(if ($env:HTTP_PORT) { [int]$env:HTTP_PORT } else { 8080 }),
     [int]$HttpsPort = $(if ($env:HTTPS_PORT) { [int]$env:HTTPS_PORT } else { 8443 }),
     [string]$EvidencePath,
+    [ValidateSet('Prepare','Promote','Rollback')]
+    [string]$AcceptanceStage = $(if ($env:PHASE4_ACCEPTANCE_STAGE) { $env:PHASE4_ACCEPTANCE_STAGE } else { 'Rollback' }),
     [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' })
 )
 
@@ -538,6 +540,12 @@ try {
         'verify-gitops' { Invoke-GitOpsCommand -Mode Verify }
         'verify-progressive-delivery' { & (Join-Path $PSScriptRoot 'progressive-delivery.ps1') -Mode Verify }
         'test-progressive-delivery' { Assert-Cluster; & (Join-Path $PSScriptRoot 'progressive-delivery.ps1') -Mode Test -HttpPort $HttpPort -EvidencePath $EvidencePath -Profile $Profile }
+        'phase4-acceptance' {
+            Assert-Cluster
+            $arguments = @{Stage=$AcceptanceStage;HttpPort=$HttpPort;Profile=$Profile}
+            if ($EvidencePath) { $arguments.EvidencePath = $EvidencePath }
+            & (Join-Path $PSScriptRoot 'phase4-acceptance.ps1') @arguments
+        }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }
         'diagnostics' { Invoke-Diagnostics }

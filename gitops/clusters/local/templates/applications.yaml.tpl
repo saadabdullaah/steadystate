@@ -26,6 +26,7 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-18"
+    argocd.argoproj.io/ignore-healthcheck: "true"
 spec:
   project: platform
   sources:

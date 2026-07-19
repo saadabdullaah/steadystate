@@ -92,6 +92,8 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	assertAutomated(t, argocd, true)
 
 	assertExternalChartApplication(t, objects, "monitoring", "https://prometheus-community.github.io/helm-charts", "kube-prometheus-stack", "87.16.1", "gitops/platform/monitoring/values.yaml", "monitoring")
+	monitoring := findObject(t, objects, "Application", "monitoring")
+	assertAnnotation(t, monitoring, "argocd.argoproj.io/ignore-healthcheck", "true")
 	assertExternalChartApplication(t, objects, "argo-rollouts", "https://argoproj.github.io/argo-helm", "argo-rollouts", "2.41.0", "gitops/platform/rollouts/values.yaml", "argo-rollouts")
 
 	operator := findObject(t, objects, "Application", "steadystate-operator")
@@ -239,6 +241,8 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	}
 	required := []string{
 		"application.resourceTrackingMethod",
+		"timeout.reconciliation",
+		"timeout.reconciliation.jitter",
 		"resource.customizations.health.platform.steadystate.dev_Application",
 		"resource.customizations.health.platform.steadystate.dev_Team",
 		"resource.customizations.health.argoproj.io_Application",
@@ -268,6 +272,9 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	}
 	if data["application.resourceTrackingMethod"] != "annotation" {
 		t.Fatal("Argo resource tracking must be annotation-based")
+	}
+	if data["timeout.reconciliation"] != "30s" || data["timeout.reconciliation.jitter"] != "0s" {
+		t.Fatal("Argo Git reconciliation must be pinned to 30 seconds without jitter")
 	}
 
 	parameters := findObject(t, objects, "ConfigMap", "argocd-cmd-params-cm")
@@ -583,72 +590,140 @@ func TestArgoVersionAndChecksumPins(t *testing.T) {
 	}
 }
 
-func TestPhase4FoundationWorkflowContracts(t *testing.T) {
+func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	root := repositoryRoot(t)
 	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase4.yml")))
-	script := string(readFile(t, filepath.Join(root, "scripts", "progressive-delivery.ps1")))
-	controllerScript := string(readFile(t, filepath.Join(root, "scripts", "phase4-controller-test.ps1")))
+	script := string(readFile(t, filepath.Join(root, "scripts", "phase4-acceptance.ps1")))
+	recordingScript := string(readFile(t, filepath.Join(root, "scripts", "phase4-recording.ps1")))
+	promotionTape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase4-canary-promotion.tape")))
+	rollbackTape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase4-automatic-rollback.tape")))
 	for _, token := range []string{
 		"name: Phase 4 acceptance",
 		"timeout-minutes: 75",
 		"cancel-in-progress: false",
-		"phase4-foundation-${{ github.sha }}",
+		"phase4-acceptance-${{ github.sha }}",
 		"if-no-files-found: error",
-		"Capture foundation diagnostics",
-		"Undeploy GitOps foundation",
+		"Capture acceptance diagnostics",
+		"Delete ephemeral acceptance branch",
+		"Undeploy GitOps",
 		"Destroy cluster",
+		"permission-contents: write",
+		".artifacts/phase4/acceptance/phase4-canary-promotion.gif",
+		".artifacts/phase4/acceptance/phase4-automatic-rollback.gif",
 	} {
 		if !strings.Contains(workflow, token) {
 			t.Errorf("Phase 4 workflow is missing %q", token)
 		}
 	}
 	for _, token := range []string{
-		"gateway-plugin-enforced-90-10",
-		"envoy-traffic-followed-50-50",
-		"rollout-promoted-stable-100",
-		"Measure-Traffic -ExpectedCanaryPercent 10",
-		"Measure-Traffic -ExpectedCanaryPercent 50",
+		"acceptance/phase4-",
+		"[ValidateSet('Prepare','Promote','Rollback','Finalize','CaptureFailure')]",
+		"sha-$sourceCommit",
+		"foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root'))",
+		"This delivery commit must change only spec.image.tag.",
+		"Invoke-External kubectl kustomize (Split-Path -Parent $ManifestPath) | Out-Null",
+		"Invoke-External git commit -m $Message | Out-Host",
+		"Measure-Traffic $GoodTag $weight",
+		"Measure-Traffic $BadTag 10",
 		"Samples = 500",
-		"[Math]::Abs($observed - $ExpectedCanaryPercent) -gt 8",
-		"Wait-GatewayResponses -AllowedVersions @('stable')",
-		"observedGeneration -eq [long]$route.metadata.generation",
-		"Save-FoundationSnapshots -Name foundation-failure",
-		"finally",
-		"delete namespace steadystate-rollouts-proof",
+		"Wait-DesiredApplication $GoodTag canary $state.commits.promotion",
+		"Wait-DesiredApplication $BadTag canary $state.commits.rejection",
+		"Wait-CanaryEndpoint",
+		"-DisableKeepAlive",
+		"$lastObserved -ge 99",
+		"CanaryAnalysisFailed",
+		"Wait-CandidateAlert",
+		"Get-MonitoringServiceName alertmanager",
+		"Get-MonitoringServiceName prometheus",
+		"app=kube-prometheus-stack-$Component",
+		"applications.platform.steadystate.dev,rollout",
+		"canary-to-rolling-git-detected",
+		"Wait-DesiredApplication $GoodTag rolling $state.commits.canaryToRolling -TimeoutSeconds 900",
+		"Measure-StableWindow",
+		"vus: 5, duration: '20m'",
+		"& /bin/kill -s INT $Process.Id",
+		"promotionResult='pending'",
+		"rollbackResult='pending'",
+		"$state.promotionResult = 'passed'",
+		"$state.rollbackResult = 'passed'",
+		"Assert-K6Summary 'rollback'",
+		"Assert-K6NoFailures 'promotion'",
+		"Assert-K6NoFailures 'final-migration'",
+		"monitoringWorkingSetBytes",
+		"Save-FinalEvidence $state passed",
+		"Save-FinalEvidence $state failed $message",
 	} {
 		if !strings.Contains(script, token) {
-			t.Errorf("Phase 4 foundation script is missing %q", token)
+			t.Errorf("Phase 4 acceptance script is missing %q", token)
 		}
 	}
-	diagnostics := strings.Index(workflow, "Capture foundation diagnostics")
-	upload := strings.Index(workflow, "Upload foundation artifact")
-	cleanup := strings.Index(workflow, "Undeploy GitOps foundation")
-	if diagnostics < 0 || diagnostics >= upload || upload >= cleanup {
+	for _, token := range []string{
+		"[ValidateSet('Promote','Rollback')]",
+		"Start-Process",
+		"promotionResult",
+		"rollbackResult",
+		"WaitForExit(10000)",
+		"Stop-Process",
+		"${MarkerPrefix}_PASSED",
+		"${MarkerPrefix}_FAILED",
+	} {
+		if !strings.Contains(recordingScript, token) {
+			t.Errorf("Phase 4 recording wrapper is missing %q", token)
+		}
+	}
+	diagnostics := strings.Index(workflow, "Capture acceptance diagnostics")
+	upload := strings.Index(workflow, "Upload Phase 4 acceptance artifact")
+	branchCleanup := strings.Index(workflow, "Delete ephemeral acceptance branch")
+	clusterCleanup := strings.Index(workflow, "Undeploy GitOps")
+	if diagnostics < 0 || diagnostics >= upload || upload >= branchCleanup || branchCleanup >= clusterCleanup {
 		t.Fatal("Phase 4 diagnostics, artifact, and cleanup ordering is invalid")
 	}
-	for _, token := range []string{
-		"Prove controller progression and reversible migrations",
-		".artifacts/phase4/controller/",
-		"rolling-to-canary-zero-downtime",
-		"bad-canary-automatic-rollback",
-		"canary-to-rolling-zero-downtime",
+	for _, condition := range []string{
+		"id: promotion-verification",
+		"id: rollback-verification",
+		"$state.promotionResult -ne 'passed'",
+		"$state.rollbackResult -ne 'passed'",
+		"-Stage Finalize",
+		"id: rollback-verification\n        timeout-minutes: 5",
+		"steps.rollback-verification.outcome == 'success'",
 	} {
-		if !strings.Contains(workflow, token) {
-			t.Errorf("Phase 4 controller workflow is missing %q", token)
+		if !strings.Contains(workflow, condition) {
+			t.Errorf("Phase 4 workflow is missing truthful recording gate %q", condition)
 		}
 	}
-	for _, token := range []string{
-		"Start-ContinuousLoad",
-		"Set-ApplicationSpec -Strategy canary -Tag $BadTag",
-		"CanaryAnalysisFailed",
-		"Assert-CanaryRouteStable",
-		"Set-ApplicationSpec -Strategy rolling -Tag $GoodTag",
-		"Save-Snapshots -Name 'failure'",
-		"Write-Evidence -Result failed",
-	} {
-		if !strings.Contains(controllerScript, token) {
-			t.Errorf("Phase 4 controller proof is missing %q", token)
+	gitDelivery := strings.Index(script, "} elseif ($Stage -eq 'Promote')")
+	if gitDelivery < 0 {
+		t.Fatal("could not locate the Phase 4 Git-only delivery interval")
+	}
+	for _, mutation := range []string{"kubectl apply", "kubectl patch", "kubectl delete"} {
+		if strings.Contains(script[gitDelivery:], mutation) {
+			t.Errorf("Phase 4 delivery interval contains Kubernetes mutation %q", mutation)
 		}
+	}
+	for _, tape := range []struct {
+		content string
+		result  string
+		timeout string
+		output  string
+	}{
+		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
+		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 35m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
+	} {
+		for _, token := range []string{tape.output, tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-recording.ps1", "Wait+Screen", tape.result} {
+			if !strings.Contains(tape.content, token) {
+				t.Errorf("Phase 4 VHS tape is missing %q", token)
+			}
+		}
+		if strings.Contains(tape.content, "Output docs/demonstrations/") {
+			t.Error("Phase 4 VHS output must not modify tracked demonstration files during Git delivery")
+		}
+	}
+}
+
+func TestCodeQLWorkflowAllowsHostedAnalysisToFinish(t *testing.T) {
+	workflow := string(readFile(t, filepath.Join(repositoryRoot(t), ".github", "workflows", "codeql.yml")))
+	if !strings.Contains(workflow, "timeout-minutes: 60") {
+		t.Fatal("CodeQL must retain the empirically required 60-minute job timeout")
 	}
 }
 

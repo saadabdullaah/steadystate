@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -116,6 +118,38 @@ func TestStrategyMigrationAndPluginWeightOwnership(t *testing.T) {
 	}
 }
 
+func TestRollingMigrationIsolatesReplacementAndDrainsAcceptedRoute(t *testing.T) {
+	t.Parallel()
+	app := unitCanaryApplication()
+	app.Generation = 42
+	deployment := resources.Deployment(app)
+	service := resources.Service(app)
+	applyRollingMigrationIdentity(app, deployment, service)
+	value := strconv.FormatInt(app.Generation, 10)
+	if deployment.Spec.Template.Labels[rollingMigrationLabelKey] != value || service.Spec.Selector[rollingMigrationLabelKey] != value {
+		t.Fatal("rolling replacement Deployment and base Service do not share an isolated migration identity")
+	}
+
+	route := resources.HTTPRoute(app)
+	route.Generation = 7
+	now := time.Date(2026, time.July, 18, 15, 0, 0, 0, time.UTC)
+	route.Annotations = map[string]string{
+		rollingCutoverStartedAtKey: fmt.Sprintf("%d,%s", route.Generation, now.Add(-10*time.Second).Format(time.RFC3339Nano)),
+	}
+	remaining, tracked := rollingCutoverRemaining(route, now)
+	if !tracked || remaining != 5*time.Second {
+		t.Fatalf("cutover drain remaining=%s tracked=%t, want 5s/true", remaining, tracked)
+	}
+	remaining, tracked = rollingCutoverRemaining(route, now.Add(6*time.Second))
+	if !tracked || remaining != 0 {
+		t.Fatalf("completed cutover drain remaining=%s tracked=%t, want 0/true", remaining, tracked)
+	}
+	route.Generation++
+	if _, tracked = rollingCutoverRemaining(route, now); tracked {
+		t.Fatal("stale cutover generation was reused")
+	}
+}
+
 func TestRolloutReadinessRequiresCurrentObservedGeneration(t *testing.T) {
 	t.Parallel()
 	app := unitCanaryApplication()
@@ -145,6 +179,30 @@ func TestBootstrapRolloutUsesRouterFreePinnedContract(t *testing.T) {
 	}
 	if rollout.Spec.WorkloadRef == nil || rollout.Spec.WorkloadRef.ScaleDown != rolloutsv1alpha1.ScaleDownNever {
 		t.Fatalf("bootstrap Rollout did not retain the serving Deployment: %#v", rollout.Spec.WorkloadRef)
+	}
+}
+
+func TestActivatedRolloutDoesNotReturnToBootstrapWhenRouteStatusLags(t *testing.T) {
+	t.Parallel()
+	app := unitCanaryApplication()
+	app.Status.ActiveVersion = "v0.3.0"
+	rollout := resources.Rollout(app)
+	rollout.Status.StableRS = "stable-hash"
+
+	if shouldHoldServingDeployment(app, rollout, true, false) {
+		t.Fatal("route generation lag incorrectly returned an active Rollout to bootstrap")
+	}
+
+	rollout.Spec.Strategy.Canary.TrafficRouting = nil
+	rollout.Spec.Strategy.Canary.Steps = nil
+	if !shouldHoldServingDeployment(app, rollout, true, false) {
+		t.Fatal("router-free Rollout did not retain the serving Deployment while route acceptance was pending")
+	}
+	if shouldHoldServingDeployment(app, rollout, true, true) {
+		t.Fatal("accepted canary route did not release the router-free bootstrap hold")
+	}
+	if !shouldHoldServingDeployment(app, rollout, false, true) {
+		t.Fatal("missing Rollout did not preserve the last healthy Deployment during reconstruction")
 	}
 }
 

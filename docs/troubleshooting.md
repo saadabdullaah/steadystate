@@ -181,6 +181,65 @@ kubectl logs -n steadystate-system deployment/steadystate-controller-manager --a
 
 The tenant Argo Application and data-plane resources should remain Healthy and retain their UIDs while the operator Deployment replaces its Pod. After restart, the controller must reconcile without generation or resource-version drift. Capture diagnostics before manually changing finalizers or managed children.
 
+## Canary rollout is stuck Progressing
+
+```powershell
+kubectl get rollout,analysisrun,analysistemplate -n team-payments
+kubectl argo rollouts get rollout demo -n team-payments
+kubectl get httproute -n team-payments demo -o yaml
+kubectl get pods -n team-payments -l app.kubernetes.io/name=demo -o wide
+```
+
+Confirm the desired Pod is Ready, the HTTPRoute has stable and canary backends, and the Gateway plugin's in-progress label is present while weights are changing. A canary step waits for its pause, Prometheus scrape, and two successful analysis measurements. Do not patch weights or Service selectors: those fields are temporarily owned by the Gateway plugin and Rollouts. Run `verify-progressive-delivery` if the generated structure or plugin permissions look wrong.
+
+## Analysis is Failed, Error, or Inconclusive
+
+```powershell
+kubectl get analysisrun -n team-payments -o yaml
+kubectl get servicemonitor,prometheusrule -n team-payments -o yaml
+kubectl get pods,service -n monitoring
+kubectl logs -n monitoring statefulset/prometheus-kube-prometheus-stack-prometheus --tail=200
+kubectl logs -n argo-rollouts deployment/argo-rollouts --tail=200
+```
+
+Failed success-rate or latency queries usually mean the candidate received real failing traffic. Empty request/latency vectors deliberately fail safe; ensure load reaches the Gateway and the ServiceMonitor target is up. Missing restart vectors are treated as zero. Two consecutive Prometheus provider errors cannot promote a candidate. With `automaticRollback: true`, expect stable traffic restoration followed by `Phase=Degraded`, reason `CanaryAnalysisFailed`, until Git restores the healthy tag. With automatic rollback disabled, use `kubectl argo rollouts promote` or `abort` only after reviewing the AnalysisRun.
+
+## Prometheus cannot scrape a Team application
+
+```powershell
+kubectl get networkpolicy -n team-payments steadystate-allow-monitoring -o yaml
+kubectl get servicemonitor -n team-payments -o yaml
+kubectl get endpointslice -n team-payments -l kubernetes.io/service-name=demo
+kubectl get pods -n monitoring --show-labels
+```
+
+The Team policy permits only Prometheus Pods from the `monitoring` Namespace to the named `http` port. Preserve the Namespace and Pod selectors installed by GitOps. The base Service remains present in canary mode specifically for metrics and reversible migration; deleting or repointing it creates an analysis outage and the operator will repair it.
+
+## Rollback restored traffic but the Application remains Degraded
+
+This is expected and truthful. Argo Rollouts aborts the candidate and restores stable traffic, but Git still requests the failed image. Verify that the last healthy tuple is unchanged, then merge a Git recovery commit restoring the healthy tag:
+
+```powershell
+kubectl get application.platform.steadystate.dev -n team-payments demo -o jsonpath='{.status.phase}{"\n"}{.status.activeVersion}{"\n"}{.status.resolvedImageDigest}{"\n"}{.status.resolvedGitRevision}{"\n"}'
+kubectl get rollout -n team-payments demo -o yaml
+```
+
+Do not force the status to Healthy or manually rewrite the Rollout. The recovery commit updates the active Git revision after the stable image is again the desired state.
+
+## Rolling/canary migration does not finish
+
+```powershell
+kubectl get deployment,rollout,replicaset,pod -n team-payments -o wide
+kubectl get service,httproute -n team-payments -o yaml
+kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=300
+```
+
+Rolling-to-canary creates and verifies the Rollout beside the serving Deployment before switching the route. Canary-to-rolling scales and verifies the Deployment before switching back to the base Service. A controller restart resumes from live readiness. Preserve both workload controllers and Services while diagnosing; deleting the apparent "old" object can remove the migration anchor. If a Rollout was deleted while a failed candidate remained desired, the operator must reconstruct the last active version rather than promote the bad tag.
+
+## Root sync waits on monitoring for an unrelated tenant commit
+
+The monitoring child carries `argocd.argoproj.io/ignore-healthcheck: "true"` so its transient chart health refresh cannot gate every tenant-only revision. This does not waive platform readiness: `deploy-gitops`, `test-gitops`, and Phase 4 preparation explicitly require monitoring and all other platform children to be Synced and Healthy before delivery testing. If the root still waits, render the root chart and confirm the annotation is present before changing sync waves.
+
 ## Reset
 
 ```powershell

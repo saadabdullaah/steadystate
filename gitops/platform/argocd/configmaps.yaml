@@ -19,6 +19,8 @@ metadata:
     app.kubernetes.io/part-of: argocd
 data:
   application.resourceTrackingMethod: annotation
+  timeout.reconciliation: 30s
+  timeout.reconciliation.jitter: 0s
   resource.customizations.health.platform.steadystate.dev_Application: |
     health = {status = "Progressing", message = "Waiting for current Application status"}
     if obj.status == nil or obj.status.observedGeneration == nil or
