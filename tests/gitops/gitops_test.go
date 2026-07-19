@@ -531,6 +531,8 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 		"900MB",
 		"6.5GB",
 		"Save-ClusterEvidence",
+		"PHASE5_ACCEPTANCE_RESULT_PASSED",
+		"PHASE5_ACCEPTANCE_RESULT_FAILED",
 	} {
 		if !strings.Contains(script, token) {
 			t.Errorf("Phase 5 acceptance script is missing %q", token)
@@ -538,7 +540,12 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	}
 
 	tape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase5-request-telemetry.tape")))
-	for _, token := range []string{"Output .artifacts/phase5/acceptance/phase5-request-telemetry.gif", "./scripts/phase5-acceptance.ps1 -Stage Test"} {
+	for _, token := range []string{
+		"Output .artifacts/phase5/acceptance/phase5-request-telemetry.gif",
+		"pwsh -NoProfile -File scripts/phase5-acceptance.ps1 -Stage Test",
+		"Set WaitTimeout 20m",
+		"Wait+Screen /PHASE5_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
+	} {
 		if !strings.Contains(tape, token) {
 			t.Errorf("Phase 5 tape is missing %q", token)
 		}
@@ -772,6 +779,9 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, token := range []string{
 		"acceptance/phase4-",
 		"[ValidateSet('Prepare','Promote','Rollback','Finalize','CaptureFailure')]",
+		"$Phase4ReleaseRef = 'v0.4.0'",
+		"git log -1 --format=%H $Phase4ReleaseRef -- apps/demo-app/VERSION",
+		"$manifest = Invoke-WebRequest -UseBasicParsing -Uri $uri -Headers $headers",
 		"sha-$sourceCommit",
 		"foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root'))",
 		"This delivery commit must change only spec.image.tag.",

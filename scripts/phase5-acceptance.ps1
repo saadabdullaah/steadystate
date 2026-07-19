@@ -292,10 +292,12 @@ switch ($Stage) {
             Save-ClusterEvidence
             $state.result='passed'; $state.completedAt=(Get-Date).ToUniversalTime().ToString('o'); Save-State $state
             Write-Utf8 (Join-Path $Root $EvidencePath) (($state | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
+            Write-Host 'PHASE5_ACCEPTANCE_RESULT_PASSED' -ForegroundColor Cyan
         } catch {
             $state.failure = $_.Exception.Message; $state.result='failed'; $state.completedAt=(Get-Date).ToUniversalTime().ToString('o'); Save-State $state
             try { Save-ClusterEvidence } catch {}
             Write-Utf8 (Join-Path $Root $EvidencePath) (($state | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
+            Write-Host 'PHASE5_ACCEPTANCE_RESULT_FAILED' -ForegroundColor Red
             throw
         }
     }
