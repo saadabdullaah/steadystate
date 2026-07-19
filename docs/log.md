@@ -147,3 +147,4 @@
 
 - Commit the hosted GIFs and documentation, then require the rerun of all five CI jobs, CodeQL, and branch Phase 4 acceptance before merging PR #27.
 - After the squash merge, run exact-`main` CI, 60-minute CodeQL, existing Nightly Integration, and Phase 4 acceptance; retain and verify the exact-main artifact before tagging and releasing `v0.4.0`.
+- Exact-main CI `29685492924`, CodeQL `29685492928`, and Phase 4 acceptance `29685512926` passed on merge `1ca1564`. Nightly `29685511924` exposed a standalone-operator regression before publication: unconditional optional-CRD watches prevented controller cache startup when Rollouts and monitoring CRDs were absent. The follow-up makes watch registration capability-aware, keeps rolling reconciliation independent of Phase 4 add-ons, and rejects unavailable canary capability before child mutation; the release remains gated on its follow-up PR and a clean exact-main Nightly rerun.

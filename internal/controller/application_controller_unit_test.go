@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -75,6 +76,39 @@ func TestSourceRevisionValidation(t *testing.T) {
 	app.Annotations[platformv1alpha1.SourceRevisionAnnotationKey] = "ABC123"
 	if _, err := resolvedSourceRevision(app); err == nil {
 		t.Fatal("invalid source revision was accepted")
+	}
+}
+
+func TestOptionalResourceAvailability(t *testing.T) {
+	t.Parallel()
+	groupVersion := schema.GroupVersion{Group: "argoproj.io", Version: "v1alpha1"}
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{groupVersion})
+	rolloutGVK := groupVersion.WithKind("Rollout")
+
+	available, err := optionalResourceAvailable(mapper, rolloutGVK)
+	if err != nil || available {
+		t.Fatalf("absent optional Rollout mapping: available=%t err=%v", available, err)
+	}
+
+	mapper.Add(rolloutGVK, meta.RESTScopeNamespace)
+	available, err = optionalResourceAvailable(mapper, rolloutGVK)
+	if err != nil || !available {
+		t.Fatalf("installed optional Rollout mapping: available=%t err=%v", available, err)
+	}
+
+	monitoringGVK := schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "ServiceMonitor"}
+	available, err = optionalResourceAvailable(mapper, monitoringGVK)
+	if err != nil || available {
+		t.Fatalf("absent optional ServiceMonitor mapping: available=%t err=%v", available, err)
+	}
+
+	reconciler := &ApplicationReconciler{}
+	if !reconciler.hasProgressiveDelivery() {
+		t.Fatal("direct unit/envtest reconcilers must assume their installed CRD fixture is available")
+	}
+	reconciler.progressiveDeliveryAvailable = &available
+	if reconciler.hasProgressiveDelivery() {
+		t.Fatal("manager discovery must disable progressive delivery when any required CRD is absent")
 	}
 }
 

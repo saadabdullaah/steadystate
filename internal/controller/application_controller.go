@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/retry"
@@ -44,6 +45,10 @@ type ApplicationReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder events.EventRecorder
+
+	// nil keeps direct unit/envtest reconcilers backward compatible; manager setup
+	// always records the discovered hosted capability before controllers start.
+	progressiveDeliveryAvailable *bool
 }
 
 // +kubebuilder:rbac:groups=platform.steadystate.dev,resources=applications,verbs=get;list;watch;create;update;patch;delete
@@ -123,6 +128,14 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		changed, err := r.patchStatus(ctx, app, degradedStatus(app, "UnsupportedFeature", message))
 		if changed {
 			r.event(app, corev1.EventTypeWarning, "UnsupportedFeature", message)
+		}
+		return ctrl.Result{}, err
+	}
+	if app.Spec.Deployment.Strategy == platformv1alpha1.DeploymentStrategyCanary && !r.hasProgressiveDelivery() {
+		message := "progressive delivery requires the Argo Rollouts and Prometheus Operator CRDs"
+		changed, err := r.patchStatus(ctx, app, degradedStatus(app, "ProgressiveDeliveryUnavailable", message))
+		if changed {
+			r.event(app, corev1.EventTypeWarning, "ProgressiveDeliveryUnavailable", message)
 		}
 		return ctrl.Result{}, err
 	}
@@ -434,23 +447,58 @@ func (r *ApplicationReconciler) applicationsForTeam(ctx context.Context, object 
 	return r.applicationRequestsInNamespace(ctx, resources.TeamNamespacePrefix+object.GetName())
 }
 
-// SetupWithManager registers owner watches and tenancy dependency watches.
+func optionalResourceAvailable(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (bool, error) {
+	_, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err == nil {
+		return true, nil
+	}
+	if meta.IsNoMatchError(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("discover optional resource %s: %w", gvk.String(), err)
+}
+
+func (r *ApplicationReconciler) hasProgressiveDelivery() bool {
+	return r.progressiveDeliveryAvailable == nil || *r.progressiveDeliveryAvailable
+}
+
+// SetupWithManager registers core watches and capability-aware progressive-delivery watches.
 func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1alpha1.Application{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&gatewayv1.HTTPRoute{}).
-		Owns(&rolloutsv1alpha1.Rollout{}).
-		Owns(&rolloutsv1alpha1.AnalysisTemplate{}).
-		Owns(monitoringWatchObject("ServiceMonitor")).
-		Owns(monitoringWatchObject("PrometheusRule")).
-		Watches(&rolloutsv1alpha1.AnalysisRun{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
 		Watches(&appsv1.ReplicaSet{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForNamespace)).
-		Watches(&platformv1alpha1.Team{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForTeam)).
-		Named("application").
-		Complete(r)
+		Watches(&platformv1alpha1.Team{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForTeam))
+
+	optionalWatches := []struct {
+		gvk      schema.GroupVersionKind
+		register func()
+	}{
+		{schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Rollout"}, func() { builder = builder.Owns(&rolloutsv1alpha1.Rollout{}) }},
+		{schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "AnalysisTemplate"}, func() { builder = builder.Owns(&rolloutsv1alpha1.AnalysisTemplate{}) }},
+		{schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "AnalysisRun"}, func() {
+			builder = builder.Watches(&rolloutsv1alpha1.AnalysisRun{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod))
+		}},
+		{schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "ServiceMonitor"}, func() { builder = builder.Owns(monitoringWatchObject("ServiceMonitor")) }},
+		{schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "PrometheusRule"}, func() { builder = builder.Owns(monitoringWatchObject("PrometheusRule")) }},
+	}
+	allProgressiveResourcesAvailable := true
+	for _, watch := range optionalWatches {
+		available, err := optionalResourceAvailable(mgr.GetRESTMapper(), watch.gvk)
+		if err != nil {
+			return err
+		}
+		allProgressiveResourcesAvailable = allProgressiveResourcesAvailable && available
+		if available {
+			watch.register()
+		}
+	}
+	r.progressiveDeliveryAvailable = &allProgressiveResourcesAvailable
+
+	return builder.Named("application").Complete(r)
 }
