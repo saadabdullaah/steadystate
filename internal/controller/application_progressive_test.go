@@ -151,6 +151,12 @@ func TestRollingMigrationIsolatesReplacementAndDrainsAcceptedRoute(t *testing.T)
 	if _, tracked = rollingCutoverRemaining(route, now); tracked {
 		t.Fatal("stale cutover generation was reused")
 	}
+	route.Generation--
+	route.Annotations[rollingCleanupStartedAtKey] = fmt.Sprintf("%d,%s", route.Generation, now.Add(-20*time.Second).Format(time.RFC3339Nano))
+	remaining, tracked = routeDrainRemaining(route, rollingCleanupStartedAtKey, rollingCleanupDrainDelay, now)
+	if !tracked || remaining != 10*time.Second {
+		t.Fatalf("progressive endpoint drain remaining=%s tracked=%t, want 10s/true", remaining, tracked)
+	}
 }
 
 func TestRolloutReadinessRequiresCurrentObservedGeneration(t *testing.T) {

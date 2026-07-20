@@ -71,3 +71,16 @@ spec:
           selector:
             matchLabels:
               steadystate.dev/gateway-access: "true"
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: steadystate-request-identity
+  namespace: steadystate-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: steadystate
+  headers:
+    requestID: PreserveOrGenerate

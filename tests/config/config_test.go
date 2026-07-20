@@ -76,6 +76,24 @@ func TestKindProfilesUseKubernetes135KubeadmShape(t *testing.T) {
 	}
 }
 
+func TestSharedGatewayPreservesRequestIdentity(t *testing.T) {
+	root := repositoryRoot(t)
+	content, err := os.ReadFile(filepath.Join(root, "config", "gateway", "shared.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, contract := range []string{
+		"kind: ClientTrafficPolicy",
+		"name: steadystate-request-identity",
+		"requestID: PreserveOrGenerate",
+	} {
+		if !strings.Contains(text, contract) {
+			t.Errorf("shared Gateway is missing request identity contract %q", contract)
+		}
+	}
+}
+
 func TestVersionLockContainsRequiredPins(t *testing.T) {
 	root := repositoryRoot(t)
 	content, err := os.ReadFile(filepath.Join(root, "scripts", "versions.env"))

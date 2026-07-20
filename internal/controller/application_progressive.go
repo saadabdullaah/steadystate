@@ -32,7 +32,9 @@ const (
 	gatewayPluginInProgressValue = "in-progress"
 	rollingMigrationLabelKey     = "steadystate.dev/rolling-migration"
 	rollingCutoverStartedAtKey   = "steadystate.dev/rolling-cutover-started-at"
+	rollingCleanupStartedAtKey   = "steadystate.dev/rolling-cleanup-started-at"
 	rollingCutoverDrainDelay     = 15 * time.Second
+	rollingCleanupDrainDelay     = 30 * time.Second
 )
 
 type applicationRuntimeState struct {
@@ -209,7 +211,24 @@ func (r *ApplicationReconciler) reconcileRollingChildren(ctx context.Context, ap
 				state.requeueAfter = remaining
 				return state, nil
 			}
-			changed, err = r.deleteProgressiveResources(ctx, app)
+			servicesRemoved, removeErr := r.deleteProgressiveServices(ctx, app)
+			if removeErr != nil {
+				return nil, removeErr
+			}
+			state.mutated = state.mutated || servicesRemoved
+			endpointsDrained, marked, remaining, drainErr := r.waitForProgressiveEndpointDrain(ctx, state.route)
+			if drainErr != nil {
+				return nil, fmt.Errorf("wait for removed progressive endpoints to drain: %w", drainErr)
+			}
+			state.mutated = state.mutated || marked
+			if !endpointsDrained {
+				state.rollout = rollout
+				state.migrating = true
+				state.migrationDetail = "waiting for Envoy to remove progressive endpoints before deleting their Pods"
+				state.requeueAfter = remaining
+				return state, nil
+			}
+			changed, err = r.deleteProgressiveControllerResources(ctx, app)
 			if err != nil {
 				return nil, err
 			}
@@ -285,8 +304,16 @@ func applyRollingMigrationIdentity(app *platformv1alpha1.Application, deployment
 }
 
 func (r *ApplicationReconciler) waitForRollingCutoverDrain(ctx context.Context, route *gatewayv1.HTTPRoute) (drained, changed bool, remaining time.Duration, err error) {
+	return r.waitForRouteDrain(ctx, route, rollingCutoverStartedAtKey, rollingCutoverDrainDelay)
+}
+
+func (r *ApplicationReconciler) waitForProgressiveEndpointDrain(ctx context.Context, route *gatewayv1.HTTPRoute) (drained, changed bool, remaining time.Duration, err error) {
+	return r.waitForRouteDrain(ctx, route, rollingCleanupStartedAtKey, rollingCleanupDrainDelay)
+}
+
+func (r *ApplicationReconciler) waitForRouteDrain(ctx context.Context, route *gatewayv1.HTTPRoute, annotation string, delay time.Duration) (drained, changed bool, remaining time.Duration, err error) {
 	now := time.Now().UTC()
-	if remaining, tracked := rollingCutoverRemaining(route, now); tracked {
+	if remaining, tracked := routeDrainRemaining(route, annotation, delay, now); tracked {
 		return remaining <= 0, false, remaining, nil
 	}
 	before := route.DeepCopy()
@@ -294,16 +321,20 @@ func (r *ApplicationReconciler) waitForRollingCutoverDrain(ctx context.Context, 
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	annotations[rollingCutoverStartedAtKey] = fmt.Sprintf("%d,%s", route.Generation, now.Format(time.RFC3339Nano))
+	annotations[annotation] = fmt.Sprintf("%d,%s", route.Generation, now.Format(time.RFC3339Nano))
 	route.SetAnnotations(annotations)
 	if patchErr := r.Patch(ctx, route, client.MergeFrom(before)); patchErr != nil {
 		return false, false, 0, patchErr
 	}
-	return false, true, rollingCutoverDrainDelay, nil
+	return false, true, delay, nil
 }
 
 func rollingCutoverRemaining(route *gatewayv1.HTTPRoute, now time.Time) (time.Duration, bool) {
-	parts := strings.SplitN(route.Annotations[rollingCutoverStartedAtKey], ",", 2)
+	return routeDrainRemaining(route, rollingCutoverStartedAtKey, rollingCutoverDrainDelay, now)
+}
+
+func routeDrainRemaining(route *gatewayv1.HTTPRoute, annotation string, delay time.Duration, now time.Time) (time.Duration, bool) {
+	parts := strings.SplitN(route.Annotations[annotation], ",", 2)
 	if len(parts) != 2 {
 		return 0, false
 	}
@@ -315,7 +346,7 @@ func rollingCutoverRemaining(route *gatewayv1.HTTPRoute, now time.Time) (time.Du
 	if err != nil {
 		return 0, false
 	}
-	remaining := rollingCutoverDrainDelay - now.Sub(startedAt)
+	remaining := delay - now.Sub(startedAt)
 	if remaining < 0 {
 		remaining = 0
 	}
@@ -515,13 +546,21 @@ func (r *ApplicationReconciler) freezeRollout(ctx context.Context, app *platform
 	return true, r.Patch(ctx, current, client.MergeFrom(before))
 }
 
-func (r *ApplicationReconciler) deleteProgressiveResources(ctx context.Context, app *platformv1alpha1.Application) (bool, error) {
-	objects := []client.Object{
-		resources.RolloutObject(app),
-		&rolloutsv1alpha1.AnalysisTemplate{ObjectMeta: metav1.ObjectMeta{Name: resources.AnalysisTemplateName(app), Namespace: app.Namespace}},
+func (r *ApplicationReconciler) deleteProgressiveServices(ctx context.Context, app *platformv1alpha1.Application) (bool, error) {
+	return r.deleteProgressiveObjects(ctx, []client.Object{
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: resources.StableServiceName(app), Namespace: app.Namespace}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: resources.CanaryServiceName(app), Namespace: app.Namespace}},
-	}
+	})
+}
+
+func (r *ApplicationReconciler) deleteProgressiveControllerResources(ctx context.Context, app *platformv1alpha1.Application) (bool, error) {
+	return r.deleteProgressiveObjects(ctx, []client.Object{
+		resources.RolloutObject(app),
+		&rolloutsv1alpha1.AnalysisTemplate{ObjectMeta: metav1.ObjectMeta{Name: resources.AnalysisTemplateName(app), Namespace: app.Namespace}},
+	})
+}
+
+func (r *ApplicationReconciler) deleteProgressiveObjects(ctx context.Context, objects []client.Object) (bool, error) {
 	mutated := false
 	for _, object := range objects {
 		key := client.ObjectKeyFromObject(object)
