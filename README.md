@@ -4,7 +4,7 @@ SteadyState is a laptop-scale internal developer platform built around a Kuberne
 
 Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`.
 
-> Status: Phases 0 through 4 are released through `v0.4.0`. Phase 5 is implemented as a `v0.5.0` release candidate and remains gated on its hosted acceptance artifact, exact-`main` regression workflows, tag, and release.
+> Status: Phases 0 through 4 are released through `v0.4.0`. Phase 5 is implemented as a `v0.5.0` release candidate, and its branch acceptance evidence is verified. Merge, demo-image delivery, exact-`main` regression workflows, tag, and release remain required.
 
 ## Architecture
 
@@ -143,6 +143,10 @@ To verify the Phase 5 observability contracts and run the hosted-compatible test
 The platform extends the existing Prometheus/Grafana installation with single-binary Loki and Tempo, a read-only Alloy log collector, and one OpenTelemetry Collector. Applications opt into metrics, logs, and traces independently. `logs=false` excludes Pods from Alloy discovery, `traces=false` removes the OTLP environment and trace egress policy, and `metrics=false` deletes the Application-owned ServiceMonitor and PrometheusRule. `ServiceHealth=True` is derived only from the active workload and accepted HTTPRoute, so it adds no controller polling or dependency on Prometheus.
 
 Grafana is available through `http://grafana.localtest.me:8080`; Prometheus, Loki, Tempo, and Alertmanager remain cluster-internal. The Phase 5 workflow records one request correlated by request ID and trace ID across all three data sources, proves telemetry opt-outs, fires the multi-window fast-burn alert with deterministic ten-percent failures, and enforces memory budgets before producing its GIF and schema-versioned evidence.
+
+![Phase 5 correlated request telemetry](docs/demonstrations/phase5-request-telemetry.gif)
+
+[Hosted Phase 5 acceptance run 29843478650](https://github.com/saadabdullaah/steadystate/actions/runs/29843478650) passed all eight checks against PR merge revision `1ba5bfa`: healthy pinned backends and Grafana datasources, one request correlated across Prometheus/Loki/Tempo, log/trace and metrics opt-outs, fast-burn alert propagation through Prometheus/Alertmanager/Grafana, resource budgets, and the progressive-delivery regression. [Artifact 8500873862](https://github.com/saadabdullaah/steadystate/actions/runs/29843478650/artifacts/8500873862) contains the 197,514-byte GIF, schema-versioned JSON, queries, alert and dashboard snapshots, rendered state, component logs, and success diagnostics. GitHub records artifact SHA-256 `f67b3e7090ee00ed60853dcfdbdffdc209a55c4bd7d56a4b7f56119852827cd9`; the GIF SHA-256 is `3791b01210e9842a0a32ae6ce6170a78a31fa8c8134fc61919a1c0398d0665d7`.
 
 Use `-Profile standard` for one worker or `-Profile full` for two workers. Override ports consistently when the defaults are occupied:
 
