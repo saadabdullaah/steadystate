@@ -93,6 +93,8 @@ kubectl get events -n team-payments --sort-by=.lastTimestamp
 
 The expected parent is `steadystate-system/steadystate`. The operator reports rejected or unresolved references as `Ready=False` rather than treating object creation as success.
 
+If `ResolvedRefs=False/BackendNotFound` remains after an owned Service has been recreated, compare `steadystate.dev/backend-service-uids` on the HTTPRoute with the current Service UID. The controller refreshes this annotation once per backend recreation so Envoy Gateway re-evaluates the reference; do not patch route status manually.
+
 ## Application deletion is stuck
 
 ```powershell

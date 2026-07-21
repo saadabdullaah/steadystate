@@ -151,6 +151,68 @@ function Wait-PrometheusResult([string]$Expression, [int]$TimeoutSeconds = 180) 
     } -IntervalSeconds 5
 }
 
+function Wait-MemoryWithinBudget {
+    param(
+        [int]$TimeoutSeconds = 300,
+        [int]$ConsecutiveSamplesRequired = 3,
+        [int]$IntervalSeconds = 15
+    )
+    $observabilityBudgetBytes = [double]900MB
+    $totalBudgetBytes = [double]6.5GB
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $consecutive = 0
+    $samples = @()
+    $lastDetail = 'no valid samples'
+    do {
+        try {
+            $observability = Invoke-PrometheusQuery 'sum(container_memory_working_set_bytes{namespace="monitoring",container!="",image!=""})'
+            $total = Invoke-PrometheusQuery 'sum(container_memory_working_set_bytes{container!="",image!=""})'
+            if ($observability.status -ne 'success' -or @($observability.data.result).Count -ne 1 -or $total.status -ne 'success' -or @($total.data.result).Count -ne 1) {
+                throw 'Prometheus returned an empty or non-scalar memory result.'
+            }
+            $observabilityBytes = [double]$observability.data.result[0].value[1]
+            $totalBytes = [double]$total.data.result[0].value[1]
+            $withinBudget = $observabilityBytes -gt 0 -and $totalBytes -gt 0 -and $observabilityBytes -le $observabilityBudgetBytes -and $totalBytes -le $totalBudgetBytes
+            $sample = [ordered]@{
+                observedAt = (Get-Date).ToUniversalTime().ToString('o')
+                observabilityWorkingSetBytes = $observabilityBytes
+                totalWorkingSetBytes = $totalBytes
+                withinBudget = $withinBudget
+            }
+            $samples = @($samples) + @($sample)
+            if ($withinBudget) { $consecutive++ } else { $consecutive = 0 }
+            $lastDetail = "observability=$observabilityBytes total=$totalBytes consecutive=$consecutive/$ConsecutiveSamplesRequired"
+            if ($consecutive -ge $ConsecutiveSamplesRequired) {
+                $breakdownResult = Invoke-PrometheusQuery 'sum by (pod,container) (container_memory_working_set_bytes{namespace="monitoring",container!="",image!=""})'
+                if ($breakdownResult.status -ne 'success' -or @($breakdownResult.data.result).Count -eq 0) {
+                    throw 'Prometheus returned no per-container observability memory breakdown.'
+                }
+                $componentBreakdown = @($breakdownResult.data.result | ForEach-Object {
+                    [ordered]@{
+                        pod = [string]$_.metric.pod
+                        container = [string]$_.metric.container
+                        workingSetBytes = [double]$_.value[1]
+                    }
+                } | Sort-Object -Property workingSetBytes -Descending)
+                return [ordered]@{
+                    observabilityWorkingSetBytes = $observabilityBytes
+                    totalWorkingSetBytes = $totalBytes
+                    observedAt = $sample.observedAt
+                    consecutiveSamplesRequired = $ConsecutiveSamplesRequired
+                    sampleIntervalSeconds = $IntervalSeconds
+                    samples = $samples
+                    componentBreakdown = $componentBreakdown
+                }
+            }
+        } catch {
+            $consecutive = 0
+            $lastDetail = $_.Exception.Message
+        }
+        if ((Get-Date) -lt $deadline) { Start-Sleep -Seconds $IntervalSeconds }
+    } while ((Get-Date) -lt $deadline)
+    throw "Memory did not remain within budget for $ConsecutiveSamplesRequired consecutive samples: $lastDetail"
+}
+
 function Save-ClusterEvidence {
     New-Item -ItemType Directory -Force -Path (Join-Path $ArtifactRoot 'snapshots'), (Join-Path $ArtifactRoot 'logs') | Out-Null
     foreach ($entry in @(
@@ -278,13 +340,9 @@ switch ($Stage) {
             Add-Check $state 'ten-percent-errors-fire-fast-burn' $burnStarted 'Fast-burn alert fired in Prometheus and was visible through Alertmanager and Grafana within five minutes.'
 
             $memoryStarted = Get-Date
-            $observabilityMemory = Wait-PrometheusResult 'sum(container_memory_working_set_bytes{namespace="monitoring",container!="",image!=""})'
-            $totalMemory = Wait-PrometheusResult 'sum(container_memory_working_set_bytes{container!="",image!=""})'
-            $observabilityBytes = [double]$observabilityMemory.data.result[0].value[1]
-            $totalBytes = [double]$totalMemory.data.result[0].value[1]
-            if ($observabilityBytes -le 0 -or $totalBytes -le 0 -or $observabilityBytes -gt 900MB -or $totalBytes -gt 6.5GB) { throw "Memory evidence is empty or over budget: observability=$observabilityBytes total=$totalBytes" }
-            $state.memory = [ordered]@{observabilityWorkingSetBytes=$observabilityBytes;totalWorkingSetBytes=$totalBytes;observedAt=(Get-Date).ToUniversalTime().ToString('o')}
-            Add-Check $state 'observability-and-standard-profile-within-budget' $memoryStarted 'Observability <=900 MiB and total in-cluster working set <=6.5 GiB.'
+            $state.memory = Wait-MemoryWithinBudget
+            Write-Utf8 (Join-Path $ArtifactRoot 'metrics/memory.json') (($state.memory | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
+            Add-Check $state 'observability-and-standard-profile-within-budget' $memoryStarted 'Three consecutive 15-second samples showed observability <=900 MiB and total in-cluster working set <=6.5 GiB; per-container evidence was retained.'
 
             $demo = Get-KubeJSON @('get','applications.platform.steadystate.dev','demo','-n',$Namespace)
             $payments = Get-KubeJSON @('get','applications.argoproj.io','payments','-n','argocd')
@@ -306,7 +364,7 @@ switch ($Stage) {
     'Finalize' {
         $state = Read-State
         if ($state.result -ne 'passed' -or $state.failure) { throw "Phase 5 acceptance did not pass: $($state.failure)" }
-        foreach ($path in @('queries/prometheus.json','queries/loki.json','queries/tempo.json','alerts/alertmanager.json','alerts/grafana-fast-burn.json','rendered/gitops-platform.yaml','logs/operator.log')) {
+        foreach ($path in @('queries/prometheus.json','queries/loki.json','queries/tempo.json','alerts/alertmanager.json','alerts/grafana-fast-burn.json','metrics/memory.json','rendered/gitops-platform.yaml','logs/operator.log')) {
             $file = Join-Path $ArtifactRoot $path
             if (-not (Test-Path -LiteralPath $file) -or (Get-Item $file).Length -le 0) { throw "Missing Phase 5 evidence: $path" }
         }
