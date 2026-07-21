@@ -9,12 +9,11 @@ nodes:
     image: __NODE_IMAGE__
     kubeadmConfigPatches:
       - |
-        apiVersion: kubeadm.k8s.io/v1beta4
+        apiVersion: kubeadm.k8s.io/v1beta3
         kind: InitConfiguration
         nodeRegistration:
           kubeletExtraArgs:
-            - name: node-labels
-              value: ingress-ready=true
+            node-labels: ingress-ready=true
     extraPortMappings:
       - containerPort: 30080
         hostPort: __HTTP_PORT__

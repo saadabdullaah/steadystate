@@ -26,11 +26,14 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-30"
 spec:
-  description: Argo configuration, monitoring, Rollouts, and the SteadyState operator.
+  description: Argo configuration, metrics, logs, traces, Rollouts, and the SteadyState operator.
   sourceRepos:
     - {{ .Values.repoURL | quote }}
     - https://argoproj.github.io/argo-helm
     - https://prometheus-community.github.io/helm-charts
+    - https://grafana-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+    - https://open-telemetry.github.io/opentelemetry-helm-charts
   destinations:
     - server: https://kubernetes.default.svc
       namespace: argocd
@@ -60,6 +63,10 @@ spec:
       kind: Service
     - group: apps
       kind: Deployment
+    - group: apps
+      kind: DaemonSet
+    - group: apps
+      kind: StatefulSet
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
     - group: networking.k8s.io
@@ -74,6 +81,8 @@ spec:
       kind: Prometheus
     - group: monitoring.coreos.com
       kind: ServiceMonitor
+    - group: policy
+      kind: PodDisruptionBudget
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject

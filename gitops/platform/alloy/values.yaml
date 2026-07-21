@@ -1,0 +1,121 @@
+fullnameOverride: alloy
+crds:
+  create: false
+
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["namespaces", "pods"]
+      verbs: ["get", "list", "watch"]
+  # The chart renders an empty clusterRules list as invalid YAML when rules are
+  # customized, so retain the same read-only discovery rule in both lists.
+  clusterRules:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list", "watch"]
+
+controller:
+  type: daemonset
+
+alloy:
+  enableReporting: false
+  clustering:
+    enabled: false
+  mounts:
+    varlog: true
+    dockercontainers: false
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi
+  configMap:
+    content: |-
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "team_application_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          regex = "team-.+"
+          action = "keep"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_steadystate_dev_logs"]
+          regex = "true"
+          action = "keep"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator = "/"
+          replacement = "/var/log/pods/*$1/$2/*.log"
+          target_label = "__path__"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label = "namespace"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+          target_label = "application"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_steadystate_dev_version"]
+          target_label = "version"
+        }
+      }
+
+      local.file_match "team_application_logs" {
+        path_targets = discovery.relabel.team_application_logs.output
+      }
+
+      loki.source.file "team_application_logs" {
+        targets = local.file_match.team_application_logs.targets
+        forward_to = [loki.process.team_application_logs.receiver]
+      }
+
+      loki.process "team_application_logs" {
+        stage.cri {}
+        stage.json {
+          expressions = {
+            level = "level",
+            request_id = "request_id",
+            trace_id = "trace_id",
+          }
+        }
+        stage.labels {
+          values = {
+            level = "",
+          }
+        }
+        forward_to = [loki.write.local.receiver]
+      }
+
+      loki.write "local" {
+        endpoint {
+          url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
+
+configReloader:
+  resources:
+    requests:
+      cpu: 5m
+      memory: 8Mi
+    limits:
+      cpu: 25m
+      memory: 16Mi
+
+serviceMonitor:
+  enabled: false

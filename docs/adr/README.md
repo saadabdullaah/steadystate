@@ -9,3 +9,4 @@
 | [0005](0005-label-based-team-tenancy.md) | Use label-based Team tenancy and finalizer-controlled Namespace deletion |
 | [0006](0006-argo-cd-app-of-apps-ownership.md) | Use Argo CD app-of-apps with exact revision inheritance and explicit ownership boundaries |
 | [0007](0007-metric-gated-progressive-delivery.md) | Use metric-gated Rollouts with explicit field ownership and fail-safe analysis |
+| [0008](0008-kubernetes-1-35-and-observability.md) | Align Kubernetes 1.35 and define the correlated observability plane |

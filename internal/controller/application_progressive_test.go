@@ -32,6 +32,9 @@ func TestCanaryStatusPromotionAndRollback(t *testing.T) {
 	if rejected || status.Phase != platformv1alpha1.ApplicationPhaseHealthy || status.ActiveVersion != "v0.4.0" || status.CandidateVersion != "" || status.ResolvedImageDigest != testImageDigest || status.ResolvedGitRevision != testGitRevision {
 		t.Fatalf("canary promotion was not atomic: %#v", status)
 	}
+	if !meta.IsStatusConditionTrue(status.Conditions, conditionServiceHealth) {
+		t.Fatalf("healthy canary does not expose ServiceHealth=True: %#v", status)
+	}
 
 	rollout.Status.Abort = true
 	rollout.Status.Phase = rolloutsv1alpha1.RolloutPhaseDegraded
@@ -95,7 +98,7 @@ func TestStrategyMigrationAndPluginWeightOwnership(t *testing.T) {
 		t.Fatalf("plugin-owned weights were overwritten: %#v", desired.Spec.Rules[0].BackendRefs)
 	}
 
-	status := strategyMigrationStatus(app, "cutover")
+	status := strategyMigrationStatus(app, &applicationRuntimeState{migrationDetail: "cutover", route: resources.CanaryHTTPRoute(app)})
 	if status.Phase != platformv1alpha1.ApplicationPhaseProgressing || meta.FindStatusCondition(status.Conditions, conditionReady).Reason != "StrategyMigration" {
 		t.Fatalf("unexpected migration status: %#v", status)
 	}
@@ -147,6 +150,12 @@ func TestRollingMigrationIsolatesReplacementAndDrainsAcceptedRoute(t *testing.T)
 	route.Generation++
 	if _, tracked = rollingCutoverRemaining(route, now); tracked {
 		t.Fatal("stale cutover generation was reused")
+	}
+	route.Generation--
+	route.Annotations[rollingCleanupStartedAtKey] = fmt.Sprintf("%d,%s", route.Generation, now.Add(-20*time.Second).Format(time.RFC3339Nano))
+	remaining, tracked = routeDrainRemaining(route, rollingCleanupStartedAtKey, rollingCleanupDrainDelay, now)
+	if !tracked || remaining != 10*time.Second {
+		t.Fatalf("progressive endpoint drain remaining=%s tracked=%t, want 10s/true", remaining, tracked)
 	}
 }
 

@@ -78,6 +78,25 @@ function Assert-Commands {
     }
 }
 
+function Assert-ChartChecksum {
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Chart,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$Expected
+    )
+    $chartDirectory = Join-Path $ArtifactRoot 'charts'
+    New-Item -ItemType Directory -Force -Path $chartDirectory | Out-Null
+    $path = Join-Path $chartDirectory "$Chart-$Version.tgz"
+    if (-not (Test-Path -LiteralPath $path)) {
+        Invoke-External helm pull $Chart --repo $Repository --version $Version --destination $chartDirectory
+    }
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+    if ($actual -ne $Expected) {
+        throw "$Chart chart checksum mismatch: expected $Expected, got $actual"
+    }
+}
+
 function Remove-Dex {
     foreach ($kind in @('serviceaccount','role','rolebinding','service','deployment')) {
         Invoke-External kubectl delete $kind argocd-dex-server -n argocd --ignore-not-found=true --wait=true
@@ -275,7 +294,7 @@ function Invoke-Test {
     Add-PassedCheck $checks 'pinned-argocd-ready-dex-absent' $started "Pinned manifest $(Split-Path -Leaf $manifest) is running and all five Dex objects are absent."
 
     $applications = @{}
-    foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root')) {
+    foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','loki','tempo','otel-collector','alloy','steadystate-operator','payments','steadystate-root')) {
         $started = Get-Date
         $applications[$name] = Wait-ArgoApplication -Name $name
         Add-PassedCheck $checks "argocd-application-$name-healthy" $started "$name is Synced and Healthy."
@@ -336,6 +355,11 @@ function Invoke-Test {
 
 function Invoke-Verify {
     Assert-Commands @('go','helm','kustomize')
+    $versions = Read-Versions
+    Assert-ChartChecksum 'https://grafana-community.github.io/helm-charts' 'loki' $versions.LOKI_CHART_VERSION $versions.LOKI_CHART_SHA256
+    Assert-ChartChecksum 'https://grafana.github.io/helm-charts' 'alloy' $versions.ALLOY_CHART_VERSION $versions.ALLOY_CHART_SHA256
+    Assert-ChartChecksum 'https://grafana.github.io/helm-charts' 'tempo' $versions.TEMPO_CHART_VERSION $versions.TEMPO_CHART_SHA256
+    Assert-ChartChecksum 'https://open-telemetry.github.io/opentelemetry-helm-charts' 'opentelemetry-collector' $versions.OTEL_COLLECTOR_CHART_VERSION $versions.OTEL_COLLECTOR_CHART_SHA256
     Push-Location $Root
     try {
         Invoke-External go test ./tests/gitops/...
@@ -360,7 +384,7 @@ function Invoke-Undeploy {
 
     if ($argoApplicationsExist) {
         Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s
-        Invoke-External kubectl delete application.argoproj.io payments monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=120s
+        Invoke-External kubectl delete application.argoproj.io payments alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s
     }
     if ($steadyStateApplicationsExist) {
         Invoke-External kubectl delete applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s

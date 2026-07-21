@@ -35,6 +35,7 @@ func TestGitOpsRendersDeterministically(t *testing.T) {
 
 	for _, path := range []string{
 		"gitops/platform",
+		"gitops/platform/observability",
 		"gitops/teams/payments",
 		"gitops/applications/demo",
 	} {
@@ -56,8 +57,8 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"--set-string", "gitRevision="+testRevision,
 	)
 	objects := decodeManifests(t, rendered)
-	if len(objects) != 8 {
-		t.Fatalf("root chart rendered %d objects, want 8", len(objects))
+	if len(objects) != 12 {
+		t.Fatalf("root chart rendered %d objects, want 12", len(objects))
 	}
 
 	for _, name := range []string{"root", "tenant"} {
@@ -71,12 +72,19 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		repositoryURL,
 		"https://argoproj.github.io/argo-helm",
 		"https://prometheus-community.github.io/helm-charts",
+		"https://grafana-community.github.io/helm-charts",
+		"https://grafana.github.io/helm-charts",
+		"https://open-telemetry.github.io/opentelemetry-helm-charts",
 	})
 
 	expectedWaves := map[string]string{
 		"argocd-configuration": "-20",
 		"monitoring":           "-18",
 		"argo-rollouts":        "-17",
+		"loki":                 "-16",
+		"tempo":                "-15",
+		"otel-collector":       "-14",
+		"alloy":                "-13",
 		"steadystate-operator": "-10",
 		"payments":             "0",
 	}
@@ -95,6 +103,10 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	monitoring := findObject(t, objects, "Application", "monitoring")
 	assertAnnotation(t, monitoring, "argocd.argoproj.io/ignore-healthcheck", "true")
 	assertExternalChartApplication(t, objects, "argo-rollouts", "https://argoproj.github.io/argo-helm", "argo-rollouts", "2.41.0", "gitops/platform/rollouts/values.yaml", "argo-rollouts")
+	assertExternalChartApplication(t, objects, "loki", "https://grafana-community.github.io/helm-charts", "loki", "18.5.1", "gitops/platform/loki/values.yaml", "monitoring")
+	assertExternalChartApplication(t, objects, "tempo", "https://grafana.github.io/helm-charts", "tempo", "1.24.4", "gitops/platform/tempo/values.yaml", "monitoring")
+	assertExternalChartApplication(t, objects, "otel-collector", "https://open-telemetry.github.io/opentelemetry-helm-charts", "opentelemetry-collector", "0.165.0", "gitops/platform/otel-collector/values.yaml", "monitoring")
+	assertExternalChartApplication(t, objects, "alloy", "https://grafana.github.io/helm-charts", "alloy", "1.10.1", "gitops/platform/alloy/values.yaml", "monitoring")
 
 	operator := findObject(t, objects, "Application", "steadystate-operator")
 	assertString(t, operator, repositoryURL, "spec", "source", "repoURL")
@@ -179,6 +191,8 @@ func TestProjectRestrictions(t *testing.T) {
 		"/ServiceAccount",
 		"/Service",
 		"apps/Deployment",
+		"apps/DaemonSet",
+		"apps/StatefulSet",
 		"gateway.networking.k8s.io/HTTPRoute",
 		"networking.k8s.io/NetworkPolicy",
 		"rbac.authorization.k8s.io/Role",
@@ -186,6 +200,7 @@ func TestProjectRestrictions(t *testing.T) {
 		"monitoring.coreos.com/Alertmanager",
 		"monitoring.coreos.com/Prometheus",
 		"monitoring.coreos.com/ServiceMonitor",
+		"policy/PodDisruptionBudget",
 	})
 	platformDestinations := nestedSlice(t, platform, "spec", "destinations")
 	actualDestinations := make([]string, 0, len(platformDestinations))
@@ -232,6 +247,11 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	labels, found, err := unstructured.NestedStringMap(namespace, "metadata", "labels")
 	if err != nil || !found || labels["steadystate.dev/gateway-access"] != "true" {
 		t.Fatalf("argocd namespace does not opt into the shared Gateway: %#v", labels)
+	}
+	monitoringNamespace := findObject(t, objects, "Namespace", "monitoring")
+	labels, found, err = unstructured.NestedStringMap(monitoringNamespace, "metadata", "labels")
+	if err != nil || !found || labels["steadystate.dev/gateway-access"] != "true" {
+		t.Fatalf("monitoring namespace does not opt into the shared Gateway: %#v", labels)
 	}
 
 	config := findObject(t, objects, "ConfigMap", "argocd-cm")
@@ -292,8 +312,33 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	parent := parentRefs[0].(map[string]any)
 	assertString(t, parent, "steadystate", "name")
 	assertString(t, parent, "steadystate-system", "namespace")
-	findObject(t, objects, "Namespace", "monitoring")
 	findObject(t, objects, "Namespace", "argo-rollouts")
+	observabilityObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "platform", "observability")))
+	grafanaRoute := findObject(t, observabilityObjects, "HTTPRoute", "grafana")
+	hostnames, found, err = unstructured.NestedStringSlice(grafanaRoute, "spec", "hostnames")
+	if err != nil || !found || len(hostnames) != 1 || hostnames[0] != "grafana.localtest.me" {
+		t.Fatalf("unexpected Grafana hostnames: %#v", hostnames)
+	}
+	rules := nestedSlice(t, grafanaRoute, "spec", "rules")
+	matches := nestedSlice(t, rules[0].(map[string]any), "matches")
+	assertString(t, matches[0].(map[string]any), "PathPrefix", "path", "type")
+	assertString(t, matches[0].(map[string]any), "/", "path", "value")
+	for _, name := range []string{"steadystate-application-dashboard", "steadystate-platform-dashboard"} {
+		dashboard := findObject(t, observabilityObjects, "ConfigMap", name)
+		labels, found, err := unstructured.NestedStringMap(dashboard, "metadata", "labels")
+		if err != nil || !found || labels["grafana_dashboard"] != "1" {
+			t.Fatalf("dashboard %s is not selected by the Grafana sidecar", name)
+		}
+		data, found, err := unstructured.NestedStringMap(dashboard, "data")
+		if err != nil || !found {
+			t.Fatalf("dashboard %s has invalid data: found=%t err=%v", name, found, err)
+		}
+		for _, value := range data {
+			if !strings.Contains(value, `"schemaVersion":41`) {
+				t.Fatalf("dashboard %s is not a deterministic Grafana schema 41 document", name)
+			}
+		}
+	}
 }
 
 func TestProgressiveDeliveryValuesAreFrozenAndMinimal(t *testing.T) {
@@ -329,10 +374,20 @@ func TestProgressiveDeliveryValuesAreFrozenAndMinimal(t *testing.T) {
 		"prometheus-node-exporter:\n  enabled: false",
 		"defaultRules:\n  create: false",
 		"GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: \"true\"",
+		"defaultDatasourceEnabled: false",
 		"auth.anonymous:",
 		"prometheusOperator:\n  tls:\n    enabled: false",
 		"memory: 320Mi",
 		"memory: 448Mi",
+		"name: Loki",
+		"name: Prometheus",
+		"uid: prometheus",
+		"uid: loki",
+		"name: Tempo",
+		"uid: tempo",
+		"tracesToLogsV2:",
+		"derivedFields:",
+		"searchNamespace: monitoring",
 	} {
 		if !strings.Contains(monitoring, token) {
 			t.Errorf("monitoring values are missing %q", token)
@@ -372,7 +427,7 @@ func TestGitOpsCommandsAreMirrored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery"} {
+	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery", "verify-observability", "test-observability", "phase5-acceptance"} {
 		if !strings.Contains(string(makefile), command) {
 			t.Errorf("Makefile is missing %s", command)
 		}
@@ -409,7 +464,7 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 
 	for _, command := range []string{
 		"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s",
-		"payments monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=120s",
+		"payments alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s",
 		"applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s",
 		"teams.platform.steadystate.dev --all --ignore-not-found=true --wait=true --timeout=180s",
 		"namespace steadystate-unmanaged --ignore-not-found=true --wait=true --timeout=120s",
@@ -430,6 +485,70 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 	} {
 		if !strings.Contains(string(devScript), command) {
 			t.Fatalf("operator teardown is missing bounded cleanup %q", command)
+		}
+	}
+}
+
+func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
+	t.Parallel()
+	root := repositoryRoot(t)
+	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase5.yml")))
+	for _, token := range []string{
+		"name: Phase 5 acceptance",
+		"timeout-minutes: 60",
+		"cancel-in-progress: false",
+		"./scripts/dev.ps1 verify-observability",
+		"./scripts/phase5-acceptance.ps1 -Stage Prepare",
+		"vhs docs/demonstrations/phase5-request-telemetry.tape",
+		"./scripts/phase5-acceptance.ps1 -Stage Finalize",
+		"./scripts/phase5-acceptance.ps1 -Stage CaptureFailure",
+		"phase5-acceptance-${{ github.sha }}",
+		".artifacts/phase5/acceptance/phase5-request-telemetry.gif",
+		".artifacts/diagnostics/",
+		"if-no-files-found: error",
+	} {
+		if !strings.Contains(workflow, token) {
+			t.Errorf("Phase 5 workflow is missing %q", token)
+		}
+	}
+	diagnostics := strings.Index(workflow, "Capture diagnostics")
+	upload := strings.Index(workflow, "Upload Phase 5 acceptance artifact")
+	cleanup := strings.Index(workflow, "Undeploy GitOps")
+	if diagnostics < 0 || upload <= diagnostics || cleanup <= upload {
+		t.Fatal("Phase 5 diagnostics, artifact upload, and cleanup ordering is invalid")
+	}
+
+	script := string(readFile(t, filepath.Join(root, "scripts", "phase5-acceptance.ps1")))
+	for _, token := range []string{
+		"observability-foundation-healthy",
+		"grafana-route-and-datasources-healthy",
+		"one-request-correlated-across-metrics-logs-traces",
+		"log-and-trace-opt-out-enforced",
+		"metrics-opt-out-removes-monitoring-children",
+		"ten-percent-errors-fire-fast-burn",
+		"observability-and-standard-profile-within-budget",
+		"progressive-delivery-regression-healthy",
+		"900MB",
+		"6.5GB",
+		"Save-ClusterEvidence",
+		"kubectl patch applications.platform.steadystate.dev telemetry",
+		"PHASE5_ACCEPTANCE_RESULT_PASSED",
+		"PHASE5_ACCEPTANCE_RESULT_FAILED",
+	} {
+		if !strings.Contains(script, token) {
+			t.Errorf("Phase 5 acceptance script is missing %q", token)
+		}
+	}
+
+	tape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase5-request-telemetry.tape")))
+	for _, token := range []string{
+		"Output .artifacts/phase5/acceptance/phase5-request-telemetry.gif",
+		"pwsh -NoProfile -File scripts/phase5-acceptance.ps1 -Stage Test",
+		"Set WaitTimeout 20m",
+		"Wait+Screen /PHASE5_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
+	} {
+		if !strings.Contains(tape, token) {
+			t.Errorf("Phase 5 tape is missing %q", token)
 		}
 	}
 }
@@ -590,6 +709,49 @@ func TestArgoVersionAndChecksumPins(t *testing.T) {
 	}
 }
 
+func TestPhase5ObservabilityFoundationContracts(t *testing.T) {
+	root := repositoryRoot(t)
+	for path, required := range map[string][]string{
+		"gitops/platform/loki/values.yaml": {
+			"deploymentMode: Monolithic", "retention_period: 24h", "sizeLimit: 4Gi", "memory: 256Mi", "memory: 512Mi",
+			"gateway:", "lokiCanary:", "chunksCache:", "resultsCache:",
+		},
+		"gitops/platform/tempo/values.yaml": {
+			"retention: 24h", "sizeLimit: 2Gi", "metricsGenerator:", "endpoint: 0.0.0.0:4317",
+		},
+		"gitops/platform/otel-collector/values.yaml": {
+			"mode: deployment", "k8s_attributes:", "filter/require_identity:", "tempo.monitoring.svc.cluster.local:4317", "memory: 128Mi",
+		},
+		"gitops/platform/alloy/values.yaml": {
+			"type: daemonset", "steadystate_dev_logs", "team-.+", "stage.json", "loki.monitoring.svc.cluster.local:3100", "memory: 128Mi",
+		},
+	} {
+		content := string(readFile(t, filepath.Join(root, filepath.FromSlash(path))))
+		for _, token := range required {
+			if !strings.Contains(content, token) {
+				t.Errorf("%s is missing %q", path, token)
+			}
+		}
+	}
+	versions := string(readFile(t, filepath.Join(root, "scripts", "versions.env")))
+	for _, pin := range []string{
+		"LOKI_CHART_VERSION=18.5.1", "LOKI_VERSION=3.7.3", "LOKI_CHART_SHA256=f6b938d251bce2d70c21e81c601f4a1b6690ab6792de6e5ca1c347d85323b6f0",
+		"ALLOY_CHART_VERSION=1.10.1", "ALLOY_VERSION=1.17.1", "ALLOY_CHART_SHA256=668a0c904bad8437baa920f11b3792d742d51d35a1161ab53ea9e70df2e51e7c",
+		"TEMPO_CHART_VERSION=1.24.4", "TEMPO_VERSION=2.9.0", "TEMPO_CHART_SHA256=f1f6e318d5bca3b5097cb676077796cdf8135beb2c1f71c4d14614ccf9b0081b",
+		"OTEL_COLLECTOR_CHART_VERSION=0.165.0", "OTEL_COLLECTOR_VERSION=0.156.0", "OTEL_COLLECTOR_CHART_SHA256=b592ea064d9b906930cac2d22b88eeb1bc82f12d5ed07fd20792de2c051ca3c5",
+	} {
+		if !strings.Contains(versions, pin) {
+			t.Errorf("versions.env is missing %s", pin)
+		}
+	}
+	script := string(readFile(t, filepath.Join(root, "scripts", "gitops.ps1")))
+	for _, token := range []string{"Assert-ChartChecksum", "helm pull", "LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256"} {
+		if !strings.Contains(script, token) {
+			t.Errorf("GitOps verification is missing %q", token)
+		}
+	}
+}
+
 func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	root := repositoryRoot(t)
 	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase4.yml")))
@@ -618,6 +780,9 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, token := range []string{
 		"acceptance/phase4-",
 		"[ValidateSet('Prepare','Promote','Rollback','Finalize','CaptureFailure')]",
+		"$Phase4ReleaseRef = 'v0.4.0'",
+		"git log -1 --format=%H $Phase4ReleaseRef -- apps/demo-app/VERSION",
+		"$manifest = Invoke-WebRequest -UseBasicParsing -Uri $uri -Headers $headers",
 		"sha-$sourceCommit",
 		"foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root'))",
 		"This delivery commit must change only spec.image.tag.",
@@ -811,8 +976,12 @@ func assertExternalChartApplication(t *testing.T, objects []map[string]any, name
 	assertAutomated(t, application, true)
 	assertString(t, application, namespace, "spec", "destination", "namespace")
 	sources := nestedSlice(t, application, "spec", "sources")
-	if len(sources) != 2 {
-		t.Fatalf("%s has %d sources, want 2", name, len(sources))
+	wantSources := 2
+	if name == "monitoring" {
+		wantSources = 3
+	}
+	if len(sources) != wantSources {
+		t.Fatalf("%s has %d sources, want %d", name, len(sources), wantSources)
 	}
 	chartSource := sources[0].(map[string]any)
 	assertString(t, chartSource, chartRepo, "repoURL")
@@ -825,6 +994,10 @@ func assertExternalChartApplication(t *testing.T, objects []map[string]any, name
 	assertString(t, valuesSource, testRevision, "targetRevision")
 	assertString(t, valuesSource, "values", "ref")
 	if name == "monitoring" {
+		observabilitySource := sources[2].(map[string]any)
+		assertString(t, observabilitySource, repositoryURL, "repoURL")
+		assertString(t, observabilitySource, testRevision, "targetRevision")
+		assertString(t, observabilitySource, "gitops/platform/observability", "path")
 		options := stringSlice(t, application, "spec", "syncPolicy", "syncOptions")
 		assertExactSet(t, options, []string{"ServerSideApply=true"})
 	}

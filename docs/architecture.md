@@ -1,4 +1,4 @@
-# Architecture Through Phase 4 Progressive Delivery
+# Architecture Through Phase 5 Observability
 
 ```mermaid
 flowchart TB
@@ -31,6 +31,11 @@ flowchart TB
         Route["Weighted HTTPRoute"]
         Monitors["ServiceMonitor / PrometheusRule"]
         Prometheus["Prometheus / Alertmanager"]
+        Grafana["Grafana"]
+        Alloy["Alloy log discovery"]
+        Loki["Loki 24h logs"]
+        OTel["OpenTelemetry Collector"]
+        Tempo["Tempo 24h traces"]
         Rollouts["Argo Rollouts / Gateway plugin"]
         EG["Envoy Gateway / shared Gateway"]
         Argo --> TeamCR
@@ -38,6 +43,11 @@ flowchart TB
         Argo --> Manager
         Argo --> Prometheus
         Argo --> Rollouts
+        Argo --> Grafana
+        Argo --> Alloy
+        Argo --> Loki
+        Argo --> OTel
+        Argo --> Tempo
         TeamCR --> Manager --> Boundary
         AppCR --> Manager
         Manager --> Rolling
@@ -50,6 +60,13 @@ flowchart TB
         Rollouts --> Route
         Prometheus --> Canary
         Monitors --> Prometheus
+        Grafana --> Prometheus
+        Grafana --> Loki
+        Grafana --> Tempo
+        Rolling --> Alloy --> Loki
+        Canary --> Alloy
+        Rolling --> OTel --> Tempo
+        Canary --> OTel
         Rolling --> Services --> Route --> EG
         Canary --> Services
     end
@@ -70,7 +87,19 @@ flowchart TB
 
 Every profile disables kindnet and installs Calico, making NetworkPolicy behavior observable. Envoy Gateway provides the maintained Gateway API implementation for north-south traffic.
 
-Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Phase 4 adds pinned Argo Rollouts, the Gateway API traffic-router plugin, a trimmed Prometheus stack, operator-generated analysis/monitoring resources, reversible strategy migration, and automatic metric-gated promotion or rollback. Logs, traces, full SLO dashboards, policy admission, and stateful recovery remain later phases.
+Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Phase 4 adds pinned Argo Rollouts, the Gateway API traffic-router plugin, a trimmed Prometheus stack, operator-generated analysis/monitoring resources, reversible strategy migration, and automatic metric-gated promotion or rollback. Phase 5 extends that monitoring plane with logs, traces, SLO rules, dashboards, and truthful service health. Admission policy and stateful recovery remain later phases.
+
+## Observability ownership and data flow
+
+Argo CD owns the pinned Loki, Tempo, OpenTelemetry Collector, Alloy, and monitoring chart releases. The operator owns only each Application's telemetry intent: Pod labels, OTLP environment, an egress NetworkPolicy, ServiceMonitor, PrometheusRule, and status conditions. It does not query Prometheus, Loki, Tempo, Grafana, or Alertmanager while reconciling.
+
+Alloy runs as a DaemonSet with read-only Pod discovery and `/var/log` access. It retains only Pods in `team-*` Namespaces labeled `steadystate.dev/logs=true`, parses the demo's JSON envelope, and forwards to single-binary Loki. Traced workloads export OTLP gRPC through an Application-owned policy to the single OpenTelemetry Collector, which adds Kubernetes resource attributes, rejects spans without service identity, batches, and forwards to Tempo. Loki and Tempo retain 24 hours in capped emptyDir storage; they are development evidence systems, not durable production stores.
+
+Grafana is the only new externally routed component. Its explicit Prometheus, Loki, and Tempo datasources use stable UIDs, enabling deterministic logs-to-traces and traces-to-logs links. Dashboard ConfigMaps are GitOps-owned and sidecar-provisioned. The per-Application dashboard covers RED metrics, active/candidate versions, rollout state, availability burn, structured logs, and traces; the platform dashboard covers custom-resource health, rollout/SLO alerts, and memory footprint.
+
+The generated PrometheusRule contains request-rate, error-rate, availability, P95 latency, and error-budget-burn recordings. Availability alerts follow multi-window burn policy: both five-minute and one-hour windows must exceed `14.4` for fast burn, and both 30-minute and six-hour windows must exceed `6` for slow burn. Empty request vectors evaluate as unavailable and empty latency vectors evaluate to a failing sentinel, avoiding false healthy results.
+
+`ServiceHealth` is independent of telemetry backends. It is `True` only when the current active Deployment or Rollout is available and the HTTPRoute is accepted with resolved references. This watch-derived contract stays useful during a Prometheus/Loki/Tempo outage and preserves the controller's zero-polling design.
 
 ## Team tenancy contract
 

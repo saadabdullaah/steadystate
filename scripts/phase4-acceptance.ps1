@@ -15,6 +15,7 @@ $Namespace = 'team-payments'
 $ApplicationName = 'demo'
 $Hostname = 'demo.team-payments.steadystate.localtest.me'
 $Repository = 'ghcr.io/saadabdullaah/steadystate-demo-app'
+$Phase4ReleaseRef = 'v0.4.0'
 $GoodTag = 'v0.4.0'
 $BadTag = 'v0.4.0-bad'
 $SourceSHA = [string]$env:GITHUB_SHA
@@ -369,9 +370,9 @@ function Get-RegistryMetadata {
     if (-not $token) { throw 'GHCR did not issue an anonymous pull token.' }
     $headers = @{Authorization="Bearer $token";Accept='application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'}
     $uri = "https://ghcr.io/v2/saadabdullaah/steadystate-demo-app/manifests/$Tag"
-    $head = Invoke-WebRequest -UseBasicParsing -Method Head -Uri $uri -Headers $headers
-    $requested = [string]$head.Headers.'Docker-Content-Digest'
-    $mediaType = ([string]$head.Headers.'Content-Type').Split(';')[0]
+    $manifest = Invoke-WebRequest -UseBasicParsing -Uri $uri -Headers $headers
+    $requested = [string]$manifest.Headers.'Docker-Content-Digest'
+    $mediaType = ([string]$manifest.Headers.'Content-Type').Split(';')[0]
     $runtime = $requested
     if ($mediaType -match '(index|manifest.list)') {
         $index = Invoke-RestMethod -Uri $uri -Headers $headers
@@ -486,7 +487,7 @@ Push-Location $Root
 try {
     New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
     if ($Stage -eq 'Prepare') {
-        $sourceCommit = Invoke-ExternalText git log -1 --format=%H -- apps/demo-app/VERSION
+        $sourceCommit = Invoke-ExternalText git log -1 --format=%H $Phase4ReleaseRef -- apps/demo-app/VERSION
         $sourceTag = "sha-$sourceCommit"
         $state = [ordered]@{schemaVersion=1;result='running';promotionResult='pending';rollbackResult='pending';sourceSHA=$SourceSHA;ephemeralBranch=$BranchName;profile=$Profile;startedAt=(Get-Date).ToUniversalTime().ToString('o');sourceTag=$sourceTag;commits=[ordered]@{};timestamps=[ordered]@{};registry=[ordered]@{};releaseTuples=[ordered]@{};activeRelease=[ordered]@{};measurements=@();stableWindows=@();checks=@();failure=$null}
         $botLogin = "$AppSlug[bot]"

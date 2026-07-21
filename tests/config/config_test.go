@@ -39,7 +39,7 @@ func TestRepositoryYAMLParses(t *testing.T) {
 		if strings.HasSuffix(path, ".yaml.tmpl") {
 			rendered := strings.NewReplacer(
 				"__CLUSTER_NAME__", "steadystate-test",
-				"__NODE_IMAGE__", "kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5",
+				"__NODE_IMAGE__", "kindest/node:v1.35.5@sha256:ce977ae6d65918d0b58a5f8b5e940429c2ce42fa3a5619ec2bbc60b949c0ac95",
 				"__HTTP_PORT__", "18080",
 				"__HTTPS_PORT__", "18443",
 			).Replace(string(content))
@@ -52,6 +52,45 @@ func TestRepositoryYAMLParses(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestKindProfilesUseKubernetes135KubeadmShape(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, profile := range []string{"minimal", "standard", "full"} {
+		path := filepath.Join(root, "hack", "kind-"+profile+".yaml.tmpl")
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(content)
+		if !strings.Contains(text, "apiVersion: kubeadm.k8s.io/v1beta3") {
+			t.Errorf("%s does not use the Kubernetes 1.35 kubeadm API", path)
+		}
+		if !regexp.MustCompile(`kubeletExtraArgs:\r?\n            node-labels: ingress-ready=true`).MatchString(text) {
+			t.Errorf("%s does not use v1beta3 map-form kubelet arguments", path)
+		}
+		if strings.Contains(text, "kubeadm.k8s.io/v1beta4") || strings.Contains(text, "- name: node-labels") {
+			t.Errorf("%s retains a Kubernetes 1.36 kubeadm shape", path)
+		}
+	}
+}
+
+func TestSharedGatewayPreservesRequestIdentity(t *testing.T) {
+	root := repositoryRoot(t)
+	content, err := os.ReadFile(filepath.Join(root, "config", "gateway", "shared.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, contract := range []string{
+		"kind: ClientTrafficPolicy",
+		"name: steadystate-request-identity",
+		"requestID: PreserveOrGenerate",
+	} {
+		if !strings.Contains(text, contract) {
+			t.Errorf("shared Gateway is missing request identity contract %q", contract)
+		}
 	}
 }
 
@@ -73,6 +112,9 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 		"ARGO_ROLLOUT_CRD_SHA256", "ARGO_ANALYSIS_TEMPLATE_CRD_SHA256", "ARGO_ANALYSIS_RUN_CRD_SHA256",
 		"SERVICE_MONITOR_CRD_SHA256", "PROMETHEUS_RULE_CRD_SHA256",
 		"GO_BUILDER_IMAGE", "OPERATOR_IMAGE", "DEMO_IMAGE", "ISOLATION_CLIENT_IMAGE",
+		"LOKI_CHART_VERSION", "LOKI_VERSION", "ALLOY_CHART_VERSION", "ALLOY_VERSION",
+		"TEMPO_CHART_VERSION", "TEMPO_VERSION", "OTEL_COLLECTOR_CHART_VERSION", "OTEL_COLLECTOR_VERSION",
+		"LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256",
 	} {
 		if !strings.Contains(text, key+"=") {
 			t.Errorf("versions.env is missing %s", key)
@@ -80,6 +122,12 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 	}
 	if !regexp.MustCompile(`(?m)^ARGO_CD_MANIFEST_SHA256=[0-9a-f]{64}$`).MatchString(text) {
 		t.Error("ARGO_CD_MANIFEST_SHA256 must be a lowercase sha256 checksum")
+	}
+	if !strings.Contains(text, "KUBERNETES_VERSION=1.35.5\n") && !strings.Contains(text, "KUBERNETES_VERSION=1.35.5\r\n") {
+		t.Error("KUBERNETES_VERSION must remain pinned to 1.35.5")
+	}
+	if !regexp.MustCompile(`(?m)^KIND_NODE_IMAGE=kindest/node:v1\.35\.5@sha256:ce977ae6d65918d0b58a5f8b5e940429c2ce42fa3a5619ec2bbc60b949c0ac95\r?$`).MatchString(text) {
+		t.Error("KIND_NODE_IMAGE must remain pinned to the approved Kubernetes 1.35.5 digest")
 	}
 	for _, key := range []string{"ARGO_ROLLOUT_CRD_SHA256", "ARGO_ANALYSIS_TEMPLATE_CRD_SHA256", "ARGO_ANALYSIS_RUN_CRD_SHA256", "SERVICE_MONITOR_CRD_SHA256", "PROMETHEUS_RULE_CRD_SHA256"} {
 		if !regexp.MustCompile(`(?m)^` + key + `=[0-9a-f]{64}$`).MatchString(text) {

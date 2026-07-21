@@ -40,6 +40,9 @@ spec:
     - repoURL: {{ .Values.repoURL | quote }}
       targetRevision: {{ .Values.gitRevision | quote }}
       ref: values
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      path: gitops/platform/observability
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
@@ -73,6 +76,118 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: argo-rollouts
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-16"
+spec:
+  project: platform
+  sources:
+    - repoURL: https://grafana-community.github.io/helm-charts
+      chart: loki
+      targetRevision: {{ .Values.lokiChartVersion | quote }}
+      helm:
+        releaseName: loki
+        valueFiles:
+          - $values/gitops/platform/loki/values.yaml
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tempo
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-15"
+spec:
+  project: platform
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: tempo
+      targetRevision: {{ .Values.tempoChartVersion | quote }}
+      helm:
+        releaseName: tempo
+        valueFiles:
+          - $values/gitops/platform/tempo/values.yaml
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-14"
+spec:
+  project: platform
+  sources:
+    - repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+      chart: opentelemetry-collector
+      targetRevision: {{ .Values.otelCollectorChartVersion | quote }}
+      helm:
+        releaseName: otel-collector
+        valueFiles:
+          - $values/gitops/platform/otel-collector/values.yaml
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-13"
+spec:
+  project: platform
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: alloy
+      targetRevision: {{ .Values.alloyChartVersion | quote }}
+      helm:
+        releaseName: alloy
+        valueFiles:
+          - $values/gitops/platform/alloy/values.yaml
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
   syncPolicy:
     automated:
       prune: true

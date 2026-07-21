@@ -11,7 +11,7 @@ docker info
 
 ## Docker is too old or uses cgroup v1
 
-The Kubernetes 1.36 kind profile requires Docker Engine 24 or newer with cgroup v2. Upgrade Docker Desktop, confirm it uses the WSL2 Linux engine, restart it, and rerun `doctor`. SteadyState fails before cluster creation rather than silently falling back to an older Kubernetes release.
+The Kubernetes 1.35.5 kind profile requires Docker Engine 24 or newer with cgroup v2. Upgrade Docker Desktop, confirm it uses the WSL2 Linux engine, restart it, and rerun `doctor`. SteadyState fails before cluster creation rather than silently falling back to another Kubernetes release.
 
 ## Port 8080 or 8443 is occupied
 
@@ -260,3 +260,63 @@ The monitoring child carries `argocd.argoproj.io/ignore-healthcheck: "true"` so 
 .\scripts\dev.ps1 destroy
 .\scripts\dev.ps1 bootstrap -Profile minimal
 ```
+
+## Grafana or an observability datasource is unhealthy
+
+```powershell
+kubectl get applications.argoproj.io -n argocd monitoring loki tempo otel-collector alloy
+kubectl get pod,service,httproute -n monitoring
+Invoke-WebRequest http://127.0.0.1:8080/api/health -Headers @{Host='grafana.localtest.me'}
+Invoke-WebRequest http://127.0.0.1:8080/api/datasources/uid/prometheus/health -Headers @{Host='grafana.localtest.me'}
+Invoke-WebRequest http://127.0.0.1:8080/api/datasources/uid/loki/health -Headers @{Host='grafana.localtest.me'}
+Invoke-WebRequest http://127.0.0.1:8080/api/datasources/uid/tempo/health -Headers @{Host='grafana.localtest.me'}
+```
+
+Only Grafana is exposed through the shared loopback Gateway. Do not create routes for Prometheus, Loki, Tempo, or Alertmanager. A failed datasource normally means its exact-revision Argo child is not Healthy, its Service has no ready EndpointSlice, or its capped emptyDir has exhausted space. Capture diagnostics before restarting anything.
+
+## Structured logs do not appear in Loki
+
+```powershell
+kubectl get deployment,pod -n team-payments demo --show-labels
+kubectl get daemonset,pod -n monitoring -l app.kubernetes.io/name=alloy
+kubectl logs -n monitoring daemonset/alloy --all-containers --tail=300
+kubectl logs -n monitoring statefulset/loki --all-containers --tail=300
+```
+
+Alloy intentionally discovers only `team-*` Pods labeled `steadystate.dev/logs=true`. A Pod with `logs=false` is an opt-out and must not be broadened into the collector selector. The demo logs normalized routes and request/trace identifiers, but never bodies, credentials, query strings, or database values.
+
+## Traces do not appear in Tempo
+
+```powershell
+kubectl get deployment -n team-payments demo -o yaml
+kubectl get networkpolicy -n team-payments demo-otel-egress -o yaml
+kubectl get deployment,pod,service -n monitoring -l app.kubernetes.io/instance=otel-collector
+kubectl logs -n monitoring deployment/otel-collector --all-containers --tail=300
+kubectl logs -n monitoring deployment/tempo --all-containers --tail=300
+```
+
+For `traces=true`, the application container must have `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector.monitoring.svc.cluster.local:4317`, and the owned NetworkPolicy must allow only that collector destination. The collector drops spans without `service.name`. Health, readiness, and metrics endpoints are deliberately not instrumented.
+
+## ServiceHealth is False while metrics are available
+
+`ServiceHealth` does not query Prometheus. Inspect the active workload and Gateway status directly:
+
+```powershell
+kubectl get application -n team-payments demo -o jsonpath='{.status.conditions[?(@.type=="ServiceHealth")]}'
+kubectl get deployment,rollout,pod -n team-payments
+kubectl get httproute -n team-payments demo -o yaml
+```
+
+The condition becomes `True` only when an active Deployment/Rollout is available and the current HTTPRoute generation is accepted with resolved references. Repair those resources or their controllers; do not patch status.
+
+## An SLO panel looks healthy with no traffic
+
+The generated rules deliberately treat no requests as unavailable and no latency samples as a failing sentinel. Confirm the ServiceMonitor target and request labels before changing PromQL:
+
+```powershell
+kubectl get servicemonitor,prometheusrule -n team-payments
+kubectl get service,endpointslice -n team-payments demo
+.\scripts\dev.ps1 verify-observability
+```
+
+Fast burn requires both five-minute and one-hour windows above `14.4`; slow burn requires both 30-minute and six-hour windows above `6`. A single short spike must not satisfy the multi-window alert.

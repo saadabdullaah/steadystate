@@ -103,13 +103,7 @@ func validateDeployment(app *platformv1alpha1.Application) error {
 
 // UnsupportedFeatures returns capabilities that are not active in the current platform phase.
 func UnsupportedFeatures(app *platformv1alpha1.Application) []string {
-	features := make([]string, 0, 6)
-	if app.Spec.Observability.Logs {
-		features = append(features, "observability.logs")
-	}
-	if app.Spec.Observability.Traces {
-		features = append(features, "observability.traces")
-	}
+	features := make([]string, 0, 2)
 	if app.Spec.Security.RequireSignedImage {
 		features = append(features, "security.requireSignedImage")
 	}

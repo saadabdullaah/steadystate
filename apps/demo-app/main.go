@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,14 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -32,11 +42,14 @@ type config struct {
 	InjectErrorRate    float64
 	InjectLatency      time.Duration
 	CrashAfterRequests uint64
+	OTLPEndpoint       string
 }
 
 type runtimeHooks struct {
-	sleep func(time.Duration)
-	exit  func(int)
+	sleep          func(time.Duration)
+	exit           func(int)
+	log            *slog.Logger
+	tracerProvider trace.TracerProvider
 }
 
 type requestRuntime struct {
@@ -62,6 +75,7 @@ type response struct {
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	configuration, err := loadConfig(os.Getenv)
 	if err != nil {
 		slog.Error("invalid configuration", "error", err)
@@ -77,11 +91,12 @@ func main() {
 
 func loadConfig(getenv func(string) string) (config, error) {
 	configuration := config{
-		Name:      valueOrDefault(getenv("STEADYSTATE_APP_NAME"), "steadystate-demo"),
-		Namespace: valueOrDefault(getenv("STEADYSTATE_APP_NAMESPACE"), "local"),
-		Owner:     valueOrDefault(getenv("STEADYSTATE_APP_OWNER"), "local-developer"),
-		Version:   valueOrDefault(getenv("STEADYSTATE_APP_VERSION"), "development"),
-		Port:      8080,
+		Name:         valueOrDefault(getenv("STEADYSTATE_APP_NAME"), "steadystate-demo"),
+		Namespace:    valueOrDefault(getenv("STEADYSTATE_APP_NAMESPACE"), "local"),
+		Owner:        valueOrDefault(getenv("STEADYSTATE_APP_OWNER"), "local-developer"),
+		Version:      valueOrDefault(getenv("STEADYSTATE_APP_VERSION"), "development"),
+		Port:         8080,
+		OTLPEndpoint: getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 	}
 	if rawPort := getenv("PORT"); rawPort != "" {
 		port, err := strconv.Atoi(rawPort)
@@ -122,6 +137,17 @@ func valueOrDefault(value, fallback string) string {
 }
 
 func run(ctx context.Context, configuration config) error {
+	shutdownTracing, err := configureTracing(ctx, configuration)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if shutdownErr := shutdownTracing(shutdownContext); shutdownErr != nil {
+			slog.Error("flush tracing", "error", shutdownErr)
+		}
+	}()
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", configuration.Port))
 	if err != nil {
 		return fmt.Errorf("listen on port %d: %w", configuration.Port, err)
@@ -160,7 +186,7 @@ func run(ctx context.Context, configuration config) error {
 }
 
 func newHandler(configuration config, ready *atomic.Bool) http.Handler {
-	return newHandlerWithRuntime(configuration, ready, runtimeHooks{sleep: time.Sleep, exit: os.Exit})
+	return newHandlerWithRuntime(configuration, ready, runtimeHooks{sleep: time.Sleep, exit: os.Exit, log: slog.Default()})
 }
 
 func newHandlerWithRuntime(configuration config, ready *atomic.Bool, hooks runtimeHooks) http.Handler {
@@ -169,6 +195,12 @@ func newHandlerWithRuntime(configuration config, ready *atomic.Bool, hooks runti
 	}
 	if hooks.exit == nil {
 		hooks.exit = os.Exit
+	}
+	if hooks.log == nil {
+		hooks.log = slog.Default()
+	}
+	if hooks.tracerProvider == nil {
+		hooks.tracerProvider = otel.GetTracerProvider()
 	}
 	metrics := newDemoMetrics(configuration)
 	runtime := &requestRuntime{configuration: configuration, metrics: metrics, hooks: hooks}
@@ -184,13 +216,16 @@ func newHandlerWithRuntime(configuration config, ready *atomic.Bool, hooks runti
 		writeJSON(writer, http.StatusOK, response{Application: configuration.Name, Namespace: configuration.Namespace, Status: "ready", Version: configuration.Version})
 	})
 	mux.Handle("/metrics", metrics.handler)
-	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+	applicationHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/" {
 			http.NotFound(writer, request)
 			return
 		}
-		runtime.serveApplication(writer)
+		trace.SpanFromContext(request.Context()).SetAttributes(attribute.String("http.route", "/"))
+		runtime.serveApplication(writer, request)
 	})
+	propagators := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+	mux.Handle("/", otelhttp.NewHandler(applicationHandler, "HTTP /", otelhttp.WithTracerProvider(hooks.tracerProvider), otelhttp.WithPropagators(propagators)))
 	return mux
 }
 
@@ -213,8 +248,13 @@ func newDemoMetrics(configuration config) *demoMetrics {
 	}
 }
 
-func (runtime *requestRuntime) serveApplication(writer http.ResponseWriter) {
+func (runtime *requestRuntime) serveApplication(writer http.ResponseWriter, request *http.Request) {
 	started := time.Now()
+	requestID := request.Header.Get("X-Request-ID")
+	if requestID == "" {
+		requestID = newRequestID()
+	}
+	writer.Header().Set("X-Request-ID", requestID)
 	sequence := runtime.sequence.Add(1)
 	if runtime.configuration.InjectLatency > 0 {
 		runtime.hooks.sleep(runtime.configuration.InjectLatency)
@@ -228,7 +268,8 @@ func (runtime *requestRuntime) serveApplication(writer http.ResponseWriter) {
 	}
 	status := strconv.Itoa(statusCode)
 	runtime.metrics.requests.WithLabelValues(runtime.configuration.Name, runtime.configuration.Namespace, runtime.configuration.Version, status).Inc()
-	runtime.metrics.duration.WithLabelValues(runtime.configuration.Name, runtime.configuration.Namespace, runtime.configuration.Version, status).Observe(time.Since(started).Seconds())
+	elapsed := time.Since(started)
+	runtime.metrics.duration.WithLabelValues(runtime.configuration.Name, runtime.configuration.Namespace, runtime.configuration.Version, status).Observe(elapsed.Seconds())
 	writeJSON(writer, statusCode, response{
 		Application: runtime.configuration.Name,
 		Namespace:   runtime.configuration.Namespace,
@@ -236,10 +277,58 @@ func (runtime *requestRuntime) serveApplication(writer http.ResponseWriter) {
 		Status:      state,
 		Version:     runtime.configuration.Version,
 	})
+	spanContext := trace.SpanContextFromContext(request.Context())
+	runtime.hooks.log.InfoContext(request.Context(), "http request",
+		"request_id", requestID,
+		"trace_id", spanContext.TraceID().String(),
+		"span_id", spanContext.SpanID().String(),
+		"method", request.Method,
+		"route", "/",
+		"status", statusCode,
+		"latency_ms", float64(elapsed.Microseconds())/1000,
+		"application", runtime.configuration.Name,
+		"namespace", runtime.configuration.Namespace,
+		"version", runtime.configuration.Version,
+	)
 
 	if runtime.configuration.CrashAfterRequests > 0 && sequence >= runtime.configuration.CrashAfterRequests && runtime.crashed.CompareAndSwap(false, true) {
 		runtime.hooks.exit(1)
 	}
+}
+
+func newRequestID() string {
+	identifier := make([]byte, 16)
+	if _, err := rand.Read(identifier); err != nil {
+		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(identifier)
+}
+
+func configureTracing(ctx context.Context, configuration config) (func(context.Context) error, error) {
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	if configuration.OTLPEndpoint == "" {
+		return func(context.Context) error { return nil }, nil
+	}
+	exporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpoint(configuration.OTLPEndpoint), otlptracegrpc.WithInsecure())
+	if err != nil {
+		return nil, fmt.Errorf("create OTLP trace exporter: %w", err)
+	}
+	platformResource, err := resource.New(ctx, resource.WithAttributes(
+		attribute.String("service.name", configuration.Name),
+		attribute.String("service.namespace", configuration.Namespace),
+		attribute.String("service.version", configuration.Version),
+		attribute.String("steadystate.application", configuration.Name),
+		attribute.String("k8s.namespace.name", configuration.Namespace),
+	))
+	if err != nil {
+		return nil, fmt.Errorf("create trace resource: %w", err)
+	}
+	provider := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(platformResource),
+	)
+	otel.SetTracerProvider(provider)
+	return provider.Shutdown, nil
 }
 
 func shouldInjectFailure(sequence uint64, rate float64) bool {

@@ -1,27 +1,33 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func TestLoadConfig(t *testing.T) {
 	t.Parallel()
 	values := map[string]string{
-		"STEADYSTATE_APP_NAME":      "payments",
-		"STEADYSTATE_APP_NAMESPACE": "team-a",
-		"STEADYSTATE_APP_OWNER":     "payments-team",
-		"STEADYSTATE_APP_VERSION":   "v1.2.3",
-		"PORT":                      "9090",
-		"INJECT_ERROR_RATE":         "0.125",
-		"INJECT_LATENCY_MS":         "250",
-		"CRASH_AFTER_REQUESTS":      "42",
+		"STEADYSTATE_APP_NAME":        "payments",
+		"STEADYSTATE_APP_NAMESPACE":   "team-a",
+		"STEADYSTATE_APP_OWNER":       "payments-team",
+		"STEADYSTATE_APP_VERSION":     "v1.2.3",
+		"PORT":                        "9090",
+		"INJECT_ERROR_RATE":           "0.125",
+		"INJECT_LATENCY_MS":           "250",
+		"CRASH_AFTER_REQUESTS":        "42",
+		"OTEL_EXPORTER_OTLP_ENDPOINT": "otel-collector.monitoring.svc.cluster.local:4317",
 	}
 	configuration, err := loadConfig(func(key string) string { return values[key] })
 	if err != nil {
@@ -29,8 +35,71 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if configuration.Name != "payments" || configuration.Namespace != "team-a" || configuration.Owner != "payments-team" ||
 		configuration.Version != "v1.2.3" || configuration.Port != 9090 || configuration.InjectErrorRate != 0.125 ||
-		configuration.InjectLatency != 250*time.Millisecond || configuration.CrashAfterRequests != 42 {
+		configuration.InjectLatency != 250*time.Millisecond || configuration.CrashAfterRequests != 42 ||
+		configuration.OTLPEndpoint != "otel-collector.monitoring.svc.cluster.local:4317" {
 		t.Fatalf("unexpected configuration: %#v", configuration)
+	}
+}
+
+func TestRequestIdentityStructuredLogAndTraceContext(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	defer func() { _ = provider.Shutdown(t.Context()) }()
+	ready := &atomic.Bool{}
+	ready.Store(true)
+	handler := newHandlerWithRuntime(config{Name: "demo", Namespace: "team-payments", Version: "v0.5.0"}, ready, runtimeHooks{
+		log: logger, tracerProvider: provider,
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/?credential=must-not-leak", nil)
+	request.Header.Set("X-Request-ID", "client-request-42")
+	request.Header.Set("traceparent", "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Header().Get("X-Request-ID") != "client-request-42" {
+		t.Fatalf("incoming request ID was not preserved: %q", recorder.Header().Get("X-Request-ID"))
+	}
+	if strings.Contains(output.String(), "must-not-leak") {
+		t.Fatal("structured access log contains a query-string value")
+	}
+	entry := map[string]any{}
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &entry); err != nil {
+		t.Fatalf("decode structured access log: %v\n%s", err, output.String())
+	}
+	for key, want := range map[string]string{
+		"level": "INFO", "request_id": "client-request-42", "trace_id": "0123456789abcdef0123456789abcdef",
+		"method": http.MethodGet, "route": "/", "application": "demo", "namespace": "team-payments", "version": "v0.5.0",
+	} {
+		if got := entry[key]; got != want {
+			t.Errorf("log field %s=%v, want %s", key, got, want)
+		}
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(entry["span_id"].(string)) {
+		t.Errorf("invalid span ID %v", entry["span_id"])
+	}
+	if entry["status"] != float64(http.StatusOK) {
+		t.Errorf("status=%v, want 200", entry["status"])
+	}
+}
+
+func TestGeneratedRequestIDAndExcludedTelemetry(t *testing.T) {
+	var output bytes.Buffer
+	ready := &atomic.Bool{}
+	ready.Store(true)
+	handler := newHandlerWithRuntime(config{}, ready, runtimeHooks{log: slog.New(slog.NewJSONHandler(&output, nil))})
+
+	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+	if output.Len() != 0 {
+		t.Fatalf("health or metrics endpoint emitted access telemetry: %s", output.String())
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(recorder.Header().Get("X-Request-ID")) {
+		t.Fatalf("generated request ID is not a secure 128-bit hexadecimal value: %q", recorder.Header().Get("X-Request-ID"))
 	}
 }
 

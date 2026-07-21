@@ -48,11 +48,17 @@ func TestWorkloadStatusTransitions(t *testing.T) {
 	if rejected || status.Phase != platformv1alpha1.ApplicationPhaseHealthy || status.ActiveVersion != "v0.1.0" || status.CandidateVersion != "" || status.ResolvedImageDigest != testImageDigest || status.ResolvedGitRevision != testGitRevision || !meta.IsStatusConditionTrue(status.Conditions, conditionReady) {
 		t.Fatalf("unexpected healthy status: %#v", status)
 	}
+	if !meta.IsStatusConditionTrue(status.Conditions, conditionServiceHealth) {
+		t.Fatalf("healthy workload does not report ServiceHealth=True: %#v", status)
+	}
 
 	route.Status.Parents[0].Conditions[0].Status = metav1.ConditionFalse
 	status, rejected = workloadStatus(app, deployment, route, digest, testGitRevision)
 	if !rejected || status.Phase != platformv1alpha1.ApplicationPhaseDegraded || meta.FindStatusCondition(status.Conditions, conditionReady).Reason != "RouteRejected" {
 		t.Fatalf("unexpected rejected status: %#v", status)
+	}
+	if condition := meta.FindStatusCondition(status.Conditions, conditionServiceHealth); condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != "RouteRejected" {
+		t.Fatalf("route rejection does not report ServiceHealth=False: %#v", condition)
 	}
 
 	deployment.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}}
