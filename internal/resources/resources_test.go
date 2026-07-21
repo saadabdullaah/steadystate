@@ -91,6 +91,9 @@ func TestGeneratedResources(t *testing.T) {
 	if container.LivenessProbe.HTTPGet.Path != "/healthz" || container.ReadinessProbe.HTTPGet.Path != "/readyz" || *container.SecurityContext.AllowPrivilegeEscalation || !*container.SecurityContext.ReadOnlyRootFilesystem || !*container.SecurityContext.RunAsNonRoot {
 		t.Fatalf("Deployment hardening or probes are incomplete: %#v", container)
 	}
+	if container.Lifecycle == nil || container.Lifecycle.PreStop == nil || container.Lifecycle.PreStop.Sleep == nil || container.Lifecycle.PreStop.Sleep.Seconds != 15 || deployment.Spec.Template.Spec.TerminationGracePeriodSeconds == nil || *deployment.Spec.Template.Spec.TerminationGracePeriodSeconds != 30 {
+		t.Fatalf("Deployment does not retain terminating Pods during Gateway endpoint drain: %#v", deployment.Spec.Template.Spec)
+	}
 	if *deployment.Spec.Template.Spec.AutomountServiceAccountToken || deployment.Spec.Template.Spec.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
 		t.Fatal("pod-level hardening is incomplete")
 	}

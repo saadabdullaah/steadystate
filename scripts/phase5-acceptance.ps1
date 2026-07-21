@@ -239,8 +239,10 @@ switch ($Stage) {
             Add-Check $state 'log-and-trace-opt-out-enforced' (Get-Date) 'Opt-out labels are false and the workload has no OTLP exporter environment.'
 
             $patch = '{"spec":{"observability":{"metrics":false,"logs":true,"traces":true}}}'
-            & kubectl patch application telemetry -n $Namespace --type merge -p $patch | Out-Host
-            if ($LASTEXITCODE -ne 0) { throw 'Failed to disable telemetry metrics.' }
+            $patchOutput = @(& kubectl patch applications.platform.steadystate.dev telemetry -n $Namespace --type merge -p $patch 2>&1)
+            $patchExitCode = $LASTEXITCODE
+            $patchOutput | Out-Host
+            if ($patchExitCode -ne 0) { throw "Failed to disable telemetry metrics: $($patchOutput -join ' ')" }
             $null = Wait-Until -TimeoutSeconds 120 -Failure 'Metrics opt-out did not delete monitoring children.' -Condition {
                 $monitor = Get-KubeJSON @('get','servicemonitor','telemetry-monitor','-n',$Namespace) -AllowMissing
                 $rule = Get-KubeJSON @('get','prometheusrule','telemetry-alerts','-n',$Namespace) -AllowMissing

@@ -531,6 +531,7 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 		"900MB",
 		"6.5GB",
 		"Save-ClusterEvidence",
+		"kubectl patch applications.platform.steadystate.dev telemetry",
 		"PHASE5_ACCEPTANCE_RESULT_PASSED",
 		"PHASE5_ACCEPTANCE_RESULT_FAILED",
 	} {
