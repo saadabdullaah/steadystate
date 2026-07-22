@@ -548,7 +548,10 @@ try {
             Set-DemoManifest -Tag $GoodTag -Strategy canary -TagOnly -Snapshot good-candidate
             $state.commits.promotion = New-DeliveryCommit 'test(gitops): promote Phase 4 good candidate'
             $state.timestamps.promotionPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
-            Wait-DesiredApplication $GoodTag canary $state.commits.promotion
+            # The root pins every health-gated child to the same revision. Git
+            # propagation is therefore bounded independently from the rollout
+            # thresholds, which begin only after the desired state is applied.
+            Wait-DesiredApplication $GoodTag canary $state.commits.promotion -TimeoutSeconds 900
             foreach ($weight in @(10,25,50,100)) {
                 Wait-RouteWeights (100-$weight) $weight
                 $state.measurements = @($state.measurements) + @((Measure-Traffic $GoodTag $weight))
@@ -586,7 +589,7 @@ try {
             Set-DemoManifest -Tag $BadTag -Strategy canary -TagOnly -Snapshot bad-candidate
             $state.commits.rejection = New-DeliveryCommit 'test(gitops): deliver Phase 4 failing candidate'
             $state.timestamps.rejectionPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
-            Wait-DesiredApplication $BadTag canary $state.commits.rejection
+            Wait-DesiredApplication $BadTag canary $state.commits.rejection -TimeoutSeconds 900
             Wait-RouteWeights 90 10
             $reachedTen = Get-Date; $state.timestamps.badCandidateReachedTenAt = $reachedTen.ToUniversalTime().ToString('o')
             $state.measurements = @($state.measurements) + @((Measure-Traffic $BadTag 10)); Save-State $state
@@ -607,7 +610,7 @@ try {
             Set-DemoManifest -Tag $GoodTag -Strategy canary -TagOnly -Snapshot recovery
             $state.commits.recovery = New-DeliveryCommit 'test(gitops): recover Phase 4 stable release'
             $state.timestamps.recoveryPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
-            Wait-DesiredApplication $GoodTag canary $state.commits.recovery
+            Wait-DesiredApplication $GoodTag canary $state.commits.recovery -TimeoutSeconds 900
             $application = Wait-Application Healthy -Version $GoodTag -Revision $state.commits.recovery -Digest $state.registry.good.runtimeDigest
             Wait-ArgoApplication payments Healthy $state.commits.recovery | Out-Null
             Wait-GatewayVersion $GoodTag
