@@ -498,11 +498,11 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	for _, token := range []string{
 		"name: Phase 5 acceptance",
 		"timeout-minutes: 40",
-		"timeout-minutes: 14",
+		"timeout-minutes: 9",
 		"cancel-in-progress: false",
 		"./scripts/dev.ps1 verify-observability",
 		"./scripts/phase5-acceptance.ps1 -Stage Prepare",
-		"timeout --signal=TERM --kill-after=30s 13m vhs docs/demonstrations/phase5-request-telemetry.tape",
+		"timeout --signal=TERM --kill-after=30s 8m vhs docs/demonstrations/phase5-request-telemetry.tape",
 		"./scripts/phase5-acceptance.ps1 -Stage Finalize",
 		"./scripts/phase5-acceptance.ps1 -Stage CaptureFailure",
 		"phase5-acceptance-${{ github.sha }}",
@@ -554,7 +554,9 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	for _, token := range []string{
 		"Output .artifacts/phase5/acceptance/phase5-request-telemetry.gif",
 		"pwsh -NoProfile -File scripts/phase5-acceptance.ps1 -Stage Test",
-		"Set WaitTimeout 12m",
+		"Set WaitTimeout 7m",
+		"Set Framerate 2",
+		"Set PlaybackSpeed 8.0",
 		"Wait+Screen /PHASE5_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
 	} {
 		if !strings.Contains(tape, token) {
@@ -803,10 +805,11 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"Measure-Traffic $GoodTag $weight",
 		"Measure-Traffic $BadTag 10",
 		"Samples = 500",
-		"Wait-DesiredApplication $GoodTag canary $state.commits.promotion",
+		"Wait-DesiredApplication $GoodTag canary $state.commits.promotion -TimeoutSeconds 900",
 		"Wait-DesiredApplication $state.sourceTag canary $state.commits.rollingToCanary -TimeoutSeconds 900",
 		"Rolling-to-canary migration exceeded five minutes.",
-		"Wait-DesiredApplication $BadTag canary $state.commits.rejection",
+		"Wait-DesiredApplication $BadTag canary $state.commits.rejection -TimeoutSeconds 900",
+		"Wait-DesiredApplication $GoodTag canary $state.commits.recovery -TimeoutSeconds 900",
 		"Wait-CanaryEndpoint",
 		"-DisableKeepAlive",
 		"$lastObserved -ge 99",

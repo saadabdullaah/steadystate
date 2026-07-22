@@ -94,12 +94,12 @@ jobs:
 
       - name: Record correlated request and SLO proof
         id: recording
-        timeout-minutes: 14
+        timeout-minutes: 9
         shell: bash
         env:
           CI: ""
           COLORTERM: truecolor
-        run: timeout --signal=TERM --kill-after=30s 13m vhs docs/demonstrations/phase5-request-telemetry.tape
+        run: timeout --signal=TERM --kill-after=30s 8m vhs docs/demonstrations/phase5-request-telemetry.tape
 
       - name: Finalize acceptance evidence
         id: finalize
