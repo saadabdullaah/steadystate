@@ -19,7 +19,7 @@ jobs:
   acceptance:
     name: telemetry-slo-and-dashboards
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -137,7 +137,8 @@ jobs:
             '.artifacts/phase5/acceptance/evidence.json',
             '.artifacts/phase5/acceptance/rendered/gitops-platform.yaml',
             '.artifacts/phase5/acceptance/snapshots/observability.yaml',
-            '.artifacts/phase5/acceptance/logs/operator.log'
+            '.artifacts/phase5/acceptance/logs/operator.log',
+            '.artifacts/phase5/acceptance/logs/grafana.log'
           )
           if ('${{ steps.finalize.outcome }}' -eq 'success') {
             $required += @(

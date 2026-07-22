@@ -374,6 +374,8 @@ func TestProgressiveDeliveryValuesAreFrozenAndMinimal(t *testing.T) {
 		"prometheus-node-exporter:\n  enabled: false",
 		"defaultRules:\n  create: false",
 		"GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: \"true\"",
+		"GF_PLUGINS_PREINSTALL_DISABLED: \"true\"",
+		"cpu: 500m",
 		"defaultDatasourceEnabled: false",
 		"auth.anonymous:",
 		"prometheusOperator:\n  tls:\n    enabled: false",
@@ -495,7 +497,7 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase5.yml")))
 	for _, token := range []string{
 		"name: Phase 5 acceptance",
-		"timeout-minutes: 45",
+		"timeout-minutes: 40",
 		"timeout-minutes: 14",
 		"cancel-in-progress: false",
 		"./scripts/dev.ps1 verify-observability",
@@ -769,7 +771,9 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	rollbackTape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase4-automatic-rollback.tape")))
 	for _, token := range []string{
 		"name: Phase 4 acceptance",
-		"timeout-minutes: 75",
+		"timeout-minutes: 60",
+		"timeout --signal=TERM --kill-after=30s 21m vhs docs/demonstrations/phase4-canary-promotion.tape",
+		"timeout --signal=TERM --kill-after=30s 29m vhs docs/demonstrations/phase4-automatic-rollback.tape",
 		"cancel-in-progress: false",
 		"phase4-acceptance-${{ github.sha }}",
 		"if-no-files-found: error",
@@ -800,6 +804,8 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"Measure-Traffic $BadTag 10",
 		"Samples = 500",
 		"Wait-DesiredApplication $GoodTag canary $state.commits.promotion",
+		"Wait-DesiredApplication $state.sourceTag canary $state.commits.rollingToCanary -TimeoutSeconds 900",
+		"Rolling-to-canary migration exceeded five minutes.",
 		"Wait-DesiredApplication $BadTag canary $state.commits.rejection",
 		"Wait-CanaryEndpoint",
 		"-DisableKeepAlive",
@@ -813,7 +819,10 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"canary-to-rolling-git-detected",
 		"Wait-DesiredApplication $GoodTag rolling $state.commits.canaryToRolling -TimeoutSeconds 900",
 		"Measure-StableWindow",
-		"vus: 5, duration: '20m'",
+		"vus: 1, duration: '20m'",
+		"sleep(0.1)",
+		"currentStage",
+		"Set-AcceptanceStage",
 		"& /bin/kill -s INT $Process.Id",
 		"promotionResult='pending'",
 		"rollbackResult='pending'",
@@ -880,7 +889,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		output  string
 	}{
 		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
-		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 35m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
+		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 28m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
 	} {
 		for _, token := range []string{tape.output, tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-recording.ps1", "Wait+Screen", tape.result} {
 			if !strings.Contains(tape.content, token) {
