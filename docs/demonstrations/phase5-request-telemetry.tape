@@ -5,7 +5,7 @@ Set Width 1200
 Set Height 720
 Set TypingSpeed 15ms
 Set PlaybackSpeed 1.5
-Set WaitTimeout 20m
+Set WaitTimeout 12m
 
 Type "pwsh -NoProfile -File scripts/phase5-acceptance.ps1 -Stage Test"
 Enter

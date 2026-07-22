@@ -53,6 +53,14 @@ function Save-State($State) {
     Write-Utf8 $StatePath (($State | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
 }
 
+function Set-AcceptanceStage {
+    param($State, [Parameter(Mandatory)][string]$Name)
+    $State.currentStage = $Name
+    $State.stageStartedAt = (Get-Date).ToUniversalTime().ToString('o')
+    Save-State $State
+    Write-Host "[STAGE] $Name at $($State.stageStartedAt)" -ForegroundColor Cyan
+}
+
 function Add-Check {
     param($State, [string]$Name, [datetime]$Started, [string]$Details)
     $State.checks = @($State.checks) + @([ordered]@{name=$Name;status='passed';elapsedSeconds=[Math]::Round(((Get-Date)-$Started).TotalSeconds,3);details=$Details})
@@ -118,7 +126,7 @@ spec:
 "@
     $path = Join-Path $ArtifactRoot "rendered/$Name.yaml"
     Write-Utf8 $path $manifest
-    $manifest | kubectl apply -f - | Out-Host
+    $manifest | kubectl apply --request-timeout=20s -f - | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Failed to apply $Name Application." }
 }
 
@@ -246,7 +254,7 @@ function Remove-TestApplications {
 switch ($Stage) {
     'Prepare' {
         New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
-        $state = [ordered]@{schemaVersion=1;sourceSHA=[string]$env:GITHUB_SHA;profile='standard';startedAt=(Get-Date).ToUniversalTime().ToString('o');checks=@();result='running';failure=$null}
+        $state = [ordered]@{schemaVersion=1;sourceSHA=[string]$env:GITHUB_SHA;profile='standard';startedAt=(Get-Date).ToUniversalTime().ToString('o');currentStage='prepare';stageStartedAt=(Get-Date).ToUniversalTime().ToString('o');checks=@();result='running';failure=$null}
         Save-State $state
         $started = Get-Date
         foreach ($name in @('monitoring','loki','tempo','otel-collector','alloy','steadystate-operator','payments')) { $null = Wait-ArgoHealthy $name }
@@ -255,6 +263,7 @@ switch ($Stage) {
     'Test' {
         $state = Read-State
         try {
+            Set-AcceptanceStage $state 'grafana-and-datasources'
             $started = Get-Date
             $grafana = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/api/health" -Headers @{Host='grafana.localtest.me'} -TimeoutSec 10
             if ($grafana.StatusCode -ne 200) { throw 'Grafana HTTPRoute is not healthy.' }
@@ -265,6 +274,7 @@ switch ($Stage) {
             }
             Add-Check $state 'grafana-route-and-datasources-healthy' $started 'Grafana route and explicit Prometheus, Loki, and Tempo datasource health endpoints returned 200.'
 
+            Set-AcceptanceStage $state 'correlated-request'
             New-TestApplication 'telemetry' $GoodImage $true $true $true
             $application = Wait-ApplicationHealthy 'telemetry'
             $traceID = '11111111111111111111111111111111'
@@ -292,6 +302,7 @@ switch ($Stage) {
             $state.requestIdentity = [ordered]@{requestID=$requestID;traceID=$traceID;application='telemetry';namespace=$Namespace;observedAt=(Get-Date).ToUniversalTime().ToString('o')}
             Add-Check $state 'one-request-correlated-across-metrics-logs-traces' $started 'The same request/trace identity was observed in Prometheus, Loki, and Tempo.'
 
+            Set-AcceptanceStage $state 'telemetry-opt-out'
             New-TestApplication 'telemetry-optout' $GoodImage $false $false $false
             $null = Wait-ApplicationHealthy 'telemetry-optout'
             $deployment = Get-KubeJSON @('get','deployment','telemetry-optout','-n',$Namespace)
@@ -300,8 +311,9 @@ switch ($Stage) {
             if ($labels.'steadystate.dev/logs' -ne 'false' -or $labels.'steadystate.dev/traces' -ne 'false' -or @($environment | Where-Object {$_.name -like 'OTEL_*'}).Count -ne 0) { throw 'Telemetry opt-out workload still exports logs or traces.' }
             Add-Check $state 'log-and-trace-opt-out-enforced' (Get-Date) 'Opt-out labels are false and the workload has no OTLP exporter environment.'
 
+            Set-AcceptanceStage $state 'metrics-opt-out'
             $patch = '{"spec":{"observability":{"metrics":false,"logs":true,"traces":true}}}'
-            $patchOutput = @(& kubectl patch applications.platform.steadystate.dev telemetry -n $Namespace --type merge -p $patch 2>&1)
+            $patchOutput = @(& kubectl patch applications.platform.steadystate.dev telemetry -n $Namespace --request-timeout=20s --type merge -p $patch 2>&1)
             $patchExitCode = $LASTEXITCODE
             $patchOutput | Out-Host
             if ($patchExitCode -ne 0) { throw "Failed to disable telemetry metrics: $($patchOutput -join ' ')" }
@@ -313,6 +325,7 @@ switch ($Stage) {
             }
             Add-Check $state 'metrics-opt-out-removes-monitoring-children' (Get-Date) 'ServiceMonitor and PrometheusRule were removed without deleting the Application.'
 
+            Set-AcceptanceStage $state 'fast-burn-alert'
             New-TestApplication 'telemetry-burn' $BadImage $true $false $false
             $null = Wait-ApplicationHealthy 'telemetry-burn'
             $burnStarted = Get-Date
@@ -339,22 +352,25 @@ switch ($Stage) {
             $state.burnMeasurement = [ordered]@{errorRate=$measuredErrorRate;application='telemetry-burn';observedAt=(Get-Date).ToUniversalTime().ToString('o')}
             Add-Check $state 'ten-percent-errors-fire-fast-burn' $burnStarted 'Fast-burn alert fired in Prometheus and was visible through Alertmanager and Grafana within five minutes.'
 
+            Set-AcceptanceStage $state 'memory-budget'
             $memoryStarted = Get-Date
             $state.memory = Wait-MemoryWithinBudget
             Write-Utf8 (Join-Path $ArtifactRoot 'metrics/memory.json') (($state.memory | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
             Add-Check $state 'observability-and-standard-profile-within-budget' $memoryStarted 'Three consecutive 15-second samples showed observability <=900 MiB and total in-cluster working set <=6.5 GiB; per-container evidence was retained.'
 
+            Set-AcceptanceStage $state 'progressive-delivery-regression'
             $demo = Get-KubeJSON @('get','applications.platform.steadystate.dev','demo','-n',$Namespace)
             $payments = Get-KubeJSON @('get','applications.argoproj.io','payments','-n','argocd')
             if ($demo.status.phase -ne 'Healthy' -or $payments.status.health.status -ne 'Healthy') { throw 'Existing progressive delivery is not healthy.' }
             Add-Check $state 'progressive-delivery-regression-healthy' (Get-Date) 'Existing demo Application and tenant Argo Application remained Healthy.'
 
+            Set-AcceptanceStage $state 'success-evidence'
             Save-ClusterEvidence
             $state.result='passed'; $state.completedAt=(Get-Date).ToUniversalTime().ToString('o'); Save-State $state
             Write-Utf8 (Join-Path $Root $EvidencePath) (($state | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
             Write-Host 'PHASE5_ACCEPTANCE_RESULT_PASSED' -ForegroundColor Cyan
         } catch {
-            $state.failure = $_.Exception.Message; $state.result='failed'; $state.completedAt=(Get-Date).ToUniversalTime().ToString('o'); Save-State $state
+            $state.failure = "stage=$($state.currentStage): $($_.Exception.Message)"; $state.result='failed'; $state.completedAt=(Get-Date).ToUniversalTime().ToString('o'); Save-State $state
             try { Save-ClusterEvidence } catch {}
             Write-Utf8 (Join-Path $Root $EvidencePath) (($state | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
             Write-Host 'PHASE5_ACCEPTANCE_RESULT_FAILED' -ForegroundColor Red
@@ -373,9 +389,9 @@ switch ($Stage) {
     }
     'CaptureFailure' {
         $state = if (Test-Path $StatePath) { Read-State } else { [ordered]@{schemaVersion=1;sourceSHA=[string]$env:GITHUB_SHA;profile='standard';checks=@()} }
-        if (-not $state.failure) { $state.failure = [string]$env:PHASE5_FAILURE_MESSAGE }
+        if (-not $state.failure) { $state.failure = "stage=$($state.currentStage): $([string]$env:PHASE5_FAILURE_MESSAGE)" }
         $state.result='failed'; $state.completedAt=(Get-Date).ToUniversalTime().ToString('o'); Save-State $state
-        try { Save-ClusterEvidence } catch {}
+        if (-not (Test-Path -LiteralPath (Join-Path $ArtifactRoot 'logs/operator.log'))) { try { Save-ClusterEvidence } catch {} }
         Write-Utf8 (Join-Path $Root $EvidencePath) (($state | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
         Remove-TestApplications
     }

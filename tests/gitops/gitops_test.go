@@ -495,11 +495,12 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase5.yml")))
 	for _, token := range []string{
 		"name: Phase 5 acceptance",
-		"timeout-minutes: 60",
+		"timeout-minutes: 45",
+		"timeout-minutes: 14",
 		"cancel-in-progress: false",
 		"./scripts/dev.ps1 verify-observability",
 		"./scripts/phase5-acceptance.ps1 -Stage Prepare",
-		"vhs docs/demonstrations/phase5-request-telemetry.tape",
+		"timeout --signal=TERM --kill-after=30s 13m vhs docs/demonstrations/phase5-request-telemetry.tape",
 		"./scripts/phase5-acceptance.ps1 -Stage Finalize",
 		"./scripts/phase5-acceptance.ps1 -Stage CaptureFailure",
 		"phase5-acceptance-${{ github.sha }}",
@@ -534,6 +535,9 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 		"consecutiveSamplesRequired",
 		"componentBreakdown",
 		"metrics/memory.json",
+		"Set-AcceptanceStage",
+		"currentStage",
+		"--request-timeout=20s",
 		"Save-ClusterEvidence",
 		"kubectl patch applications.platform.steadystate.dev telemetry",
 		"PHASE5_ACCEPTANCE_RESULT_PASSED",
@@ -548,7 +552,7 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	for _, token := range []string{
 		"Output .artifacts/phase5/acceptance/phase5-request-telemetry.gif",
 		"pwsh -NoProfile -File scripts/phase5-acceptance.ps1 -Stage Test",
-		"Set WaitTimeout 20m",
+		"Set WaitTimeout 12m",
 		"Wait+Screen /PHASE5_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
 	} {
 		if !strings.Contains(tape, token) {
