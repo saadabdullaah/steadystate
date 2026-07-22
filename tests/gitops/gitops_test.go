@@ -498,11 +498,11 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	for _, token := range []string{
 		"name: Phase 5 acceptance",
 		"timeout-minutes: 40",
-		"timeout-minutes: 14",
+		"timeout-minutes: 9",
 		"cancel-in-progress: false",
 		"./scripts/dev.ps1 verify-observability",
 		"./scripts/phase5-acceptance.ps1 -Stage Prepare",
-		"timeout --signal=TERM --kill-after=30s 13m vhs docs/demonstrations/phase5-request-telemetry.tape",
+		"timeout --signal=TERM --kill-after=30s 8m vhs docs/demonstrations/phase5-request-telemetry.tape",
 		"./scripts/phase5-acceptance.ps1 -Stage Finalize",
 		"./scripts/phase5-acceptance.ps1 -Stage CaptureFailure",
 		"phase5-acceptance-${{ github.sha }}",
@@ -554,7 +554,9 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	for _, token := range []string{
 		"Output .artifacts/phase5/acceptance/phase5-request-telemetry.gif",
 		"pwsh -NoProfile -File scripts/phase5-acceptance.ps1 -Stage Test",
-		"Set WaitTimeout 12m",
+		"Set WaitTimeout 7m",
+		"Set Framerate 2",
+		"Set PlaybackSpeed 8.0",
 		"Wait+Screen /PHASE5_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
 	} {
 		if !strings.Contains(tape, token) {
