@@ -9,7 +9,7 @@ Set Margin 24
 Set MarginFill "#111827"
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 5ms
-Set WaitTimeout 35m
+Set WaitTimeout 28m
 Set Framerate 2
 Set PlaybackSpeed 8.0
 

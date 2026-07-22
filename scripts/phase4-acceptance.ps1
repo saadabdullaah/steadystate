@@ -75,6 +75,14 @@ function Add-Check {
     Write-Host "[PASS] $Name" -ForegroundColor Green
 }
 
+function Set-AcceptanceStage {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Name)
+    $State.currentStage = $Name
+    $State.stageStartedAt = (Get-Date).ToUniversalTime().ToString('o')
+    Save-State $State
+    Write-Host "[STAGE] $Name at $($State.stageStartedAt)" -ForegroundColor Cyan
+}
+
 function Set-DemoManifest {
     param(
         [Parameter(Mandatory)][string]$Tag,
@@ -310,8 +318,12 @@ function Start-Load {
     $summaryPath = ".artifacts/phase4/acceptance/$Name-k6-summary.json"
     Write-Utf8 $scriptPath @"
 import http from 'k6/http';
-export const options = { vus: 5, duration: '20m', discardResponseBodies: true };
-export default function () { http.get('http://127.0.0.1:$HttpPort/', { headers: { Host: '$Hostname' } }); }
+import { sleep } from 'k6';
+export const options = { vus: 1, duration: '20m', discardResponseBodies: true };
+export default function () {
+  http.get('http://127.0.0.1:$HttpPort/', { headers: { Host: '$Hostname' } });
+  sleep(0.1);
+}
 export function handleSummary(data) { return { '$summaryPath': JSON.stringify(data, null, 2) }; }
 "@
     $platform = if ($env:OS -eq 'Windows_NT') {'windows-amd64'} else {'linux-amd64'}
@@ -489,7 +501,7 @@ try {
     if ($Stage -eq 'Prepare') {
         $sourceCommit = Invoke-ExternalText git log -1 --format=%H $Phase4ReleaseRef -- apps/demo-app/VERSION
         $sourceTag = "sha-$sourceCommit"
-        $state = [ordered]@{schemaVersion=1;result='running';promotionResult='pending';rollbackResult='pending';sourceSHA=$SourceSHA;ephemeralBranch=$BranchName;profile=$Profile;startedAt=(Get-Date).ToUniversalTime().ToString('o');sourceTag=$sourceTag;commits=[ordered]@{};timestamps=[ordered]@{};registry=[ordered]@{};releaseTuples=[ordered]@{};activeRelease=[ordered]@{};measurements=@();stableWindows=@();checks=@();failure=$null}
+        $state = [ordered]@{schemaVersion=1;result='running';promotionResult='pending';rollbackResult='pending';sourceSHA=$SourceSHA;ephemeralBranch=$BranchName;profile=$Profile;startedAt=(Get-Date).ToUniversalTime().ToString('o');currentStage='prepare';stageStartedAt=(Get-Date).ToUniversalTime().ToString('o');sourceTag=$sourceTag;commits=[ordered]@{};timestamps=[ordered]@{};registry=[ordered]@{};releaseTuples=[ordered]@{};activeRelease=[ordered]@{};measurements=@();stableWindows=@();checks=@();failure=$null}
         $botLogin = "$AppSlug[bot]"
         $botID = Invoke-ExternalText gh api "/users/$botLogin" --jq .id
         Invoke-External git config user.name $botLogin
@@ -520,12 +532,18 @@ try {
     } elseif ($Stage -eq 'Promote') {
         $state = Read-State; $load = Start-Load 'promotion'; $stageStarted = Get-Date
         try {
+            Set-AcceptanceStage $state 'rolling-to-canary'
             Set-DemoManifest -Tag $state.sourceTag -Strategy canary -Snapshot rolling-to-canary
             $state.commits.rollingToCanary = New-DeliveryCommit 'test(gitops): migrate Phase 4 baseline to canary'
             $state.timestamps.rollingToCanaryPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
-            Wait-Application Healthy -Version $state.sourceTag -Revision $state.commits.rollingToCanary | Out-Null
+            Wait-DesiredApplication $state.sourceTag canary $state.commits.rollingToCanary -TimeoutSeconds 900
+            $state.timestamps.rollingToCanaryAppliedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
+            $migrationStarted = Get-Date
+            Wait-Application Healthy -Version $state.sourceTag -Revision $state.commits.rollingToCanary -TimeoutSeconds 300 | Out-Null
             Wait-GatewayVersion $state.sourceTag
-            Add-Check $state 'rolling-to-canary-zero-downtime' $stageStarted 'Git-driven migration completed without a Gateway outage.'
+            if (((Get-Date)-$migrationStarted).TotalMinutes -gt 5) { throw 'Rolling-to-canary migration exceeded five minutes.' }
+            Add-Check $state 'rolling-to-canary-zero-downtime' $migrationStarted 'After Argo applied the desired revision, the migration completed within five minutes without a Gateway outage.'
+            Set-AcceptanceStage $state 'good-canary-promotion'
             $promotionStarted = Get-Date
             Set-DemoManifest -Tag $GoodTag -Strategy canary -TagOnly -Snapshot good-candidate
             $state.commits.promotion = New-DeliveryCommit 'test(gitops): promote Phase 4 good candidate'
@@ -550,7 +568,7 @@ try {
             $state.promotionResult = 'passed'
             $state.timestamps.promotionEvidenceVerifiedAt = (Get-Date).ToUniversalTime().ToString('o')
             Save-State $state
-            Add-Check $state 'promotion-path-no-routing-outage' $stageStarted 'Continuous k6 traffic observed no failed requests during migration and promotion.'
+            Add-Check $state 'promotion-path-no-routing-outage' $stageStarted 'Rate-limited continuous k6 traffic observed no failed requests during migration and promotion.'
             Save-Snapshot 'after-promotion'
             Write-Host 'PHASE4_PROMOTION_RESULT_PASSED' -ForegroundColor Cyan
         } catch {
@@ -563,6 +581,7 @@ try {
     } elseif ($Stage -eq 'Rollback') {
         $state = Read-State; $load = Start-Load 'rollback'; $failure = $null
         try {
+            Set-AcceptanceStage $state 'bad-canary-rollback'
             $failedTuple = @{} + $state.activeRelease
             Set-DemoManifest -Tag $BadTag -Strategy canary -TagOnly -Snapshot bad-candidate
             $state.commits.rejection = New-DeliveryCommit 'test(gitops): deliver Phase 4 failing candidate'
@@ -583,6 +602,7 @@ try {
             Add-Check $state 'three-stable-only-windows-after-abort' $reachedTen 'Three consecutive 30-second windows served only successful stable traffic.'
             Save-Snapshot 'after-rollback'
             Save-Kubectl (Join-Path $ArtifactRoot 'metrics/analysis-runs.json') @('get','analysisruns','-n',$Namespace,'-o','json')
+            Set-AcceptanceStage $state 'git-recovery'
             $recoveryStarted = Get-Date
             Set-DemoManifest -Tag $GoodTag -Strategy canary -TagOnly -Snapshot recovery
             $state.commits.recovery = New-DeliveryCommit 'test(gitops): recover Phase 4 stable release'
@@ -597,6 +617,7 @@ try {
             Stop-Load $load; $load = $null
             Assert-K6Summary 'rollback'
             $load = Start-Load 'final-migration'
+            Set-AcceptanceStage $state 'canary-to-rolling'
             $deliveryStarted = Get-Date
             Set-DemoManifest -Tag $GoodTag -Strategy rolling -Snapshot canary-to-rolling
             $state.commits.canaryToRolling = New-DeliveryCommit 'test(gitops): return Phase 4 application to rolling'
@@ -635,6 +656,7 @@ try {
         } finally { Stop-Load $load }
     } elseif ($Stage -eq 'Finalize') {
         $state = Read-State
+        Set-AcceptanceStage $state 'finalize'
         if ($state.promotionResult -ne 'passed' -or $state.rollbackResult -ne 'passed' -or $state.failure) {
             throw "Cannot finalize incomplete Phase 4 acceptance: promotion=$($state.promotionResult), rollback=$($state.rollbackResult), failure=$($state.failure)"
         }

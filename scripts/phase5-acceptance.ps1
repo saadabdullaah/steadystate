@@ -233,6 +233,7 @@ function Save-ClusterEvidence {
     }
     foreach ($entry in @(
         @{name='operator';args=@('logs','-n','steadystate-system','deployment/steadystate-controller-manager','--all-containers','--tail=1000')},
+        @{name='grafana';args=@('logs','-n','monitoring','deployment/monitoring-grafana','--all-containers','--tail=1000')},
         @{name='alloy';args=@('logs','-n','monitoring','daemonset/alloy','--all-containers','--tail=1000')},
         @{name='otel-collector';args=@('logs','-n','monitoring','deployment/otel-collector','--all-containers','--tail=1000')},
         @{name='loki';args=@('logs','-n','monitoring','statefulset/loki','--all-containers','--tail=1000')},

@@ -19,7 +19,7 @@ jobs:
   acceptance:
     name: gitops-canary-and-rollback
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -28,6 +28,7 @@ jobs:
           persist-credentials: false
 
       - name: Install checksum-verified platform tools
+        timeout-minutes: 8
         shell: pwsh
         run: |
           ./scripts/install-tools.ps1 -BaseOnly
@@ -48,11 +49,14 @@ jobs:
           }
 
       - name: Install pinned recording tools
+        timeout-minutes: 6
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes ffmpeg
+          fi
           install_dir="$RUNNER_TEMP/steadystate-recording/bin"
           mkdir -p "$install_dir"
           archive="$RUNNER_TEMP/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
@@ -67,10 +71,12 @@ jobs:
           echo "$install_dir" >> "$GITHUB_PATH"
 
       - name: Bootstrap standard profile
+        timeout-minutes: 15
         shell: pwsh
         run: ./scripts/dev.ps1 bootstrap -Profile standard
 
       - name: Build and load local platform images
+        timeout-minutes: 10
         shell: pwsh
         run: |
           ./scripts/dev.ps1 build-images
@@ -98,6 +104,7 @@ jobs:
 
       - name: Prepare rolling baseline outside recordings
         id: prepare
+        timeout-minutes: 15
         shell: pwsh
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -106,16 +113,18 @@ jobs:
 
       - name: Record automatic good-canary promotion
         id: promotion
+        timeout-minutes: 22
         shell: bash
         env:
           CI: ""
           COLORTERM: truecolor
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PHASE4_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-        run: vhs docs/demonstrations/phase4-canary-promotion.tape
+        run: timeout --signal=TERM --kill-after=30s 21m vhs docs/demonstrations/phase4-canary-promotion.tape
 
       - name: Verify promotion recording result
         id: promotion-verification
+        timeout-minutes: 2
         shell: pwsh
         run: |
           $state = Get-Content -Raw -LiteralPath .artifacts/phase4/acceptance/state.json | ConvertFrom-Json
@@ -126,13 +135,14 @@ jobs:
 
       - name: Record automatic rollback and Git recovery
         id: rollback
+        timeout-minutes: 30
         shell: bash
         env:
           CI: ""
           COLORTERM: truecolor
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PHASE4_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-        run: vhs docs/demonstrations/phase4-automatic-rollback.tape
+        run: timeout --signal=TERM --kill-after=30s 29m vhs docs/demonstrations/phase4-automatic-rollback.tape
 
       - name: Verify rollback recording result
         id: rollback-verification
@@ -152,6 +162,7 @@ jobs:
       - name: Capture acceptance diagnostics
         if: always()
         continue-on-error: true
+        timeout-minutes: 5
         shell: pwsh
         run: ./scripts/dev.ps1 diagnostics
 
@@ -169,6 +180,7 @@ jobs:
 
       - name: Verify acceptance evidence
         if: steps.rollback-verification.outcome == 'success'
+        timeout-minutes: 3
         shell: pwsh
         run: |
           foreach ($path in @(
@@ -228,6 +240,7 @@ jobs:
 
       - name: Verify artifact completeness
         if: always() && steps.prepare.outcome != 'skipped'
+        timeout-minutes: 3
         shell: pwsh
         run: |
           $required = @(
