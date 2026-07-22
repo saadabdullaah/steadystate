@@ -1,15 +1,19 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"testing"
 	"time"
 
 	rolloutsv1alpha1 "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
@@ -118,6 +122,54 @@ func TestStrategyMigrationAndPluginWeightOwnership(t *testing.T) {
 	}
 	if *currentDeployment.Spec.Replicas != 0 {
 		t.Fatal("rolling migration did not restore operator replica ownership")
+	}
+}
+
+func TestRouteBackendServiceUIDFingerprintChangesAfterServiceRecreation(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := gatewayv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := platformv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	app := unitApplication()
+	app.UID = types.UID("application-uid")
+	service := resources.Service(app)
+	service.UID = types.UID("service-uid-1")
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(service).Build()
+	reconciler := &ApplicationReconciler{Client: client, Scheme: scheme}
+
+	route, changed, err := reconciler.reconcileRoute(context.Background(), app, false)
+	if err != nil || !changed {
+		t.Fatalf("initial route reconcile: changed=%t err=%v", changed, err)
+	}
+	first := route.Annotations[backendServiceUIDsAnnotation]
+	if first != "apps/demo=service-uid-1" {
+		t.Fatalf("unexpected initial backend fingerprint %q", first)
+	}
+
+	if err := client.Delete(context.Background(), service); err != nil {
+		t.Fatal(err)
+	}
+	recreated := resources.Service(app)
+	recreated.UID = types.UID("service-uid-2")
+	if err := client.Create(context.Background(), recreated); err != nil {
+		t.Fatal(err)
+	}
+	route, changed, err = reconciler.reconcileRoute(context.Background(), app, false)
+	if err != nil || !changed {
+		t.Fatalf("route reconcile after Service recreation: changed=%t err=%v", changed, err)
+	}
+	if got := route.Annotations[backendServiceUIDsAnnotation]; got != "apps/demo=service-uid-2" || got == first {
+		t.Fatalf("backend fingerprint was not refreshed: first=%q current=%q", first, got)
+	}
+	if _, changed, err = reconciler.reconcileRoute(context.Background(), app, false); err != nil || changed {
+		t.Fatalf("steady-state route reconcile wrote unexpectedly: changed=%t err=%v", changed, err)
 	}
 }
 

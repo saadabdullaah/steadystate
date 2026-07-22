@@ -30,6 +30,7 @@ import (
 const (
 	gatewayPluginInProgressLabel = "rollouts.argoproj.io/gatewayapi-canary"
 	gatewayPluginInProgressValue = "in-progress"
+	backendServiceUIDsAnnotation = "steadystate.dev/backend-service-uids"
 	rollingMigrationLabelKey     = "steadystate.dev/rolling-migration"
 	rollingCutoverStartedAtKey   = "steadystate.dev/rolling-cutover-started-at"
 	rollingCleanupStartedAtKey   = "steadystate.dev/rolling-cleanup-started-at"
@@ -489,16 +490,26 @@ func (r *ApplicationReconciler) reconcileUnstructured(ctx context.Context, app *
 }
 
 func (r *ApplicationReconciler) reconcileRoute(ctx context.Context, app *platformv1alpha1.Application, canary bool) (*gatewayv1.HTTPRoute, bool, error) {
+	desired := resources.HTTPRoute(app)
+	if canary {
+		desired = resources.CanaryHTTPRoute(app)
+	}
+	backendServiceUIDs, err := r.routeBackendServiceUIDs(ctx, desired)
+	if err != nil {
+		return nil, false, fmt.Errorf("resolve HTTP route backends: %w", err)
+	}
 	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace}}
 	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, route, func() error {
-		desired := resources.HTTPRoute(app)
 		if canary {
-			desired = resources.CanaryHTTPRoute(app)
 			if route.Labels[gatewayPluginInProgressLabel] == gatewayPluginInProgressValue {
 				preserveRouteWeights(desired, route)
 			}
 		}
 		mergeLabels(&route.ObjectMeta, desired.Labels)
+		if route.Annotations == nil {
+			route.Annotations = map[string]string{}
+		}
+		route.Annotations[backendServiceUIDsAnnotation] = backendServiceUIDs
 		route.Spec = desired.Spec
 		return controllerutil.SetControllerReference(app, route, r.Scheme)
 	})
@@ -506,6 +517,37 @@ func (r *ApplicationReconciler) reconcileRoute(ctx context.Context, app *platfor
 		return nil, false, fmt.Errorf("HTTP route: %w", err)
 	}
 	return route, op != controllerutil.OperationResultNone, nil
+}
+
+func (r *ApplicationReconciler) routeBackendServiceUIDs(ctx context.Context, route *gatewayv1.HTTPRoute) (string, error) {
+	identities := make([]string, 0)
+	seen := map[types.NamespacedName]struct{}{}
+	for _, rule := range route.Spec.Rules {
+		for _, backend := range rule.BackendRefs {
+			if backend.Group != nil && *backend.Group != "" {
+				continue
+			}
+			if backend.Kind != nil && *backend.Kind != "Service" {
+				continue
+			}
+			namespace := route.Namespace
+			if backend.Namespace != nil {
+				namespace = string(*backend.Namespace)
+			}
+			key := types.NamespacedName{Namespace: namespace, Name: string(backend.Name)}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			service := &corev1.Service{}
+			if err := r.Get(ctx, key, service); err != nil {
+				return "", fmt.Errorf("service %s: %w", key, err)
+			}
+			identities = append(identities, fmt.Sprintf("%s/%s=%s", namespace, service.Name, service.UID))
+		}
+	}
+	sort.Strings(identities)
+	return strings.Join(identities, ","), nil
 }
 
 func preserveRouteWeights(desired, current *gatewayv1.HTTPRoute) {

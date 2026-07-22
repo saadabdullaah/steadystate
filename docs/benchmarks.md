@@ -13,6 +13,6 @@ SteadyState's limits are acceptance boundaries for a disposable laptop-scale pla
 | Phase 5 | Loki + Tempo + OTel + Alloy + existing monitoring | `<=900 MiB` | 844,398,592 bytes in run `29843478650` |
 | Phase 5 | Standard-profile in-cluster total | `<=6.5 GiB` | 5,272,350,720 bytes in run `29843478650` |
 
-Phase 5 measures `container_memory_working_set_bytes` from Prometheus after telemetry and SLO checks have run. Zero/absent measurements fail acceptance rather than passing as an empty result. The evidence JSON records raw byte counts and timestamps; diagnostics capture the corresponding Pods and resource declarations.
+Phase 5 measures `container_memory_working_set_bytes` from Prometheus after telemetry and SLO checks have run. To distinguish the bounded steady working set from the intentional fast-burn load spike, both budgets must hold for three consecutive samples 15 seconds apart within a five-minute window. Zero/absent measurements and a budget that never stabilizes fail acceptance. Evidence records every sample, the final raw byte counts, timestamps, and a per-container observability breakdown; diagnostics capture the corresponding Pods and resource declarations.
 
 Retention/storage caps are 24 hours and 4 GiB for Loki, and 24 hours and 2 GiB for Tempo. Both use disposable emptyDir storage. Prometheus retains six hours. These caps keep the standard profile bounded and deliberately avoid implying durable observability.
