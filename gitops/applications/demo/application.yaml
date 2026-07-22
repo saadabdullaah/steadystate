@@ -9,7 +9,7 @@ spec:
   owner: platform-team
   image:
     repository: ghcr.io/saadabdullaah/steadystate-demo-app
-    tag: v0.5.0
+    tag: v0.5.1
   runtime:
     port: 8080
     replicas:
