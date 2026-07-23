@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - monitoring.yaml
   - argo-rollouts.yaml
+  - kyverno.yaml

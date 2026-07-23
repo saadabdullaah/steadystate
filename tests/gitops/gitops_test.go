@@ -36,6 +36,7 @@ func TestGitOpsRendersDeterministically(t *testing.T) {
 	for _, path := range []string{
 		"gitops/platform",
 		"gitops/platform/observability",
+		"gitops/platform/kyverno-policies",
 		"gitops/teams/payments",
 		"gitops/applications/demo",
 	} {
@@ -57,8 +58,8 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"--set-string", "gitRevision="+testRevision,
 	)
 	objects := decodeManifests(t, rendered)
-	if len(objects) != 12 {
-		t.Fatalf("root chart rendered %d objects, want 12", len(objects))
+	if len(objects) != 14 {
+		t.Fatalf("root chart rendered %d objects, want 14", len(objects))
 	}
 
 	for _, name := range []string{"root", "tenant"} {
@@ -75,6 +76,7 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"https://grafana-community.github.io/helm-charts",
 		"https://grafana.github.io/helm-charts",
 		"https://open-telemetry.github.io/opentelemetry-helm-charts",
+		"https://kyverno.github.io/kyverno/",
 	})
 
 	expectedWaves := map[string]string{
@@ -85,6 +87,8 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"tempo":                "-15",
 		"otel-collector":       "-14",
 		"alloy":                "-13",
+		"kyverno":              "-12",
+		"kyverno-policies":     "-11",
 		"steadystate-operator": "-10",
 		"payments":             "0",
 	}
@@ -107,6 +111,19 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	assertExternalChartApplication(t, objects, "tempo", "https://grafana.github.io/helm-charts", "tempo", "1.24.4", "gitops/platform/tempo/values.yaml", "monitoring")
 	assertExternalChartApplication(t, objects, "otel-collector", "https://open-telemetry.github.io/opentelemetry-helm-charts", "opentelemetry-collector", "0.165.0", "gitops/platform/otel-collector/values.yaml", "monitoring")
 	assertExternalChartApplication(t, objects, "alloy", "https://grafana.github.io/helm-charts", "alloy", "1.10.1", "gitops/platform/alloy/values.yaml", "monitoring")
+	assertExternalChartApplication(t, objects, "kyverno", "https://kyverno.github.io/kyverno/", "kyverno", "3.8.2", "gitops/platform/kyverno/values.yaml", "kyverno")
+	kyverno := findObject(t, objects, "Application", "kyverno")
+	kyvernoSources := nestedSlice(t, kyverno, "spec", "sources")
+	helmSource := kyvernoSources[0].(map[string]any)
+	skipTests, found, err := unstructured.NestedBool(helmSource, "helm", "skipTests")
+	if err != nil || !found || !skipTests {
+		t.Fatalf("Kyverno Helm tests must be skipped to avoid mutable test images: found=%v value=%v err=%v", found, skipTests, err)
+	}
+	policies := findObject(t, objects, "Application", "kyverno-policies")
+	assertString(t, policies, repositoryURL, "spec", "source", "repoURL")
+	assertString(t, policies, testRevision, "spec", "source", "targetRevision")
+	assertString(t, policies, "gitops/platform/kyverno-policies", "spec", "source", "path")
+	assertAutomated(t, policies, true)
 
 	operator := findObject(t, objects, "Application", "steadystate-operator")
 	assertString(t, operator, repositoryURL, "spec", "source", "repoURL")
@@ -186,6 +203,8 @@ func TestProjectRestrictions(t *testing.T) {
 		"apiextensions.k8s.io/CustomResourceDefinition",
 		"rbac.authorization.k8s.io/ClusterRole",
 		"rbac.authorization.k8s.io/ClusterRoleBinding",
+		"policies.kyverno.io/ImageValidatingPolicy",
+		"policies.kyverno.io/ValidatingPolicy",
 		"/ConfigMap",
 		"/Secret",
 		"/ServiceAccount",
@@ -207,7 +226,7 @@ func TestProjectRestrictions(t *testing.T) {
 	for _, raw := range platformDestinations {
 		actualDestinations = append(actualDestinations, raw.(map[string]any)["namespace"].(string))
 	}
-	assertExactSet(t, actualDestinations, []string{"argocd", "steadystate-system", "monitoring", "argo-rollouts"})
+	assertExactSet(t, actualDestinations, []string{"argocd", "steadystate-system", "monitoring", "argo-rollouts", "kyverno"})
 
 	tenant := findObject(t, objects, "AppProject", "tenant")
 	assertExactSet(t, resourceKinds(t, tenant, "clusterResourceWhitelist"), []string{"platform.steadystate.dev/Team"})
@@ -313,6 +332,12 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	assertString(t, parent, "steadystate", "name")
 	assertString(t, parent, "steadystate-system", "namespace")
 	findObject(t, objects, "Namespace", "argo-rollouts")
+	kyvernoNamespace := findObject(t, objects, "Namespace", "kyverno")
+	labels, found, err = unstructured.NestedStringMap(kyvernoNamespace, "metadata", "labels")
+	if err != nil || !found || labels["pod-security.kubernetes.io/audit"] != "restricted" ||
+		labels["pod-security.kubernetes.io/warn"] != "restricted" {
+		t.Fatalf("Kyverno namespace must audit and warn against the restricted Pod Security standard: %#v", labels)
+	}
 	observabilityObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "platform", "observability")))
 	grafanaRoute := findObject(t, observabilityObjects, "HTTPRoute", "grafana")
 	hostnames, found, err = unstructured.NestedStringSlice(grafanaRoute, "spec", "hostnames")
@@ -397,6 +422,120 @@ func TestProgressiveDeliveryValuesAreFrozenAndMinimal(t *testing.T) {
 	}
 }
 
+func TestKyvernoAuditFoundationContracts(t *testing.T) {
+	root := repositoryRoot(t)
+	values := string(readFile(t, filepath.Join(root, "gitops", "platform", "kyverno", "values.yaml")))
+	for _, token := range []string{
+		"crds:\n  install: true",
+		"migration:\n    enabled: false",
+		"reportsServer:\n  enabled: false",
+		"openreports:\n  enabled: false",
+		"webhooksCleanup:\n  enabled: false",
+		"cleanupController:\n  enabled: false",
+		"admissionController:\n  replicas: 1",
+		"backgroundController:\n  enabled: true\n  replicas: 1",
+		"reportsController:\n  enabled: true\n  replicas: 1",
+		"backgroundScanInterval: 5m",
+		"format: json",
+	} {
+		if !strings.Contains(values, token) {
+			t.Errorf("Kyverno values are missing %q", token)
+		}
+	}
+
+	policyPath := filepath.Join(root, "gitops", "platform", "kyverno-policies")
+	objects := decodeManifests(t, run(t, root, "kustomize", "build", policyPath))
+	if len(objects) != 3 {
+		t.Fatalf("Kyverno policy leaf rendered %d objects, want 3", len(objects))
+	}
+	for _, object := range objects {
+		name := objectString(object, "metadata", "name")
+		if objectString(object, "apiVersion") != "policies.kyverno.io/v1" {
+			t.Errorf("policy %s does not use the stable Kyverno v1 API", name)
+		}
+		if objectString(object, "kind") == "ClusterPolicy" {
+			t.Fatal("legacy ClusterPolicy resources are forbidden")
+		}
+		actions, found, err := unstructured.NestedStringSlice(object, "spec", "validationActions")
+		if err != nil || !found || len(actions) != 1 || actions[0] != "Audit" {
+			t.Errorf("policy %s must remain in Audit during the foundation checkpoint: %#v", name, actions)
+		}
+		assertString(t, object, "Fail", "spec", "failurePolicy")
+		timeout, found, err := unstructured.NestedFieldNoCopy(object, "spec", "webhookConfiguration", "timeoutSeconds")
+		if err != nil || !found || timeout != float64(15) {
+			t.Errorf("policy %s must use a 15-second webhook timeout: found=%v value=%v err=%v", name, found, timeout, err)
+		}
+		background, found, err := unstructured.NestedBool(object, "spec", "evaluation", "background", "enabled")
+		if err != nil || !found || !background {
+			t.Errorf("policy %s must enable background evaluation", name)
+		}
+		selectors := nestedSlice(t, object, "spec", "matchConstraints", "namespaceSelector", "matchExpressions")
+		if len(selectors) != 1 {
+			t.Errorf("policy %s must have one immutable Team namespace selector", name)
+			continue
+		}
+		selector := selectors[0].(map[string]any)
+		assertString(t, selector, "steadystate.dev/team", "key")
+		assertString(t, selector, "Exists", "operator")
+	}
+
+	imagePolicy := findObject(t, objects, "ImageValidatingPolicy", "steadystate-verify-team-images")
+	for _, field := range []string{"mutateDigest", "required", "verifyDigest"} {
+		value, found, err := unstructured.NestedBool(imagePolicy, "spec", "validationConfigurations", field)
+		if err != nil || !found || !value {
+			t.Errorf("ImageValidatingPolicy must set %s=true: found=%v value=%v err=%v", field, found, value, err)
+		}
+	}
+	imagePolicyText := string(readFile(t, filepath.Join(policyPath, "verify-team-images.yaml")))
+	for _, identity := range []string{
+		"https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main",
+		"https://token.actions.githubusercontent.com",
+		"https://rekor.sigstore.dev",
+	} {
+		if !strings.Contains(imagePolicyText, identity) {
+			t.Errorf("ImageValidatingPolicy is missing trust contract %q", identity)
+		}
+	}
+	rendered := string(run(t, root, "kustomize", "build", policyPath))
+	if strings.Contains(rendered, "kind: PolicyException") || strings.Contains(rendered, "kind: ClusterPolicy") {
+		t.Fatal("the Audit foundation must not install legacy policies or broad policy exceptions")
+	}
+	boundaries := string(readFile(t, filepath.Join(root, "docs", "security", "kyverno-policy-boundaries.md")))
+	for _, token := range []string{
+		"No Phase 7 exception exists in the foundation",
+		"exact operator-managed ServiceAccount",
+		"pinned repositories and digests",
+		"namespace-wide exemptions",
+		"user-supplied bypass labels",
+	} {
+		if !strings.Contains(boundaries, token) {
+			t.Errorf("Kyverno policy boundary documentation is missing %q", token)
+		}
+	}
+	installPowerShell := string(readFile(t, filepath.Join(root, "scripts", "install-tools.ps1")))
+	installShell := string(readFile(t, filepath.Join(root, "scripts", "install-tools.sh")))
+	for _, token := range []string{
+		"IncludeSecurity",
+		"kyverno-cli_v$($v.KYVERNO_VERSION)_windows_x86_64.zip",
+		"KYVERNO_CLI_WINDOWS_AMD64_SHA256",
+		"kyverno-cli_v$($v.KYVERNO_VERSION)_linux_x86_64.tar.gz",
+		"KYVERNO_CLI_LINUX_AMD64_SHA256",
+	} {
+		if !strings.Contains(installPowerShell, token) {
+			t.Errorf("PowerShell tool installation is missing %q", token)
+		}
+	}
+	for _, token := range []string{
+		"--include-security",
+		"kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz",
+		"KYVERNO_CLI_LINUX_AMD64_SHA256",
+	} {
+		if !strings.Contains(installShell, token) {
+			t.Errorf("Linux tool installation is missing %q", token)
+		}
+	}
+}
+
 func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	root := repositoryRoot(t)
 	rendered := run(t, root, "helm",
@@ -466,12 +605,16 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 
 	for _, command := range []string{
 		"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s",
-		"payments alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s",
+		"payments kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s",
+		"kyverno -n argocd --ignore-not-found=true --wait=true --timeout=180s",
 		"applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s",
 		"teams.platform.steadystate.dev --all --ignore-not-found=true --wait=true --timeout=180s",
 		"namespace steadystate-unmanaged --ignore-not-found=true --wait=true --timeout=120s",
 		"argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s",
 		"config/default') --ignore-not-found=true --wait=true --timeout=180s",
+		"validatingwebhookconfiguration,mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno",
+		"namespace monitoring argo-rollouts kyverno --ignore-not-found=true --wait=true --timeout=180s",
+		"validatingpolicies.policies.kyverno.io",
 	} {
 		if !strings.Contains(text, command) {
 			t.Fatalf("GitOps teardown is missing bounded delete %q", command)
@@ -487,6 +630,65 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 	} {
 		if !strings.Contains(string(devScript), command) {
 			t.Fatalf("operator teardown is missing bounded cleanup %q", command)
+		}
+	}
+}
+
+func TestPhase6FoundationWorkflowContracts(t *testing.T) {
+	t.Parallel()
+	root := repositoryRoot(t)
+	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase6-foundation.yml")))
+	script := string(readFile(t, filepath.Join(root, "scripts", "phase6-foundation.ps1")))
+	for _, token := range []string{
+		"name: Phase 6 foundation",
+		"timeout-minutes: 50",
+		"cancel-in-progress: false",
+		"./scripts/install-tools.ps1 -BaseOnly -IncludeSecurity",
+		"./scripts/dev.ps1 verify-gitops",
+		"./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA",
+		"./scripts/phase6-foundation.ps1 -Stage Test",
+		"./scripts/phase6-foundation.ps1 -Stage CaptureFailure",
+		"phase6-foundation-${{ github.sha }}",
+		".artifacts/phase6/foundation/evidence.json",
+		".artifacts/diagnostics/",
+		"if-no-files-found: error",
+	} {
+		if !strings.Contains(workflow, token) {
+			t.Errorf("Phase 6 foundation workflow is missing %q", token)
+		}
+	}
+	diagnostics := strings.Index(workflow, "Capture cluster diagnostics")
+	upload := strings.Index(workflow, "Upload Phase 6 foundation artifact")
+	cleanup := strings.Index(workflow, "Undeploy GitOps")
+	if diagnostics < 0 || upload <= diagnostics || cleanup <= upload {
+		t.Fatal("Phase 6 foundation diagnostics, artifact upload, and cleanup ordering is invalid")
+	}
+	for _, check := range []string{
+		"pinned-kyverno-three-controllers-ready",
+		"cleanup-reports-server-and-legacy-policies-absent",
+		"stable-cel-audit-policies",
+		"admission-webhooks-ready",
+		"unmanaged-image-mutated-to-digest",
+		"audit-admits-and-reports-unsafe-pod",
+		"background-scan-reports-existing-resource",
+		"controller-restart-preserves-admission-and-reporting",
+	} {
+		if !strings.Contains(script, check) {
+			t.Errorf("Phase 6 compatibility proof is missing check %q", check)
+		}
+	}
+	for _, token := range []string{
+		"KYVERNO_CHART_VERSION -ne '3.8.2'",
+		"KYVERNO_VERSION -ne '1.18.2'",
+		"f4fc787cf1d6781eefb9e9b45837edcddcfae984c872888289914e97207cc5de",
+		"policies.kyverno.io/v1",
+		"validationActions) -notcontains 'Audit'",
+		"clusterpolicies.kyverno.io",
+		"kyverno-cleanup-controller",
+		"kyverno-reports-server",
+	} {
+		if !strings.Contains(script, token) {
+			t.Errorf("Phase 6 compatibility script is missing %q", token)
 		}
 	}
 }

@@ -332,6 +332,13 @@ function Invoke-CheckVersions {
         throw "k6 version mismatch: expected v$($v.K6_VERSION), got $k6Version"
     }
     Write-Host "[PASS] k6 $($v.K6_VERSION)"
+    if (Test-CommandAvailable 'kyverno') {
+        $kyvernoVersion = ((& kyverno version) -join "`n")
+        if ($LASTEXITCODE -ne 0 -or $kyvernoVersion -notmatch [regex]::Escape($v.KYVERNO_VERSION)) {
+            throw "Kyverno CLI version mismatch: expected $($v.KYVERNO_VERSION), got $kyvernoVersion"
+        }
+        Write-Host "[PASS] kyverno $($v.KYVERNO_VERSION)"
+    }
     if (-not $IsWindowsHost -and (Test-CommandAvailable 'kubebuilder')) {
         $kubebuilderVersion = ((& kubebuilder version) -join "`n")
         if ($LASTEXITCODE -ne 0 -or $kubebuilderVersion -notmatch [regex]::Escape("v$($v.KUBEBUILDER_VERSION)")) {

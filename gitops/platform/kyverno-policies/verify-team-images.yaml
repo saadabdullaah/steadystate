@@ -1,0 +1,63 @@
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: steadystate-verify-team-images
+  labels:
+    app.kubernetes.io/part-of: steadystate
+spec:
+  validationActions:
+    - Audit
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 15
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: steadystate.dev/team
+          operator: Exists
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+  matchConditions:
+    - name: unmanaged-or-signature-requested
+      expression: >-
+        !has(object.metadata.labels) ||
+        !('app.kubernetes.io/managed-by' in object.metadata.labels) ||
+        object.metadata.labels['app.kubernetes.io/managed-by'] != 'steadystate' ||
+        (
+          'steadystate.dev/require-signed-image' in object.metadata.labels &&
+          object.metadata.labels['steadystate.dev/require-signed-image'] == 'true'
+        )
+  matchImageReferences:
+    - glob: "*"
+  validationConfigurations:
+    mutateDigest: true
+    required: true
+    verifyDigest: true
+  attestors:
+    - name: steadystateDelivery
+      cosign:
+        keyless:
+          identities:
+            - subject: https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main
+              issuer: https://token.actions.githubusercontent.com
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validations:
+    - expression: >-
+        images.containers.map(image,
+          verifyImageSignatures(image, [attestors.steadystateDelivery])
+        ).all(results, results > 0)
+      message: Images must be signed by the SteadyState main-branch demo release workflow.

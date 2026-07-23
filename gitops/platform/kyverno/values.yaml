@@ -1,0 +1,115 @@
+# Frozen for Kyverno chart 3.8.2 / application v1.18.2.
+crds:
+  install: true
+  migration:
+    enabled: false
+  reportsServer:
+    enabled: false
+
+openreports:
+  enabled: false
+  installCrds: false
+
+reportsServer:
+  enabled: false
+
+grafana:
+  enabled: false
+
+webhooksCleanup:
+  enabled: false
+
+test:
+  enabled: false
+
+features:
+  admissionReports:
+    enabled: true
+  aggregateReports:
+    enabled: true
+  policyReports:
+    enabled: true
+  validatingAdmissionPolicyReports:
+    enabled: true
+  backgroundScan:
+    enabled: true
+    backgroundScanWorkers: 2
+    backgroundScanInterval: 5m
+    skipResourceFilters: true
+  dumpPayload:
+    enabled: false
+  dumpPatches:
+    enabled: false
+  forceFailurePolicyIgnore:
+    enabled: false
+  generateValidatingAdmissionPolicy:
+    enabled: true
+  generateMutatingAdmissionPolicy:
+    enabled: false
+  logging:
+    format: json
+    verbosity: 2
+
+admissionController:
+  replicas: 1
+  antiAffinity:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+  initContainer:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+  container:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      app.kubernetes.io/part-of: steadystate
+
+backgroundController:
+  enabled: true
+  replicas: 1
+  antiAffinity:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      app.kubernetes.io/part-of: steadystate
+
+cleanupController:
+  enabled: false
+
+reportsController:
+  enabled: true
+  replicas: 1
+  antiAffinity:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      app.kubernetes.io/part-of: steadystate

@@ -2,6 +2,7 @@
 param(
     [switch]$Force,
     [switch]$BaseOnly,
+    [switch]$IncludeSecurity,
     [switch]$SkipLint
 )
 
@@ -146,6 +147,15 @@ if ($IsWindowsHost) {
     $k6Extract = Join-Path $ToolsRoot 'k6-extract'
     Expand-Archive -LiteralPath $k6Archive -DestinationPath $k6Extract -Force
     Copy-Item -Force (Join-Path $k6Extract "k6-v$($v.K6_VERSION)-windows-amd64/k6.exe") (Join-Path $BinDir 'k6.exe')
+
+    if (-not $BaseOnly -or $IncludeSecurity) {
+        $kyvernoArchive = Join-Path $DownloadDir "kyverno-cli_v$($v.KYVERNO_VERSION)_windows_x86_64.zip"
+        Get-VerifiedFile -Url "https://github.com/kyverno/kyverno/releases/download/v$($v.KYVERNO_VERSION)/kyverno-cli_v$($v.KYVERNO_VERSION)_windows_x86_64.zip" -Destination $kyvernoArchive -ExpectedSha256 $v.KYVERNO_CLI_WINDOWS_AMD64_SHA256
+        $kyvernoExtract = Join-Path $ToolsRoot 'kyverno-extract/windows-amd64'
+        New-Item -ItemType Directory -Force -Path $kyvernoExtract | Out-Null
+        Expand-Archive -LiteralPath $kyvernoArchive -DestinationPath $kyvernoExtract -Force
+        Copy-Item -Force (Join-Path $kyvernoExtract 'kyverno.exe') (Join-Path $BinDir 'kyverno.exe')
+    }
 } else {
     $goArchive = Join-Path $DownloadDir "go$($v.GO_VERSION).linux-amd64.tar.gz"
     Get-VerifiedFile -Url "https://go.dev/dl/go$($v.GO_VERSION).linux-amd64.tar.gz" -Destination $goArchive -ExpectedSha256 $v.GO_LINUX_AMD64_SHA256
@@ -180,6 +190,16 @@ if ($IsWindowsHost) {
     & tar -xzf $k6Archive -C $k6Extract
     Copy-Item -Force (Join-Path $k6Extract "k6-v$($v.K6_VERSION)-linux-amd64/k6") (Join-Path $BinDir 'k6')
     & chmod +x (Join-Path $BinDir 'k6')
+
+    if (-not $BaseOnly -or $IncludeSecurity) {
+        $kyvernoArchive = Join-Path $DownloadDir "kyverno-cli_v$($v.KYVERNO_VERSION)_linux_x86_64.tar.gz"
+        Get-VerifiedFile -Url "https://github.com/kyverno/kyverno/releases/download/v$($v.KYVERNO_VERSION)/kyverno-cli_v$($v.KYVERNO_VERSION)_linux_x86_64.tar.gz" -Destination $kyvernoArchive -ExpectedSha256 $v.KYVERNO_CLI_LINUX_AMD64_SHA256
+        $kyvernoExtract = Join-Path $ToolsRoot 'kyverno-extract/linux-amd64'
+        New-Item -ItemType Directory -Force -Path $kyvernoExtract | Out-Null
+        & tar -xzf $kyvernoArchive -C $kyvernoExtract
+        Copy-Item -Force (Join-Path $kyvernoExtract 'kyverno') (Join-Path $BinDir 'kyverno')
+        & chmod +x (Join-Path $BinDir 'kyverno')
+    }
 }
 
 if (-not $BaseOnly) {

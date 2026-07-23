@@ -294,7 +294,7 @@ function Invoke-Test {
     Add-PassedCheck $checks 'pinned-argocd-ready-dex-absent' $started "Pinned manifest $(Split-Path -Leaf $manifest) is running and all five Dex objects are absent."
 
     $applications = @{}
-    foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','loki','tempo','otel-collector','alloy','steadystate-operator','payments','steadystate-root')) {
+    foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','loki','tempo','otel-collector','alloy','kyverno','kyverno-policies','steadystate-operator','payments','steadystate-root')) {
         $started = Get-Date
         $applications[$name] = Wait-ArgoApplication -Name $name
         Add-PassedCheck $checks "argocd-application-$name-healthy" $started "$name is Synced and Healthy."
@@ -360,6 +360,7 @@ function Invoke-Verify {
     Assert-ChartChecksum 'https://grafana.github.io/helm-charts' 'alloy' $versions.ALLOY_CHART_VERSION $versions.ALLOY_CHART_SHA256
     Assert-ChartChecksum 'https://grafana.github.io/helm-charts' 'tempo' $versions.TEMPO_CHART_VERSION $versions.TEMPO_CHART_SHA256
     Assert-ChartChecksum 'https://open-telemetry.github.io/opentelemetry-helm-charts' 'opentelemetry-collector' $versions.OTEL_COLLECTOR_CHART_VERSION $versions.OTEL_COLLECTOR_CHART_SHA256
+    Assert-ChartChecksum 'https://kyverno.github.io/kyverno/' 'kyverno' $versions.KYVERNO_CHART_VERSION $versions.KYVERNO_CHART_SHA256
     Push-Location $Root
     try {
         Invoke-External go test ./tests/gitops/...
@@ -384,7 +385,8 @@ function Invoke-Undeploy {
 
     if ($argoApplicationsExist) {
         Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s
-        Invoke-External kubectl delete application.argoproj.io payments alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s
+        Invoke-External kubectl delete application.argoproj.io payments kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s
+        Invoke-External kubectl delete application.argoproj.io kyverno -n argocd --ignore-not-found=true --wait=true --timeout=180s
     }
     if ($steadyStateApplicationsExist) {
         Invoke-External kubectl delete applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s
@@ -397,12 +399,19 @@ function Invoke-Undeploy {
         Invoke-External kubectl delete application.argoproj.io argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s
     }
     Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true --wait=true --timeout=180s
-    Invoke-External kubectl delete namespace monitoring argo-rollouts --ignore-not-found=true --wait=true --timeout=180s
+    Invoke-External kubectl delete validatingwebhookconfiguration,mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno --ignore-not-found=true --wait=true --timeout=60s
+    Invoke-External kubectl delete namespace monitoring argo-rollouts kyverno --ignore-not-found=true --wait=true --timeout=180s
     Invoke-External kubectl delete customresourcedefinition `
         rollouts.argoproj.io analysisruns.argoproj.io analysistemplates.argoproj.io clusteranalysistemplates.argoproj.io experiments.argoproj.io `
         alertmanagerconfigs.monitoring.coreos.com alertmanagers.monitoring.coreos.com podmonitors.monitoring.coreos.com probes.monitoring.coreos.com `
         prometheusagents.monitoring.coreos.com prometheuses.monitoring.coreos.com prometheusrules.monitoring.coreos.com scrapeconfigs.monitoring.coreos.com `
         servicemonitors.monitoring.coreos.com thanosrulers.monitoring.coreos.com `
+        cleanuppolicies.kyverno.io clustercleanuppolicies.kyverno.io clusterephemeralreports.reports.kyverno.io clusterpolicies.kyverno.io `
+        clusterpolicyreports.wgpolicyk8s.io deletingpolicies.policies.kyverno.io ephemeralreports.reports.kyverno.io generatingpolicies.policies.kyverno.io `
+        globalcontextentries.kyverno.io imagevalidatingpolicies.policies.kyverno.io mutatingpolicies.policies.kyverno.io `
+        namespaceddeletingpolicies.policies.kyverno.io namespacedgeneratingpolicies.policies.kyverno.io namespacedimagevalidatingpolicies.policies.kyverno.io `
+        namespacedmutatingpolicies.policies.kyverno.io namespacedvalidatingpolicies.policies.kyverno.io policies.kyverno.io `
+        policyexceptions.kyverno.io policyexceptions.policies.kyverno.io policyreports.wgpolicyk8s.io updaterequests.kyverno.io validatingpolicies.policies.kyverno.io `
         --ignore-not-found=true --wait=true --timeout=180s
     Invoke-External kubectl delete -n argocd -f $manifest --ignore-not-found=true --wait=false
     Invoke-External kubectl delete namespace argocd --ignore-not-found=true --wait=true --timeout=180s

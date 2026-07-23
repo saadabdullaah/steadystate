@@ -15,12 +15,14 @@ export XDG_CACHE_HOME="$TOOLS_ROOT/cache/xdg/$PLATFORM"
 FORCE=false
 BASE_ONLY=false
 SKIP_LINT=false
+INCLUDE_SECURITY=false
 
 for argument in "$@"; do
   case "$argument" in
     --force) FORCE=true ;;
     --base-only) BASE_ONLY=true ;;
     --skip-lint) SKIP_LINT=true ;;
+    --include-security) INCLUDE_SECURITY=true ;;
     *) echo "Unknown argument: $argument" >&2; exit 2 ;;
   esac
 done
@@ -88,6 +90,18 @@ download_verified \
 mkdir -p "$TOOLS_ROOT/k6-extract"
 tar -xzf "$k6_archive" -C "$TOOLS_ROOT/k6-extract"
 cp "$TOOLS_ROOT/k6-extract/k6-v${K6_VERSION}-linux-amd64/k6" "$BIN_DIR/k6"
+
+if [[ "$BASE_ONLY" == false || "$INCLUDE_SECURITY" == true ]]; then
+  kyverno_archive="$DOWNLOAD_DIR/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz"
+  download_verified \
+    "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz" \
+    "$kyverno_archive" \
+    "$KYVERNO_CLI_LINUX_AMD64_SHA256"
+  mkdir -p "$TOOLS_ROOT/kyverno-extract/linux-amd64"
+  tar -xzf "$kyverno_archive" -C "$TOOLS_ROOT/kyverno-extract/linux-amd64"
+  cp "$TOOLS_ROOT/kyverno-extract/linux-amd64/kyverno" "$BIN_DIR/kyverno"
+  chmod +x "$BIN_DIR/kyverno"
+fi
 
 download_verified \
   "https://github.com/kubernetes-sigs/kubebuilder/releases/download/v${KUBEBUILDER_VERSION}/kubebuilder_linux_amd64" \

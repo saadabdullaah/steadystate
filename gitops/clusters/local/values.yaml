@@ -9,3 +9,4 @@ lokiChartVersion: 18.5.1
 alloyChartVersion: 1.10.1
 tempoChartVersion: 1.24.4
 otelCollectorChartVersion: 0.165.0
+kyvernoChartVersion: 3.8.2

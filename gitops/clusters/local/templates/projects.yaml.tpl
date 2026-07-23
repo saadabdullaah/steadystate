@@ -34,6 +34,7 @@ spec:
     - https://grafana-community.github.io/helm-charts
     - https://grafana.github.io/helm-charts
     - https://open-telemetry.github.io/opentelemetry-helm-charts
+    - https://kyverno.github.io/kyverno/
   destinations:
     - server: https://kubernetes.default.svc
       namespace: argocd
@@ -43,6 +44,8 @@ spec:
       namespace: monitoring
     - server: https://kubernetes.default.svc
       namespace: argo-rollouts
+    - server: https://kubernetes.default.svc
+      namespace: kyverno
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
@@ -52,6 +55,10 @@ spec:
       kind: ClusterRole
     - group: rbac.authorization.k8s.io
       kind: ClusterRoleBinding
+    - group: policies.kyverno.io
+      kind: ImageValidatingPolicy
+    - group: policies.kyverno.io
+      kind: ValidatingPolicy
   namespaceResourceWhitelist:
     - group: ""
       kind: ConfigMap
