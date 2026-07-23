@@ -1,0 +1,4 @@
+creation_rules:
+  - path_regex: .*grafana-admin.*\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age: age19nqqe30cjcegfagf63ccamqd9a2qw9vv6xavscjcldsz6u2mpf3sm6qs0p

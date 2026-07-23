@@ -187,6 +187,7 @@ func (r *TeamReconciler) reconcileNetworkPolicy(ctx context.Context, team *platf
 		resources.TeamAllowDNSNetworkPolicy(team),
 		resources.TeamAllowEnvoyNetworkPolicy(team),
 		resources.TeamAllowMonitoringNetworkPolicy(team),
+		resources.TeamAllowApplicationsNetworkPolicy(team),
 	} {
 		current := &networkingv1.NetworkPolicy{}
 		changed, err := r.reconcileManagedObject(ctx, team, "NetworkPolicy", current, desired, func() {

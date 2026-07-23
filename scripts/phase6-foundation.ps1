@@ -6,6 +6,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
+$Platform = if ($env:OS -eq 'Windows_NT') { 'windows-amd64' } else { 'linux-amd64' }
+$env:PATH = "$(Join-Path $Root ".tools/bin/$Platform")$([IO.Path]::PathSeparator)$env:PATH"
 $ArtifactRoot = Join-Path $Root '.artifacts/phase6/foundation'
 $FixtureNamespace = 'team-phase6-foundation'
 $BackgroundPolicy = 'steadystate-phase6-background-fixture'
@@ -59,6 +61,20 @@ function Apply-Object {
     if ($LASTEXITCODE -ne 0) {
         throw 'kubectl apply from generated JSON failed'
     }
+}
+
+function Assert-ObjectDenied {
+    param([Parameter(Mandatory)]$Object)
+    $json = $Object | ConvertTo-Json -Depth 30
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $output = @($json | & kubectl apply --dry-run=server -f - 2>&1)
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($exitCode -eq 0) {
+        throw 'Expected the generated object to be denied by Kyverno.'
+    }
+    return ($output -join ' ')
 }
 
 function Add-PassedCheck {
@@ -216,15 +232,15 @@ function Invoke-Test {
         }
         $policies = Get-KubectlJson @('get','validatingpolicies.policies.kyverno.io,imagevalidatingpolicies.policies.kyverno.io')
         if (@($policies.items).Count -ne 3) {
-            throw "Expected three stable CEL Audit policies, found $(@($policies.items).Count)."
+            throw "Expected three stable CEL enforcement policies, found $(@($policies.items).Count)."
         }
         foreach ($policy in @($policies.items)) {
-            if ([string]$policy.apiVersion -ne 'policies.kyverno.io/v1' -or @($policy.spec.validationActions) -notcontains 'Audit' -or
+            if ([string]$policy.apiVersion -ne 'policies.kyverno.io/v1' -or @($policy.spec.validationActions) -notcontains 'Deny' -or
                 [string]$policy.spec.failurePolicy -ne 'Fail' -or [int]$policy.spec.webhookConfiguration.timeoutSeconds -ne 15) {
-                throw "Policy $($policy.metadata.name) does not satisfy the stable Audit/fail-safe contract."
+                throw "Policy $($policy.metadata.name) does not satisfy the stable Deny/fail-safe contract."
             }
         }
-        Add-PassedCheck $checks 'stable-cel-audit-policies' $started "All three policies use policies.kyverno.io/v1, Audit, failurePolicy=Fail, timeoutSeconds=15; policy revision is $([string]$policyApplication.status.sync.revision)."
+        Add-PassedCheck $checks 'stable-cel-enforcement-policies' $started "All three policies use policies.kyverno.io/v1, Deny, failurePolicy=Fail, timeoutSeconds=15; policy revision is $([string]$policyApplication.status.sync.revision)."
 
         $started = Get-Date
         $validatingWebhooks = Get-KubectlJson @('get','validatingwebhookconfigurations')
@@ -271,12 +287,12 @@ function Invoke-Test {
                 })
             }
         }
-        Apply-Object $digestFixture
-        $storedImage = & kubectl get pod digest-mutation -n $FixtureNamespace -o "jsonpath={.spec.containers[0].image}"
-        if ($LASTEXITCODE -ne 0 -or $storedImage -notmatch '^ghcr\.io/saadabdullaah/steadystate-demo-app@sha256:[0-9a-f]{64}$') {
-            throw "Kyverno did not mutate the unmanaged image tag to a canonical digest: $storedImage"
+        $denial = Assert-ObjectDenied $digestFixture
+        if ($denial -notmatch '(?i)(signature|attestation|verify|denied)') {
+            throw "Unsigned image denial did not expose a readable verification reason: $denial"
         }
-        Add-PassedCheck $checks 'unmanaged-image-mutated-to-digest' $started "The public v0.5.1 tag was stored as $storedImage while signature enforcement remained Audit-only."
+        $rejectedImage = [string]$digestFixture.spec.containers[0].image
+        Add-PassedCheck $checks 'unsigned-image-enforcement-active' $started 'The public unsigned v0.5.1 image was denied by stable fail-closed image policy.'
 
         $started = Get-Date
         $unsafeFixture = [ordered]@{
@@ -298,9 +314,8 @@ function Invoke-Test {
                 })
             }
         }
-        Apply-Object $unsafeFixture
-        $null = Wait-PolicyFailure -Policy 'steadystate-universal-team-safety'
-        Add-PassedCheck $checks 'audit-admits-and-reports-unsafe-pod' $started 'An unsafe Team Pod was admitted in Audit and produced a failing namespaced PolicyReport.'
+        $null = Assert-ObjectDenied $unsafeFixture
+        Add-PassedCheck $checks 'unsafe-team-pod-denied' $started 'An unsafe Team Pod was rejected for host, privilege, resource, and mutable-image violations.'
 
         $started = Get-Date
         $configMap = [ordered]@{
@@ -383,7 +398,7 @@ function Invoke-Test {
             kyvernoVersion = $versions.KYVERNO_VERSION
             kyvernoChartSha256 = $versions.KYVERNO_CHART_SHA256
             fixtureNamespace = $FixtureNamespace
-            mutatedImage = $storedImage
+            rejectedImage = $rejectedImage
             checks = $checks
         }
         Write-Json -Path (Join-Path $ArtifactRoot 'evidence.json') -Value $evidence

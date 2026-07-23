@@ -181,6 +181,13 @@ func TestTeamNetworkPolicies(t *testing.T) {
 	if len(monitoringRule.Ports) != 1 || monitoringRule.Ports[0].Port == nil || monitoringRule.Ports[0].Port.StrVal != "http" || monitoringRule.Ports[0].Protocol == nil || *monitoringRule.Ports[0].Protocol != corev1.ProtocolTCP {
 		t.Fatalf("monitoring policy must permit only the named TCP http port: %#v", monitoring.Spec)
 	}
+
+	applications := TeamAllowApplicationsNetworkPolicy(team)
+	if applications.Spec.PodSelector.MatchLabels[NetworkIsolationLabelKey] != "false" ||
+		applications.Spec.Ingress[0].From[0].PodSelector.MatchLabels[NetworkIsolationLabelKey] != "false" ||
+		applications.Spec.Egress[0].To[0].PodSelector.MatchLabels[NetworkIsolationLabelKey] != "false" {
+		t.Fatalf("same-Team communication must exclude isolated Applications: %#v", applications.Spec)
+	}
 }
 
 func TestTeamBuildersAreByteStableAndIndependent(t *testing.T) {
@@ -197,6 +204,7 @@ func TestTeamBuildersAreByteStableAndIndependent(t *testing.T) {
 		func() any { return TeamAllowDNSNetworkPolicy(team) },
 		func() any { return TeamAllowEnvoyNetworkPolicy(team) },
 		func() any { return TeamAllowMonitoringNetworkPolicy(team) },
+		func() any { return TeamAllowApplicationsNetworkPolicy(team) },
 	}
 	for _, build := range builders {
 		first, err := json.Marshal(build())

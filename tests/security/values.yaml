@@ -1,0 +1,8 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Values
+metadata:
+  name: steadystate-security-fixtures
+namespaceSelector:
+  - name: team-payments
+    labels:
+      steadystate.dev/team: payments

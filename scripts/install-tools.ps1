@@ -56,10 +56,13 @@ function Get-VerifiedFile {
     }
 
     Write-Host "Downloading $Url"
+    if (Test-Path -LiteralPath $Destination) {
+        Remove-Item -LiteralPath $Destination -Force
+    }
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     if (-not $curl) { $curl = Get-Command curl -ErrorAction SilentlyContinue }
     if ($curl) {
-        & $curl.Source --location --fail --retry 3 --continue-at - --output $Destination $Url
+        & $curl.Source --location --fail --retry 3 --output $Destination $Url
         if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
     } else {
         Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Destination
@@ -155,6 +158,23 @@ if ($IsWindowsHost) {
         New-Item -ItemType Directory -Force -Path $kyvernoExtract | Out-Null
         Expand-Archive -LiteralPath $kyvernoArchive -DestinationPath $kyvernoExtract -Force
         Copy-Item -Force (Join-Path $kyvernoExtract 'kyverno.exe') (Join-Path $BinDir 'kyverno.exe')
+
+        Install-DirectBinary -Name 'cosign' -Url "https://github.com/sigstore/cosign/releases/download/v$($v.COSIGN_VERSION)/cosign-windows-amd64.exe" -ExpectedSha256 $v.COSIGN_WINDOWS_AMD64_SHA256
+        $syftArchive = Join-Path $DownloadDir "syft_$($v.SYFT_VERSION)_windows_amd64.zip"
+        Get-VerifiedFile -Url "https://github.com/anchore/syft/releases/download/v$($v.SYFT_VERSION)/syft_$($v.SYFT_VERSION)_windows_amd64.zip" -Destination $syftArchive -ExpectedSha256 $v.SYFT_WINDOWS_AMD64_SHA256
+        $syftExtract = Join-Path $ToolsRoot 'syft-extract/windows-amd64'
+        New-Item -ItemType Directory -Force -Path $syftExtract | Out-Null
+        Expand-Archive -LiteralPath $syftArchive -DestinationPath $syftExtract -Force
+        Copy-Item -Force (Join-Path $syftExtract 'syft.exe') (Join-Path $BinDir 'syft.exe')
+
+        Install-DirectBinary -Name 'sops' -Url "https://github.com/getsops/sops/releases/download/v$($v.SOPS_VERSION)/sops-v$($v.SOPS_VERSION).amd64.exe" -ExpectedSha256 $v.SOPS_WINDOWS_AMD64_SHA256
+        $ageArchive = Join-Path $DownloadDir "age-v$($v.AGE_VERSION)-windows-amd64.zip"
+        Get-VerifiedFile -Url "https://github.com/FiloSottile/age/releases/download/v$($v.AGE_VERSION)/age-v$($v.AGE_VERSION)-windows-amd64.zip" -Destination $ageArchive -ExpectedSha256 $v.AGE_WINDOWS_AMD64_SHA256
+        $ageExtract = Join-Path $ToolsRoot 'age-extract/windows-amd64'
+        New-Item -ItemType Directory -Force -Path $ageExtract | Out-Null
+        Expand-Archive -LiteralPath $ageArchive -DestinationPath $ageExtract -Force
+        Copy-Item -Force (Join-Path $ageExtract "age/age.exe") (Join-Path $BinDir 'age.exe')
+        Copy-Item -Force (Join-Path $ageExtract "age/age-keygen.exe") (Join-Path $BinDir 'age-keygen.exe')
     }
 } else {
     $goArchive = Join-Path $DownloadDir "go$($v.GO_VERSION).linux-amd64.tar.gz"
@@ -199,6 +219,25 @@ if ($IsWindowsHost) {
         & tar -xzf $kyvernoArchive -C $kyvernoExtract
         Copy-Item -Force (Join-Path $kyvernoExtract 'kyverno') (Join-Path $BinDir 'kyverno')
         & chmod +x (Join-Path $BinDir 'kyverno')
+
+        Install-DirectBinary -Name 'cosign' -Url "https://github.com/sigstore/cosign/releases/download/v$($v.COSIGN_VERSION)/cosign-linux-amd64" -ExpectedSha256 $v.COSIGN_LINUX_AMD64_SHA256
+        $syftArchive = Join-Path $DownloadDir "syft_$($v.SYFT_VERSION)_linux_amd64.tar.gz"
+        Get-VerifiedFile -Url "https://github.com/anchore/syft/releases/download/v$($v.SYFT_VERSION)/syft_$($v.SYFT_VERSION)_linux_amd64.tar.gz" -Destination $syftArchive -ExpectedSha256 $v.SYFT_LINUX_AMD64_SHA256
+        $syftExtract = Join-Path $ToolsRoot 'syft-extract/linux-amd64'
+        New-Item -ItemType Directory -Force -Path $syftExtract | Out-Null
+        & tar -xzf $syftArchive -C $syftExtract
+        Copy-Item -Force (Join-Path $syftExtract 'syft') (Join-Path $BinDir 'syft')
+        & chmod +x (Join-Path $BinDir 'cosign') (Join-Path $BinDir 'syft')
+
+        Install-DirectBinary -Name 'sops' -Url "https://github.com/getsops/sops/releases/download/v$($v.SOPS_VERSION)/sops-v$($v.SOPS_VERSION).linux.amd64" -ExpectedSha256 $v.SOPS_LINUX_AMD64_SHA256
+        $ageArchive = Join-Path $DownloadDir "age-v$($v.AGE_VERSION)-linux-amd64.tar.gz"
+        Get-VerifiedFile -Url "https://github.com/FiloSottile/age/releases/download/v$($v.AGE_VERSION)/age-v$($v.AGE_VERSION)-linux-amd64.tar.gz" -Destination $ageArchive -ExpectedSha256 $v.AGE_LINUX_AMD64_SHA256
+        $ageExtract = Join-Path $ToolsRoot 'age-extract/linux-amd64'
+        New-Item -ItemType Directory -Force -Path $ageExtract | Out-Null
+        & tar -xzf $ageArchive -C $ageExtract
+        Copy-Item -Force (Join-Path $ageExtract 'age/age') (Join-Path $BinDir 'age')
+        Copy-Item -Force (Join-Path $ageExtract 'age/age-keygen') (Join-Path $BinDir 'age-keygen')
+        & chmod +x (Join-Path $BinDir 'age') (Join-Path $BinDir 'age-keygen')
     }
 }
 

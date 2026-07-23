@@ -247,6 +247,15 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    # Kyverno injects the serving CA into its conversion webhook CRDs at
+    # runtime. The certificate is controller-owned and must not cause Argo
+    # self-heal loops.
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jqPathExpressions:
+        - .spec.conversion.webhook.clientConfig.caBundle
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application

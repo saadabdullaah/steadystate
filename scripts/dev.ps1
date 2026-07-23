@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -13,6 +13,8 @@ param(
     [string]$AcceptanceStage = $(if ($env:PHASE4_ACCEPTANCE_STAGE) { $env:PHASE4_ACCEPTANCE_STAGE } else { 'Rollback' }),
     [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
     [string]$Phase5AcceptanceStage = $(if ($env:PHASE5_ACCEPTANCE_STAGE) { $env:PHASE5_ACCEPTANCE_STAGE } else { 'Test' }),
+    [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
+    [string]$Phase6AcceptanceStage = $(if ($env:PHASE6_ACCEPTANCE_STAGE) { $env:PHASE6_ACCEPTANCE_STAGE } else { 'Test' }),
     [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' })
 )
 
@@ -134,16 +136,16 @@ function Invoke-Envtest {
     $drive = $Matches[1].ToLowerInvariant()
     $relativePath = $Matches[2].Replace('\', '/')
     $wslRoot = "/mnt/$drive/$relativePath"
-    $assets = (& wsl.exe -d Ubuntu -- "$wslRoot/.tools/bin/linux-amd64/setup-envtest" use $v.ENVTEST_K8S_VERSION -p path).Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $assets) { throw 'Failed to provision envtest assets in WSL Ubuntu.' }
-    & wsl.exe -d Ubuntu -- env `
+    $assets = (& wsl.exe -d Ubuntu -- timeout --signal=TERM --kill-after=30s 5m "$wslRoot/.tools/bin/linux-amd64/setup-envtest" use $v.ENVTEST_K8S_VERSION -p path).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $assets) { throw 'Failed to provision envtest assets in WSL Ubuntu within five minutes.' }
+    & wsl.exe -d Ubuntu -- timeout --signal=TERM --kill-after=30s 10m env `
         "KUBEBUILDER_ASSETS=$assets" `
         "GOCACHE=$wslRoot/.tools/cache/go-build/linux-amd64" `
         "GOMODCACHE=$wslRoot/.tools/cache/go-mod/linux-amd64" `
         "GOPATH=$wslRoot/.tools/gopath/linux-amd64" `
         "XDG_CACHE_HOME=$wslRoot/.tools/cache/xdg/linux-amd64" `
         "$wslRoot/.tools/go/linux-amd64/bin/go" -C $wslRoot test -tags=envtest ./internal/controller/...
-    if ($LASTEXITCODE -ne 0) { throw "WSL envtest exited with code $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) { throw "WSL envtest failed or exceeded its ten-minute bound (exit $LASTEXITCODE)" }
 }
 
 function Invoke-BuildImages {
@@ -338,6 +340,20 @@ function Invoke-CheckVersions {
             throw "Kyverno CLI version mismatch: expected $($v.KYVERNO_VERSION), got $kyvernoVersion"
         }
         Write-Host "[PASS] kyverno $($v.KYVERNO_VERSION)"
+    }
+    foreach ($securityTool in @(
+        @{Name='cosign'; Expected=$v.COSIGN_VERSION; Arguments=@('version')},
+        @{Name='syft'; Expected=$v.SYFT_VERSION; Arguments=@('version')},
+        @{Name='sops'; Expected=$v.SOPS_VERSION; Arguments=@('--version')},
+        @{Name='age'; Expected=$v.AGE_VERSION; Arguments=@('--version')}
+    )) {
+        if (-not (Test-CommandAvailable $securityTool.Name)) { continue }
+        $toolName = [string]$securityTool.Name
+        $reported = ((& $toolName @($securityTool.Arguments)) -join "`n")
+        if ($LASTEXITCODE -ne 0 -or $reported -notmatch [regex]::Escape($securityTool.Expected)) {
+            throw "$($securityTool.Name) version mismatch: expected $($securityTool.Expected), got $reported"
+        }
+        Write-Host "[PASS] $($securityTool.Name) $($securityTool.Expected)"
     }
     if (-not $IsWindowsHost -and (Test-CommandAvailable 'kubebuilder')) {
         $kubebuilderVersion = ((& kubebuilder version) -join "`n")
@@ -573,6 +589,21 @@ try {
             $arguments = @{Stage=$Phase5AcceptanceStage;HttpPort=$HttpPort}
             if ($EvidencePath) { $arguments.EvidencePath = $EvidencePath }
             & (Join-Path $PSScriptRoot 'phase5-acceptance.ps1') @arguments
+        }
+        'decrypt-secrets' { & (Join-Path $PSScriptRoot 'secrets.ps1') -Action Decrypt }
+        'verify-secrets' { & (Join-Path $PSScriptRoot 'secrets.ps1') -Action Verify }
+        'rotate-secrets' { & (Join-Path $PSScriptRoot 'secrets.ps1') -Action Rotate }
+        'verify-security' {
+            Invoke-GitOpsCommand -Mode Verify
+            & (Join-Path $PSScriptRoot 'security-static.ps1')
+        }
+        'test-security' {
+            Assert-Cluster
+            & (Join-Path $PSScriptRoot 'phase6-acceptance.ps1') -Stage Test -HttpPort $HttpPort
+        }
+        'phase6-acceptance' {
+            Assert-Cluster
+            & (Join-Path $PSScriptRoot 'phase6-acceptance.ps1') -Stage $Phase6AcceptanceStage -HttpPort $HttpPort
         }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }

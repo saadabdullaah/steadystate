@@ -75,14 +75,24 @@ func TestGeneratedResources(t *testing.T) {
 	if deployment.Spec.Template.Labels[VersionLabelKey] != "v1.2.3" {
 		t.Fatalf("Deployment template lacks version identity: %#v", deployment.Spec.Template.Labels)
 	}
+	if deployment.Spec.Template.Labels[WorkloadKindLabelKey] != "application" ||
+		deployment.Spec.Template.Labels[RequireSignedImageLabelKey] != "false" ||
+		deployment.Spec.Template.Labels[NetworkIsolationLabelKey] != "false" {
+		t.Fatalf("Deployment template lacks deterministic security labels: %#v", deployment.Spec.Template.Labels)
+	}
 	if deployment.Spec.Template.Labels[LogsLabelKey] != "false" || deployment.Spec.Template.Labels[TracesLabelKey] != "false" || len(container.Env) != 0 {
 		t.Fatalf("disabled telemetry mutated the workload: labels=%#v env=%#v", deployment.Spec.Template.Labels, container.Env)
 	}
 	app.Spec.Observability.Logs = true
 	app.Spec.Observability.Traces = true
+	app.Spec.Security.RequireSignedImage = true
+	app.Spec.Security.NetworkIsolation = true
 	traced := Deployment(app)
 	if traced.Spec.Template.Labels[LogsLabelKey] != "true" || traced.Spec.Template.Labels[TracesLabelKey] != "true" || len(traced.Spec.Template.Spec.Containers[0].Env) != 2 {
 		t.Fatalf("enabled telemetry contract is incomplete: %#v", traced.Spec.Template)
+	}
+	if traced.Spec.Template.Labels[RequireSignedImageLabelKey] != "true" || traced.Spec.Template.Labels[NetworkIsolationLabelKey] != "true" {
+		t.Fatalf("enabled security contract is incomplete: %#v", traced.Spec.Template.Labels)
 	}
 	policy := OTelEgressNetworkPolicy(app)
 	if policy.Name != "payments-otel-egress" || policy.Spec.Egress[0].Ports[0].Port.IntVal != 4317 {

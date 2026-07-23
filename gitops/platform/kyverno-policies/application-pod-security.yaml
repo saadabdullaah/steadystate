@@ -6,7 +6,7 @@ metadata:
     app.kubernetes.io/part-of: steadystate
 spec:
   validationActions:
-    - Audit
+    - Deny
   failurePolicy: Fail
   webhookConfiguration:
     timeoutSeconds: 15

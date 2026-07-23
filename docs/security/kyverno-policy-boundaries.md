@@ -5,13 +5,12 @@ Phase 6 installs Kyverno `1.18.2` through chart `3.8.2` on Kubernetes
 `policies.kyverno.io/v1` `ValidatingPolicy` and `ImageValidatingPolicy`
 APIs. Legacy `ClusterPolicy` resources are not installed.
 
-## Audit foundation
+## Enforced foundation
 
-All foundation policies use `validationActions: Audit`,
+All validated policies use `validationActions: Deny`,
 `failurePolicy: Fail`, a 15-second webhook timeout, and background
-evaluation. Audit lets the platform measure current compliance before a later
-checkpoint deliberately switches validated rules to Deny. Audit is not
-described as enforcement.
+evaluation. Admission fails closed; background reports retain visibility for
+existing resources.
 
 Policies select namespaces carrying the operator-owned
 `steadystate.dev/team` label. This immutable administrative boundary excludes
@@ -27,10 +26,9 @@ The tiers are:
   requesting verification are resolved to digests and checked against the exact
   main-branch demo-release OIDC identity.
 
-The image policy deliberately excludes currently managed Applications until
-they set `steadystate.dev/require-signed-image=true`. This prevents Audit
-rollout from mutating workloads before the Phase 6 controller provenance
-contract is activated.
+The image policy excludes a managed Application only when its operator-owned
+label explicitly says `steadystate.dev/require-signed-image=false`. Status then
+reports `SignatureVerificationNotRequested`; it never claims verification.
 
 ## CloudNativePG boundary
 

@@ -6,7 +6,7 @@ metadata:
     app.kubernetes.io/part-of: steadystate
 spec:
   validationActions:
-    - Audit
+    - Deny
   failurePolicy: Fail
   webhookConfiguration:
     timeoutSeconds: 15
@@ -55,9 +55,18 @@ spec:
               issuer: https://token.actions.githubusercontent.com
         ctlog:
           url: https://rekor.sigstore.dev
+  attestations:
+    - name: spdxSBOM
+      intoto:
+        type: https://spdx.dev/Document
   validations:
     - expression: >-
         images.containers.map(image,
           verifyImageSignatures(image, [attestors.steadystateDelivery])
         ).all(results, results > 0)
       message: Images must be signed by the SteadyState main-branch demo release workflow.
+    - expression: >-
+        images.containers.map(image,
+          verifyAttestationSignatures(image, attestations.spdxSBOM, [attestors.steadystateDelivery])
+        ).all(results, results > 0)
+      message: Images must carry a verified SPDX SBOM attestation from the SteadyState main-branch demo release workflow.

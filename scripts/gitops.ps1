@@ -254,6 +254,14 @@ function Invoke-Deploy {
     Remove-Dex
     Assert-DexAbsent
     Invoke-External kubectl apply --server-side --force-conflicts -k $PlatformPath
+    $localAgeKey = Join-Path $Root '.artifacts/secrets/steadystate.agekey'
+    if ($env:SOPS_AGE_KEY -or (Test-Path -LiteralPath $localAgeKey -PathType Leaf)) {
+        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action Apply
+        if ($LASTEXITCODE -ne 0) { throw 'Encrypted platform secret bootstrap failed.' }
+    } else {
+        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyEphemeral
+        if ($LASTEXITCODE -ne 0) { throw 'Ephemeral platform secret bootstrap failed.' }
+    }
     Invoke-External kubectl rollout restart deployment/argocd-server -n argocd
     Wait-ArgoWorkloads
 

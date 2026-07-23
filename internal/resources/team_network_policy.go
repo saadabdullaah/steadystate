@@ -85,3 +85,28 @@ func TeamAllowMonitoringNetworkPolicy(team *platformv1alpha1.Team) *networkingv1
 		},
 	}
 }
+
+// TeamAllowApplicationsNetworkPolicy permits only non-isolated SteadyState
+// Applications to communicate with non-isolated Applications in the same Team.
+func TeamAllowApplicationsNetworkPolicy(team *platformv1alpha1.Team) *networkingv1.NetworkPolicy {
+	selector := metav1.LabelSelector{MatchLabels: map[string]string{
+		WorkloadKindLabelKey:     "application",
+		NetworkIsolationLabelKey: "false",
+	}}
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: teamObjectMeta(team, AllowTeamApplicationsPolicyName),
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: selector,
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+				networkingv1.PolicyTypeEgress,
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{{
+				From: []networkingv1.NetworkPolicyPeer{{PodSelector: &selector}},
+			}},
+			Egress: []networkingv1.NetworkPolicyEgressRule{{
+				To: []networkingv1.NetworkPolicyPeer{{PodSelector: &selector}},
+			}},
+		},
+	}
+}

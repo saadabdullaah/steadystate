@@ -20,6 +20,9 @@ func Deployment(application *platformv1alpha1.Application) *appsv1.Deployment {
 	templateLabels[VersionLabelKey] = application.Spec.Image.Tag
 	templateLabels[LogsLabelKey] = strconv.FormatBool(application.Spec.Observability.Logs)
 	templateLabels[TracesLabelKey] = strconv.FormatBool(application.Spec.Observability.Traces)
+	templateLabels[WorkloadKindLabelKey] = "application"
+	templateLabels[RequireSignedImageLabelKey] = strconv.FormatBool(application.Spec.Security.RequireSignedImage)
+	templateLabels[NetworkIsolationLabelKey] = strconv.FormatBool(application.Spec.Security.NetworkIsolation)
 	environment := []corev1.EnvVar{}
 	if application.Spec.Observability.Traces {
 		environment = append(environment,

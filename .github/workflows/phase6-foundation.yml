@@ -26,6 +26,8 @@ jobs:
     name: kyverno-kubernetes-1-35
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    env:
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -51,7 +53,7 @@ jobs:
         shell: pwsh
         run: ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA
 
-      - name: Verify Kyverno compatibility and Audit behavior
+      - name: Verify Kyverno compatibility and enforcement behavior
         id: foundation
         timeout-minutes: 12
         shell: pwsh

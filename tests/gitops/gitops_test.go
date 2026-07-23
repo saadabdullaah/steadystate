@@ -398,7 +398,9 @@ func TestProgressiveDeliveryValuesAreFrozenAndMinimal(t *testing.T) {
 		"nodeExporter:\n  enabled: false",
 		"prometheus-node-exporter:\n  enabled: false",
 		"defaultRules:\n  create: false",
-		"GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: \"true\"",
+		"existingSecret: steadystate-grafana-admin",
+		"userKey: admin-user",
+		"passwordKey: admin-password",
 		"GF_PLUGINS_PREINSTALL_DISABLED: \"true\"",
 		"cpu: 500m",
 		"defaultDatasourceEnabled: false",
@@ -422,7 +424,7 @@ func TestProgressiveDeliveryValuesAreFrozenAndMinimal(t *testing.T) {
 	}
 }
 
-func TestKyvernoAuditFoundationContracts(t *testing.T) {
+func TestKyvernoEnforcementContracts(t *testing.T) {
 	root := repositoryRoot(t)
 	values := string(readFile(t, filepath.Join(root, "gitops", "platform", "kyverno", "values.yaml")))
 	for _, token := range []string{
@@ -457,8 +459,8 @@ func TestKyvernoAuditFoundationContracts(t *testing.T) {
 			t.Fatal("legacy ClusterPolicy resources are forbidden")
 		}
 		actions, found, err := unstructured.NestedStringSlice(object, "spec", "validationActions")
-		if err != nil || !found || len(actions) != 1 || actions[0] != "Audit" {
-			t.Errorf("policy %s must remain in Audit during the foundation checkpoint: %#v", name, actions)
+		if err != nil || !found || len(actions) != 1 || actions[0] != "Deny" {
+			t.Errorf("policy %s must enforce Deny: %#v", name, actions)
 		}
 		assertString(t, object, "Fail", "spec", "failurePolicy")
 		timeout, found, err := unstructured.NestedFieldNoCopy(object, "spec", "webhookConfiguration", "timeoutSeconds")
@@ -498,7 +500,7 @@ func TestKyvernoAuditFoundationContracts(t *testing.T) {
 	}
 	rendered := string(run(t, root, "kustomize", "build", policyPath))
 	if strings.Contains(rendered, "kind: PolicyException") || strings.Contains(rendered, "kind: ClusterPolicy") {
-		t.Fatal("the Audit foundation must not install legacy policies or broad policy exceptions")
+		t.Fatal("the enforcement foundation must not install legacy policies or broad policy exceptions")
 	}
 	boundaries := string(readFile(t, filepath.Join(root, "docs", "security", "kyverno-policy-boundaries.md")))
 	for _, token := range []string{
@@ -666,10 +668,10 @@ func TestPhase6FoundationWorkflowContracts(t *testing.T) {
 	for _, check := range []string{
 		"pinned-kyverno-three-controllers-ready",
 		"cleanup-reports-server-and-legacy-policies-absent",
-		"stable-cel-audit-policies",
+		"stable-cel-enforcement-policies",
 		"admission-webhooks-ready",
-		"unmanaged-image-mutated-to-digest",
-		"audit-admits-and-reports-unsafe-pod",
+		"unsigned-image-enforcement-active",
+		"unsafe-team-pod-denied",
 		"background-scan-reports-existing-resource",
 		"controller-restart-preserves-admission-and-reporting",
 	} {
@@ -682,7 +684,7 @@ func TestPhase6FoundationWorkflowContracts(t *testing.T) {
 		"KYVERNO_VERSION -ne '1.18.2'",
 		"f4fc787cf1d6781eefb9e9b45837edcddcfae984c872888289914e97207cc5de",
 		"policies.kyverno.io/v1",
-		"validationActions) -notcontains 'Audit'",
+		"validationActions) -notcontains 'Deny'",
 		"clusterpolicies.kyverno.io",
 		"kyverno-cleanup-controller",
 		"kyverno-reports-server",
@@ -690,6 +692,55 @@ func TestPhase6FoundationWorkflowContracts(t *testing.T) {
 		if !strings.Contains(script, token) {
 			t.Errorf("Phase 6 compatibility script is missing %q", token)
 		}
+	}
+}
+
+func TestPhase6AcceptanceAndSecretCustodyContracts(t *testing.T) {
+	t.Parallel()
+	root := repositoryRoot(t)
+	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase6.yml")))
+	script := string(readFile(t, filepath.Join(root, "scripts", "phase6-acceptance.ps1")))
+	for _, token := range []string{
+		"name: Phase 6 acceptance",
+		"timeout-minutes: 60",
+		"SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}",
+		"anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
+		"sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6",
+		"cosign attest --yes --type spdxjson",
+		"cosign verify-attestation --type spdxjson",
+		"phase6-acceptance-${{ github.sha }}",
+		".artifacts/phase6/acceptance/evidence.json",
+		".artifacts/diagnostics/",
+		"if-no-files-found: error",
+	} {
+		if !strings.Contains(workflow, token) {
+			t.Errorf("Phase 6 acceptance workflow is missing %q", token)
+		}
+	}
+	for _, check := range []string{
+		"unsigned-image-denied",
+		"wrong-workflow-identity-denied",
+		"unsafe-pods-and-cnpg-label-bypass-denied",
+		"signed-attested-image-admitted-and-digest-pinned",
+		"security-status-truth-and-active-tuple-preserved",
+		"sops-decrypts-without-tracked-plaintext",
+		"security-and-standard-profile-memory-budget",
+	} {
+		if !strings.Contains(script, check) {
+			t.Errorf("Phase 6 acceptance is missing check %q", check)
+		}
+	}
+
+	encrypted := string(readFile(t, filepath.Join(root, "gitops", "secrets", "grafana-admin.enc.yaml")))
+	if !strings.Contains(encrypted, "ENC[AES256_GCM") ||
+		!strings.Contains(encrypted, "recipient: age19nqqe30cjcegfagf63ccamqd9a2qw9vv6xavscjcldsz6u2mpf3sm6qs0p") ||
+		strings.Contains(encrypted, "admin-password: admin") {
+		t.Fatal("the Grafana administrator Secret is not encrypted to the frozen public age recipient")
+	}
+	sopsConfig := string(readFile(t, filepath.Join(root, ".sops.yaml")))
+	if !strings.Contains(sopsConfig, "encrypted_regex: ^(data|stringData)$") ||
+		!strings.Contains(sopsConfig, "age19nqqe30cjcegfagf63ccamqd9a2qw9vv6xavscjcldsz6u2mpf3sm6qs0p") {
+		t.Fatal("SOPS configuration does not preserve the encrypted Secret contract")
 	}
 }
 

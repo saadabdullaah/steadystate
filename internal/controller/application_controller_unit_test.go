@@ -146,6 +146,10 @@ func TestResolvePodImageDigestStates(t *testing.T) {
 	if result := resolvePodImageDigest([]corev1.Pod{first}, image); result.state != imageDigestResolved || result.digest != testImageDigest {
 		t.Fatalf("resolved result=%#v", result)
 	}
+	digestPinned := unitReadyPod("digest-pinned", "example.test/demo@"+testImageDigest, "containerd://"+testImageDigest)
+	if result := resolvePodImageDigest([]corev1.Pod{digestPinned}, image); result.state != imageDigestResolved || result.digest != testImageDigest {
+		t.Fatalf("Kyverno-mutated digest reference was not accepted: %#v", result)
+	}
 	malformed := unitReadyPod("malformed", image, "containerd://sha256:short")
 	if result := resolvePodImageDigest([]corev1.Pod{malformed}, image); result.state != imageDigestInvalid {
 		t.Fatalf("invalid result=%#v", result)
@@ -217,7 +221,7 @@ func TestApplicationRequestForPod(t *testing.T) {
 		t.Fatalf("foreign Pod mapped to Application: %#v", requests)
 	}
 }
-func TestUnsupportedStatusPreservesActiveVersion(t *testing.T) {
+func TestSecurityRejectionStatusPreservesActiveVersion(t *testing.T) {
 	t.Parallel()
 	app := unitApplication()
 	app.Status.ActiveVersion = "v0.0.9"
@@ -225,12 +229,12 @@ func TestUnsupportedStatusPreservesActiveVersion(t *testing.T) {
 	app.Status.ResolvedImageDigest = testImageDigest
 	app.Status.ResolvedGitRevision = testGitRevision
 	app.Spec.Security.NetworkIsolation = true
-	status := degradedStatus(app, "UnsupportedFeature", "network isolation is not available")
+	status := degradedStatus(app, "SecurityPolicyRejected", "workload admission was rejected")
 	if status.ActiveVersion != "v0.0.9" || status.ResolvedImageDigest != testImageDigest || status.ResolvedGitRevision != testGitRevision || status.CandidateVersion != "" || status.Phase != platformv1alpha1.ApplicationPhaseDegraded {
-		t.Fatalf("unexpected unsupported status: %#v", status)
+		t.Fatalf("unexpected security rejection status: %#v", status)
 	}
 	if condition := meta.FindStatusCondition(status.Conditions, conditionSecurityPolicyReady); condition == nil || condition.Status != metav1.ConditionFalse {
-		t.Fatalf("security condition does not expose unsupported capability: %#v", condition)
+		t.Fatalf("security condition does not expose admission rejection: %#v", condition)
 	}
 }
 

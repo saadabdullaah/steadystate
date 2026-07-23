@@ -76,7 +76,7 @@ var _ = Describe("Application reconciler", Ordered, func() {
 		Expect(configMap.Data["STEADYSTATE_APP_VERSION"]).To(Equal("v0.1.1"))
 	})
 
-	It("retains known-good children when a future capability is requested", func(ctx SpecContext) {
+	It("activates network isolation and updates the workload template", func(ctx SpecContext) {
 		app := validApplication("unsupported", namespace)
 		Expect(k8sClient.Create(ctx, app)).To(Succeed())
 		reconcile(ctx, k8sClient, app)
@@ -89,9 +89,6 @@ var _ = Describe("Application reconciler", Ordered, func() {
 		Expect(k8sClient.Get(ctx, key, service)).To(Succeed())
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app.Name + "-config", Namespace: namespace}, configMap)).To(Succeed())
 		Expect(k8sClient.Get(ctx, key, route)).To(Succeed())
-		resourceVersions := []string{deployment.ResourceVersion, service.ResourceVersion, configMap.ResourceVersion, route.ResourceVersion}
-		image := deployment.Spec.Template.Spec.Containers[0].Image
-
 		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
 		app.Spec.Image.Tag = "v9.9.9"
 		app.Spec.Security.NetworkIsolation = true
@@ -102,11 +99,10 @@ var _ = Describe("Application reconciler", Ordered, func() {
 		Expect(k8sClient.Get(ctx, key, service)).To(Succeed())
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app.Name + "-config", Namespace: namespace}, configMap)).To(Succeed())
 		Expect(k8sClient.Get(ctx, key, route)).To(Succeed())
-		Expect([]string{deployment.ResourceVersion, service.ResourceVersion, configMap.ResourceVersion, route.ResourceVersion}).To(Equal(resourceVersions))
-		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal(image))
+		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal(app.Spec.Image.Repository + ":v9.9.9"))
+		Expect(deployment.Spec.Template.Labels[resources.NetworkIsolationLabelKey]).To(Equal("true"))
 		Expect(k8sClient.Get(ctx, key, app)).To(Succeed())
-		Expect(app.Status.Phase).To(Equal(platformv1alpha1.ApplicationPhaseDegraded))
-		Expect(meta.FindStatusCondition(app.Status.Conditions, conditionReady).Reason).To(Equal("UnsupportedFeature"))
+		Expect(meta.FindStatusCondition(app.Status.Conditions, conditionReady).Reason).NotTo(Equal("UnsupportedFeature"))
 	})
 
 	It("rejects a disallowed repository and recovers after the Team allowlist changes", func(ctx SpecContext) {

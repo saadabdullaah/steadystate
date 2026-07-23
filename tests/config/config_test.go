@@ -118,6 +118,11 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 		"LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256",
 		"KYVERNO_CHART_SHA256",
 		"KYVERNO_CLI_LINUX_AMD64_SHA256", "KYVERNO_CLI_WINDOWS_AMD64_SHA256",
+		"COSIGN_VERSION", "SYFT_VERSION", "SOPS_VERSION", "AGE_VERSION",
+		"COSIGN_LINUX_AMD64_SHA256", "COSIGN_WINDOWS_AMD64_SHA256",
+		"SYFT_LINUX_AMD64_SHA256", "SYFT_WINDOWS_AMD64_SHA256",
+		"SOPS_LINUX_AMD64_SHA256", "SOPS_WINDOWS_AMD64_SHA256",
+		"AGE_LINUX_AMD64_SHA256", "AGE_WINDOWS_AMD64_SHA256",
 	} {
 		if !strings.Contains(text, key+"=") {
 			t.Errorf("versions.env is missing %s", key)
@@ -143,6 +148,26 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 		t.Error("Kyverno chart/application/checksum pins do not match the frozen Phase 6 baseline")
 	}
 	for _, key := range []string{"KYVERNO_CLI_LINUX_AMD64_SHA256", "KYVERNO_CLI_WINDOWS_AMD64_SHA256"} {
+		if !regexp.MustCompile(`(?m)^` + key + `=[0-9a-f]{64}\r?$`).MatchString(text) {
+			t.Errorf("%s must be a lowercase sha256 checksum", key)
+		}
+	}
+	for _, expected := range []string{
+		"COSIGN_VERSION=3.1.2",
+		"SYFT_VERSION=1.48.0",
+		"SOPS_VERSION=3.13.2",
+		"AGE_VERSION=1.3.1",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Errorf("security tool pin is missing %q", expected)
+		}
+	}
+	for _, key := range []string{
+		"COSIGN_LINUX_AMD64_SHA256", "COSIGN_WINDOWS_AMD64_SHA256",
+		"SYFT_LINUX_AMD64_SHA256", "SYFT_WINDOWS_AMD64_SHA256",
+		"SOPS_LINUX_AMD64_SHA256", "SOPS_WINDOWS_AMD64_SHA256",
+		"AGE_LINUX_AMD64_SHA256", "AGE_WINDOWS_AMD64_SHA256",
+	} {
 		if !regexp.MustCompile(`(?m)^` + key + `=[0-9a-f]{64}\r?$`).MatchString(text) {
 			t.Errorf("%s must be a lowercase sha256 checksum", key)
 		}
