@@ -167,15 +167,18 @@ if ($IsWindowsHost) {
         Expand-Archive -LiteralPath $syftArchive -DestinationPath $syftExtract -Force
         Copy-Item -Force (Join-Path $syftExtract 'syft.exe') (Join-Path $BinDir 'syft.exe')
 
-        Install-DirectBinary -Name 'sops' -Url "https://github.com/getsops/sops/releases/download/v$($v.SOPS_VERSION)/sops-v$($v.SOPS_VERSION).amd64.exe" -ExpectedSha256 $v.SOPS_WINDOWS_AMD64_SHA256
-        $ageArchive = Join-Path $DownloadDir "age-v$($v.AGE_VERSION)-windows-amd64.zip"
-        Get-VerifiedFile -Url "https://github.com/FiloSottile/age/releases/download/v$($v.AGE_VERSION)/age-v$($v.AGE_VERSION)-windows-amd64.zip" -Destination $ageArchive -ExpectedSha256 $v.AGE_WINDOWS_AMD64_SHA256
-        $ageExtract = Join-Path $ToolsRoot 'age-extract/windows-amd64'
-        New-Item -ItemType Directory -Force -Path $ageExtract | Out-Null
-        Expand-Archive -LiteralPath $ageArchive -DestinationPath $ageExtract -Force
-        Copy-Item -Force (Join-Path $ageExtract "age/age.exe") (Join-Path $BinDir 'age.exe')
-        Copy-Item -Force (Join-Path $ageExtract "age/age-keygen.exe") (Join-Path $BinDir 'age-keygen.exe')
     }
+
+    # GitOps bootstrap decrypts the committed platform Secret, so SOPS and age
+    # are part of the base deployment toolchain rather than optional scanners.
+    Install-DirectBinary -Name 'sops' -Url "https://github.com/getsops/sops/releases/download/v$($v.SOPS_VERSION)/sops-v$($v.SOPS_VERSION).amd64.exe" -ExpectedSha256 $v.SOPS_WINDOWS_AMD64_SHA256
+    $ageArchive = Join-Path $DownloadDir "age-v$($v.AGE_VERSION)-windows-amd64.zip"
+    Get-VerifiedFile -Url "https://github.com/FiloSottile/age/releases/download/v$($v.AGE_VERSION)/age-v$($v.AGE_VERSION)-windows-amd64.zip" -Destination $ageArchive -ExpectedSha256 $v.AGE_WINDOWS_AMD64_SHA256
+    $ageExtract = Join-Path $ToolsRoot 'age-extract/windows-amd64'
+    New-Item -ItemType Directory -Force -Path $ageExtract | Out-Null
+    Expand-Archive -LiteralPath $ageArchive -DestinationPath $ageExtract -Force
+    Copy-Item -Force (Join-Path $ageExtract "age/age.exe") (Join-Path $BinDir 'age.exe')
+    Copy-Item -Force (Join-Path $ageExtract "age/age-keygen.exe") (Join-Path $BinDir 'age-keygen.exe')
 } else {
     $goArchive = Join-Path $DownloadDir "go$($v.GO_VERSION).linux-amd64.tar.gz"
     Get-VerifiedFile -Url "https://go.dev/dl/go$($v.GO_VERSION).linux-amd64.tar.gz" -Destination $goArchive -ExpectedSha256 $v.GO_LINUX_AMD64_SHA256
@@ -229,16 +232,19 @@ if ($IsWindowsHost) {
         Copy-Item -Force (Join-Path $syftExtract 'syft') (Join-Path $BinDir 'syft')
         & chmod +x (Join-Path $BinDir 'cosign') (Join-Path $BinDir 'syft')
 
-        Install-DirectBinary -Name 'sops' -Url "https://github.com/getsops/sops/releases/download/v$($v.SOPS_VERSION)/sops-v$($v.SOPS_VERSION).linux.amd64" -ExpectedSha256 $v.SOPS_LINUX_AMD64_SHA256
-        $ageArchive = Join-Path $DownloadDir "age-v$($v.AGE_VERSION)-linux-amd64.tar.gz"
-        Get-VerifiedFile -Url "https://github.com/FiloSottile/age/releases/download/v$($v.AGE_VERSION)/age-v$($v.AGE_VERSION)-linux-amd64.tar.gz" -Destination $ageArchive -ExpectedSha256 $v.AGE_LINUX_AMD64_SHA256
-        $ageExtract = Join-Path $ToolsRoot 'age-extract/linux-amd64'
-        New-Item -ItemType Directory -Force -Path $ageExtract | Out-Null
-        & tar -xzf $ageArchive -C $ageExtract
-        Copy-Item -Force (Join-Path $ageExtract 'age/age') (Join-Path $BinDir 'age')
-        Copy-Item -Force (Join-Path $ageExtract 'age/age-keygen') (Join-Path $BinDir 'age-keygen')
-        & chmod +x (Join-Path $BinDir 'age') (Join-Path $BinDir 'age-keygen')
     }
+
+    # GitOps bootstrap decrypts the committed platform Secret, so SOPS and age
+    # are part of the base deployment toolchain rather than optional scanners.
+    Install-DirectBinary -Name 'sops' -Url "https://github.com/getsops/sops/releases/download/v$($v.SOPS_VERSION)/sops-v$($v.SOPS_VERSION).linux.amd64" -ExpectedSha256 $v.SOPS_LINUX_AMD64_SHA256
+    $ageArchive = Join-Path $DownloadDir "age-v$($v.AGE_VERSION)-linux-amd64.tar.gz"
+    Get-VerifiedFile -Url "https://github.com/FiloSottile/age/releases/download/v$($v.AGE_VERSION)/age-v$($v.AGE_VERSION)-linux-amd64.tar.gz" -Destination $ageArchive -ExpectedSha256 $v.AGE_LINUX_AMD64_SHA256
+    $ageExtract = Join-Path $ToolsRoot 'age-extract/linux-amd64'
+    New-Item -ItemType Directory -Force -Path $ageExtract | Out-Null
+    & tar -xzf $ageArchive -C $ageExtract
+    Copy-Item -Force (Join-Path $ageExtract 'age/age') (Join-Path $BinDir 'age')
+    Copy-Item -Force (Join-Path $ageExtract 'age/age-keygen') (Join-Path $BinDir 'age-keygen')
+    & chmod +x (Join-Path $BinDir 'sops') (Join-Path $BinDir 'age') (Join-Path $BinDir 'age-keygen')
 }
 
 if (-not $BaseOnly) {

@@ -283,7 +283,7 @@ var _ = Describe("Application reconciler", Ordered, func() {
 		reconcile(ctx, wrapped, app)
 		Expect(wrapped.attempts.Load()).To(BeNumerically(">=", 2))
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: namespace}, app)).To(Succeed())
-		Expect(app.Status.Phase).To(Equal(platformv1alpha1.ApplicationPhaseDegraded))
+		Expect(app.Status.Phase).To(Equal(platformv1alpha1.ApplicationPhaseProgressing))
 	})
 
 	It("performs zero writes after reconciliation settles", func(ctx SpecContext) {

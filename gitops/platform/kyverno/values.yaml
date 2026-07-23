@@ -22,6 +22,11 @@ webhooksCleanup:
 test:
   enabled: false
 
+# Kyverno's Helm post-delete preservation hook conflicts with Argo app-of-apps
+# ownership and can keep the child Application OutOfSync.
+config:
+  preserve: false
+
 features:
   admissionReports:
     enabled: true

@@ -131,6 +131,7 @@ jobs:
       - name: Go vulnerability machine-readable report
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f
         with:
+          repo-checkout: false
           go-version-input: "1.25.12"
           go-package: ./...
           output-format: sarif
@@ -142,6 +143,7 @@ jobs:
       - name: Go vulnerability gate
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f
         with:
+          repo-checkout: false
           go-version-input: "1.25.12"
           go-package: ./...
       - name: Trivy repository and IaC blocking gate

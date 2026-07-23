@@ -113,6 +113,7 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	assertExternalChartApplication(t, objects, "alloy", "https://grafana.github.io/helm-charts", "alloy", "1.10.1", "gitops/platform/alloy/values.yaml", "monitoring")
 	assertExternalChartApplication(t, objects, "kyverno", "https://kyverno.github.io/kyverno/", "kyverno", "3.8.2", "gitops/platform/kyverno/values.yaml", "kyverno")
 	kyverno := findObject(t, objects, "Application", "kyverno")
+	assertAnnotation(t, kyverno, "argocd.argoproj.io/compare-options", "ServerSideDiff=true,IncludeMutationWebhook=true")
 	kyvernoSources := nestedSlice(t, kyverno, "spec", "sources")
 	helmSource := kyvernoSources[0].(map[string]any)
 	skipTests, found, err := unstructured.NestedBool(helmSource, "helm", "skipTests")
@@ -433,6 +434,7 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 		"reportsServer:\n  enabled: false",
 		"openreports:\n  enabled: false",
 		"webhooksCleanup:\n  enabled: false",
+		"config:\n  preserve: false",
 		"cleanupController:\n  enabled: false",
 		"admissionController:\n  replicas: 1",
 		"backgroundController:\n  enabled: true\n  replicas: 1",
@@ -614,7 +616,8 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 		"namespace steadystate-unmanaged --ignore-not-found=true --wait=true --timeout=120s",
 		"argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s",
 		"config/default') --ignore-not-found=true --wait=true --timeout=180s",
-		"validatingwebhookconfiguration,mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno",
+		"validatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno",
+		"mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno",
 		"namespace monitoring argo-rollouts kyverno --ignore-not-found=true --wait=true --timeout=180s",
 		"validatingpolicies.policies.kyverno.io",
 	} {

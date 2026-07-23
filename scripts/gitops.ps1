@@ -407,7 +407,8 @@ function Invoke-Undeploy {
         Invoke-External kubectl delete application.argoproj.io argocd-configuration steadystate-operator -n argocd --ignore-not-found=true --wait=true --timeout=60s
     }
     Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true --wait=true --timeout=180s
-    Invoke-External kubectl delete validatingwebhookconfiguration,mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno --ignore-not-found=true --wait=true --timeout=60s
+    Invoke-External kubectl delete validatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno --ignore-not-found=true --wait=true --timeout=60s
+    Invoke-External kubectl delete mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno --ignore-not-found=true --wait=true --timeout=60s
     Invoke-External kubectl delete namespace monitoring argo-rollouts kyverno --ignore-not-found=true --wait=true --timeout=180s
     Invoke-External kubectl delete customresourcedefinition `
         rollouts.argoproj.io analysisruns.argoproj.io analysistemplates.argoproj.io clusteranalysistemplates.argoproj.io experiments.argoproj.io `

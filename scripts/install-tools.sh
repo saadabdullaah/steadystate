@@ -115,21 +115,25 @@ if [[ "$BASE_ONLY" == false || "$INCLUDE_SECURITY" == true ]]; then
   tar -xzf "$syft_archive" -C "$TOOLS_ROOT/syft-extract/linux-amd64"
   cp "$TOOLS_ROOT/syft-extract/linux-amd64/syft" "$BIN_DIR/syft"
 
-  download_verified \
-    "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64" \
-    "$BIN_DIR/sops" \
-    "$SOPS_LINUX_AMD64_SHA256"
-  age_archive="$DOWNLOAD_DIR/age-v${AGE_VERSION}-linux-amd64.tar.gz"
-  download_verified \
-    "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz" \
-    "$age_archive" \
-    "$AGE_LINUX_AMD64_SHA256"
-  mkdir -p "$TOOLS_ROOT/age-extract/linux-amd64"
-  tar -xzf "$age_archive" -C "$TOOLS_ROOT/age-extract/linux-amd64"
-  cp "$TOOLS_ROOT/age-extract/linux-amd64/age/age" "$BIN_DIR/age"
-  cp "$TOOLS_ROOT/age-extract/linux-amd64/age/age-keygen" "$BIN_DIR/age-keygen"
-  chmod +x "$BIN_DIR/cosign" "$BIN_DIR/syft" "$BIN_DIR/sops" "$BIN_DIR/age" "$BIN_DIR/age-keygen"
+  chmod +x "$BIN_DIR/cosign" "$BIN_DIR/syft"
 fi
+
+# GitOps bootstrap decrypts the committed platform Secret, so SOPS and age are
+# part of the base deployment toolchain rather than optional scanners.
+download_verified \
+  "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64" \
+  "$BIN_DIR/sops" \
+  "$SOPS_LINUX_AMD64_SHA256"
+age_archive="$DOWNLOAD_DIR/age-v${AGE_VERSION}-linux-amd64.tar.gz"
+download_verified \
+  "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz" \
+  "$age_archive" \
+  "$AGE_LINUX_AMD64_SHA256"
+mkdir -p "$TOOLS_ROOT/age-extract/linux-amd64"
+tar -xzf "$age_archive" -C "$TOOLS_ROOT/age-extract/linux-amd64"
+cp "$TOOLS_ROOT/age-extract/linux-amd64/age/age" "$BIN_DIR/age"
+cp "$TOOLS_ROOT/age-extract/linux-amd64/age/age-keygen" "$BIN_DIR/age-keygen"
+chmod +x "$BIN_DIR/sops" "$BIN_DIR/age" "$BIN_DIR/age-keygen"
 
 download_verified \
   "https://github.com/kubernetes-sigs/kubebuilder/releases/download/v${KUBEBUILDER_VERSION}/kubebuilder_linux_amd64" \
