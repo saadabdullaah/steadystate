@@ -207,7 +207,15 @@ function Invoke-Test {
             Invoke-External kubectl rollout status "deployment/$deployment" -n kyverno --timeout=300s
         }
         $deployments = Get-KubectlJson @('get','deployments','-n','kyverno')
-        $images = @($deployments.items | ForEach-Object { @($_.spec.template.spec.initContainers) + @($_.spec.template.spec.containers) } | ForEach-Object { [string]$_.image })
+        $images = @(
+            $deployments.items |
+                ForEach-Object { @($_.spec.template.spec.initContainers) + @($_.spec.template.spec.containers) } |
+                Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_.image) } |
+                ForEach-Object { [string]$_.image }
+        )
+        if ($images.Count -eq 0) {
+            throw 'No Kyverno controller images were discovered.'
+        }
         $unpinned = @($images | Where-Object { $_ -notmatch ':v1\.18\.2(@sha256:[0-9a-f]{64})?$' })
         if ($unpinned) {
             throw "Unexpected Kyverno image versions: $($unpinned -join ', ')"
