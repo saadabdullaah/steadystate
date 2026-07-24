@@ -307,8 +307,17 @@ function Invoke-Test {
     Assert-DexAbsent
     Add-PassedCheck $checks 'pinned-argocd-ready-dex-absent' $started "Pinned manifest $(Split-Path -Leaf $manifest) is running and all five Dex objects are absent."
 
+    $applicationNames = @('argocd-configuration','monitoring','argo-rollouts')
+    if (-not $DisableTelemetryPipeline) {
+        $applicationNames += @('loki','tempo','otel-collector','alloy')
+    }
+    if (-not $DisableSecurity) {
+        $applicationNames += @('kyverno','kyverno-policies')
+    }
+    $applicationNames += @('steadystate-operator','payments','steadystate-root')
+
     $applications = @{}
-    foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','loki','tempo','otel-collector','alloy','kyverno','kyverno-policies','steadystate-operator','payments','steadystate-root')) {
+    foreach ($name in $applicationNames) {
         $started = Get-Date
         $applications[$name] = Wait-ArgoApplication -Name $name
         Add-PassedCheck $checks "argocd-application-$name-healthy" $started "$name is Synced and Healthy."

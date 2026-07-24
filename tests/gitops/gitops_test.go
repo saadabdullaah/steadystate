@@ -805,6 +805,8 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 		"timeout-minutes: 9",
 		"cancel-in-progress: false",
 		"./scripts/dev.ps1 verify-observability",
+		"./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -DisableSecurity",
+		"./scripts/dev.ps1 test-gitops -Profile standard -DisableSecurity",
 		"./scripts/phase5-acceptance.ps1 -Stage Prepare",
 		"timeout --signal=TERM --kill-after=30s 8m vhs docs/demonstrations/phase5-request-telemetry.tape",
 		"./scripts/phase5-acceptance.ps1 -Stage Finalize",
