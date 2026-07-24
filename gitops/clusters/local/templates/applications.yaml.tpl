@@ -80,6 +80,7 @@ spec:
     automated:
       prune: true
       selfHeal: true
+{{- if .Values.enableTelemetryPipeline }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -192,6 +193,7 @@ spec:
     automated:
       prune: true
       selfHeal: true
+{{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -216,6 +218,7 @@ spec:
     automated:
       prune: true
       selfHeal: true
+{{- if .Values.enableSecurity }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -280,6 +283,7 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
+{{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application

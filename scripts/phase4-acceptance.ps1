@@ -459,7 +459,7 @@ function Save-FinalEvidence {
         Save-Kubectl (Join-Path $ArtifactRoot 'logs/prometheus.log') @('logs','-n','monitoring','-l','app.kubernetes.io/name=prometheus','--all-containers','--tail=2000') -AllowFailure
         Save-Kubectl (Join-Path $ArtifactRoot 'metrics/analysis-runs-final.json') @('get','analysisruns','-n',$Namespace,'-o','json') -AllowFailure
         if ($State.commits.canaryToRolling) {
-            $rootRender = @(& helm template steadystate-root (Join-Path $Root 'gitops/clusters/local') --namespace argocd --set-string "gitRevision=$($State.commits.canaryToRolling)")
+            $rootRender = @(& helm template steadystate-root (Join-Path $Root 'gitops/clusters/local') --namespace argocd --set-string "gitRevision=$($State.commits.canaryToRolling)" --set enableTelemetryPipeline=false --set enableSecurity=false)
             if ($LASTEXITCODE -ne 0) { throw 'Final GitOps root rendering failed.' }
             Write-Utf8 (Join-Path $ArtifactRoot 'rendered/root.yaml') (($rootRender -join [Environment]::NewLine) + [Environment]::NewLine)
         }
@@ -514,7 +514,7 @@ try {
         Invoke-External git push --set-upstream origin $BranchName
         $state.timestamps.baselinePushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
         $started = Get-Date
-        & (Join-Path $Root 'scripts/dev.ps1') deploy-gitops -Profile standard -GitRevision $BranchName
+        & (Join-Path $Root 'scripts/dev.ps1') deploy-gitops -Profile standard -GitRevision $BranchName -DisableTelemetryPipeline -DisableSecurity
         if ($LASTEXITCODE -ne 0) { throw 'GitOps deployment failed.' }
         foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root')) { Wait-ArgoApplication $name Healthy $state.commits.baseline | Out-Null }
         $application = Wait-Application Healthy -Version $sourceTag -Revision $state.commits.baseline

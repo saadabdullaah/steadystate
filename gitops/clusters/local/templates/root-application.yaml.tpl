@@ -14,6 +14,10 @@ spec:
       parameters:
         - name: gitRevision
           value: "$ARGOCD_APP_REVISION"
+        - name: enableTelemetryPipeline
+          value: {{ .Values.enableTelemetryPipeline | quote }}
+        - name: enableSecurity
+          value: {{ .Values.enableSecurity | quote }}
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

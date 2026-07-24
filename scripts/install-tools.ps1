@@ -62,7 +62,7 @@ function Get-VerifiedFile {
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     if (-not $curl) { $curl = Get-Command curl -ErrorAction SilentlyContinue }
     if ($curl) {
-        & $curl.Source --location --fail --retry 3 --output $Destination $Url
+        & $curl.Source --location --fail --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 --output $Destination $Url
         if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
     } else {
         Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Destination
