@@ -6,6 +6,8 @@ param(
     [int]$HttpPort = 8080,
     [string]$GitRevision = 'main',
     [string]$EvidencePath,
+    [switch]$DisableTelemetryPipeline,
+    [switch]$DisableSecurity,
     [ValidateSet('minimal','standard','full')][string]$Profile = 'standard'
 )
 
@@ -138,10 +140,14 @@ function Render-RootTemplate {
         [Parameter(Mandatory)][string]$Path,
         [switch]$BootstrapRoot
     )
+    $telemetryPipeline = if ($DisableTelemetryPipeline) { 'false' } else { 'true' }
+    $security = if ($DisableSecurity) { 'false' } else { 'true' }
     $arguments = @(
         'template', 'steadystate-root', $ChartPath,
         '--namespace', 'argocd',
         '--set-string', "gitRevision=$GitRevision",
+        '--set', "enableTelemetryPipeline=$telemetryPipeline",
+        '--set', "enableSecurity=$security",
         '--show-only', $Template
     )
     if ($BootstrapRoot) {

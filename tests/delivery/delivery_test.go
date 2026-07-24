@@ -59,6 +59,7 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 		"all good and bad semver/SHA tags must exist or all must be absent",
 		"go test -race ./apps/demo-app/...",
 		"manifest unknown|not found",
+		"scanners: vuln,secret",
 		"detect-demo-runtime-impact",
 		"needs: impact",
 		"if: needs.impact.outputs.release == 'true'",
@@ -94,6 +95,9 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 	}
 	if strings.Contains(workflow, ":latest") {
 		t.Fatal("demo release workflow must not publish a mutable latest tag")
+	}
+	if strings.Contains(workflow, "scanners: vuln,secret,misconfig") {
+		t.Fatal("demo publication must not duplicate the repository IaC misconfiguration gate")
 	}
 	if strings.Count(workflow, "docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf") != 2 {
 		t.Fatal("demo release workflow must build exactly the good and bad immutable variants")

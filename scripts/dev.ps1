@@ -15,7 +15,9 @@ param(
     [string]$Phase5AcceptanceStage = $(if ($env:PHASE5_ACCEPTANCE_STAGE) { $env:PHASE5_ACCEPTANCE_STAGE } else { 'Test' }),
     [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
     [string]$Phase6AcceptanceStage = $(if ($env:PHASE6_ACCEPTANCE_STAGE) { $env:PHASE6_ACCEPTANCE_STAGE } else { 'Test' }),
-    [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' })
+    [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' }),
+    [switch]$DisableTelemetryPipeline,
+    [switch]$DisableSecurity
 )
 
 $ErrorActionPreference = 'Stop'
@@ -252,6 +254,8 @@ function Invoke-GitOpsCommand {
         -HttpPort $HttpPort `
         -GitRevision $GitRevision `
         -EvidencePath $EvidencePath `
+        -DisableTelemetryPipeline:$DisableTelemetryPipeline `
+        -DisableSecurity:$DisableSecurity `
         -Profile $Profile
 }
 

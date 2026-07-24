@@ -2,6 +2,8 @@ repoURL: https://github.com/saadabdullaah/steadystate.git
 gitRevision: main
 bootstrapRoot: false
 rootTargetRevision: main
+enableTelemetryPipeline: true
+enableSecurity: true
 operatorImage: ghcr.io/saadabdullaah/steadystate-operator:v0.3.0
 argoRolloutsChartVersion: 2.41.0
 kubePrometheusStackChartVersion: 87.16.1

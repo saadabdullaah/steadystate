@@ -175,6 +175,32 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	}
 }
 
+func TestRootChartCanIsolateEarlierPhaseAcceptance(t *testing.T) {
+	root := repositoryRoot(t)
+	rendered := run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--namespace", "argocd",
+		"--set-string", "gitRevision="+testRevision,
+		"--set", "enableTelemetryPipeline=false",
+		"--set", "enableSecurity=false",
+	)
+	objects := decodeManifests(t, rendered)
+	if len(objects) != 8 {
+		t.Fatalf("isolated Phase 4 root chart rendered %d objects, want 8", len(objects))
+	}
+	for _, object := range objects {
+		name := objectString(object, "metadata", "name")
+		for _, excluded := range []string{"loki", "tempo", "otel-collector", "alloy", "kyverno", "kyverno-policies"} {
+			if name == excluded {
+				t.Fatalf("isolated Phase 4 root chart unexpectedly rendered %s", name)
+			}
+		}
+	}
+	for _, required := range []string{"argocd-configuration", "monitoring", "argo-rollouts", "steadystate-operator", "payments"} {
+		findObject(t, objects, "Application", required)
+	}
+}
+
 func TestProjectRestrictions(t *testing.T) {
 	root := repositoryRoot(t)
 	objects := decodeManifests(t, run(t, root, "helm",
@@ -557,12 +583,27 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 1 {
+	if len(parameters) != 3 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
-	parameter := parameters[0].(map[string]any)
-	assertString(t, parameter, "gitRevision", "name")
-	assertString(t, parameter, "$ARGOCD_APP_REVISION", "value")
+	expected := map[string]string{
+		"gitRevision":             "$ARGOCD_APP_REVISION",
+		"enableTelemetryPipeline": "true",
+		"enableSecurity":          "true",
+	}
+	for _, raw := range parameters {
+		parameter := raw.(map[string]any)
+		name := objectString(parameter, "name")
+		if value, ok := expected[name]; !ok {
+			t.Errorf("root application contains unexpected Helm parameter %q", name)
+		} else {
+			assertString(t, parameter, value, "value")
+			delete(expected, name)
+		}
+	}
+	if len(expected) != 0 {
+		t.Fatalf("root application is missing Helm parameters: %v", expected)
+	}
 	assertAutomated(t, rootApplication, true)
 }
 
@@ -1059,6 +1100,8 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"git log -1 --format=%H $Phase4ReleaseRef -- apps/demo-app/VERSION",
 		"$manifest = Invoke-WebRequest -UseBasicParsing -Uri $uri -Headers $headers",
 		"sha-$sourceCommit",
+		"deploy-gitops -Profile standard -GitRevision $BranchName -DisableTelemetryPipeline -DisableSecurity",
+		"--set enableTelemetryPipeline=false --set enableSecurity=false",
 		"foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root'))",
 		"This delivery commit must change only spec.image.tag.",
 		"Invoke-External kubectl kustomize (Split-Path -Parent $ManifestPath) | Out-Null",
