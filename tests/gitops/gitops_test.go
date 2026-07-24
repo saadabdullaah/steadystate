@@ -550,6 +550,7 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 	installShell := string(readFile(t, filepath.Join(root, "scripts", "install-tools.sh")))
 	for _, token := range []string{
 		"IncludeSecurity",
+		"--retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30",
 		"kyverno-cli_v$($v.KYVERNO_VERSION)_windows_x86_64.zip",
 		"KYVERNO_CLI_WINDOWS_AMD64_SHA256",
 		"kyverno-cli_v$($v.KYVERNO_VERSION)_linux_x86_64.tar.gz",
@@ -561,6 +562,7 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 	}
 	for _, token := range []string{
 		"--include-security",
+		"--retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30",
 		"kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz",
 		"KYVERNO_CLI_LINUX_AMD64_SHA256",
 	} {

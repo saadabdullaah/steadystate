@@ -41,14 +41,14 @@ download_verified() {
     actual="$(sha256sum "$destination" | awk '{print $1}')"
     [[ "$actual" == "$expected" ]] && return
   fi
-  curl --fail --location --retry 3 --output "$destination" "$url"
+  curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 --output "$destination" "$url"
   echo "$expected  $destination" | sha256sum --check --status
 }
 
 download_with_checksum_url() {
   local url="$1" destination="$2" checksum_url="$3"
   local expected
-  expected="$(curl --fail --location --retry 3 "$checksum_url" | awk 'NR == 1 {print $1}')"
+  expected="$(curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 "$checksum_url" | awk 'NR == 1 {print $1}')"
   download_verified "$url" "$destination" "$expected"
 }
 
