@@ -79,7 +79,7 @@ function Assert-ObjectDenied {
 
 function Add-PassedCheck {
     param(
-        [Parameter(Mandatory)][System.Collections.Generic.List[object]]$Checks,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Checks,
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][datetime]$Started,
         [Parameter(Mandatory)][string]$Details

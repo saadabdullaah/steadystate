@@ -33,3 +33,4 @@ Invoke-PolicyFixture -Name 'compliant-managed-pod.yaml' -ShouldPass $true
 Invoke-PolicyFixture -Name 'vulnerable-pod.yaml' -ShouldPass $false
 Invoke-PolicyFixture -Name 'cnpg-label-bypass.yaml' -ShouldPass $false
 Write-Host 'Kyverno static policy fixtures passed, including the CNPG label bypass regression.'
+exit 0

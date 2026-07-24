@@ -504,6 +504,10 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 	if strings.Contains(rendered, "kind: PolicyException") || strings.Contains(rendered, "kind: ClusterPolicy") {
 		t.Fatal("the enforcement foundation must not install legacy policies or broad policy exceptions")
 	}
+	staticScript := string(readFile(t, filepath.Join(root, "scripts", "security-static.ps1")))
+	if !strings.Contains(staticScript, "exit 0") {
+		t.Fatal("the static policy script must clear expected native denial exit codes on success")
+	}
 	boundaries := string(readFile(t, filepath.Join(root, "docs", "security", "kyverno-policy-boundaries.md")))
 	for _, token := range []string{
 		"No Phase 7 exception exists in the foundation",
@@ -686,6 +690,7 @@ func TestPhase6FoundationWorkflowContracts(t *testing.T) {
 		"KYVERNO_CHART_VERSION -ne '3.8.2'",
 		"KYVERNO_VERSION -ne '1.18.2'",
 		"f4fc787cf1d6781eefb9e9b45837edcddcfae984c872888289914e97207cc5de",
+		"[AllowEmptyCollection()][System.Collections.Generic.List[object]]$Checks",
 		"policies.kyverno.io/v1",
 		"validationActions) -notcontains 'Deny'",
 		"clusterpolicies.kyverno.io",
