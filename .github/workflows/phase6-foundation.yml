@@ -1,0 +1,127 @@
+name: Phase 6 foundation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/phase6-foundation.yml"
+      - "gitops/**"
+      - "scripts/gitops.ps1"
+      - "scripts/phase6-foundation.ps1"
+      - "scripts/versions.env"
+      - "tests/gitops/**"
+      - "tests/config/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase6-foundation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compatibility:
+    name: kyverno-kubernetes-1-35
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install and verify pinned platform tools
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          ./scripts/install-tools.ps1 -BaseOnly -IncludeSecurity
+          ./scripts/dev.ps1 check-versions
+          ./scripts/dev.ps1 verify-gitops
+
+      - name: Bootstrap Kubernetes 1.35 standard profile
+        timeout-minutes: 15
+        shell: pwsh
+        run: ./scripts/dev.ps1 bootstrap -Profile standard
+
+      - name: Deploy exact-revision GitOps foundation
+        timeout-minutes: 15
+        shell: pwsh
+        run: ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA
+
+      - name: Verify Kyverno compatibility and enforcement behavior
+        id: foundation
+        timeout-minutes: 12
+        shell: pwsh
+        run: ./scripts/phase6-foundation.ps1 -Stage Test
+
+      - name: Capture cluster diagnostics
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/dev.ps1 diagnostics
+
+      - name: Capture failure snapshots
+        if: always() && steps.foundation.outcome != 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        shell: pwsh
+        run: ./scripts/phase6-foundation.ps1 -Stage CaptureFailure
+
+      - name: Verify foundation artifact completeness
+        if: always() && steps.foundation.outcome == 'success'
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $required = @(
+            '.artifacts/phase6/foundation/evidence.json',
+            '.artifacts/phase6/foundation/kyverno-workloads.yaml',
+            '.artifacts/phase6/foundation/policies.yaml',
+            '.artifacts/phase6/foundation/policyreports.json',
+            '.artifacts/phase6/foundation/webhooks.yaml',
+            '.artifacts/phase6/foundation/logs/kyverno-admission-controller.log',
+            '.artifacts/phase6/foundation/logs/kyverno-background-controller.log',
+            '.artifacts/phase6/foundation/logs/kyverno-reports-controller.log'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -le 0) {
+              throw "Missing or empty Phase 6 foundation artifact: $path"
+            }
+          }
+          $evidence = Get-Content -Raw -LiteralPath '.artifacts/phase6/foundation/evidence.json' | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed' -or $evidence.sourceSHA -ne $env:GITHUB_SHA -or @($evidence.checks).Count -ne 8) {
+            throw 'Phase 6 foundation evidence is incomplete or does not match this commit.'
+          }
+          if (@(Get-ChildItem '.artifacts/diagnostics' -Recurse -File -ErrorAction SilentlyContinue).Count -eq 0) {
+            throw 'Cluster diagnostics are missing.'
+          }
+
+      - name: Upload Phase 6 foundation artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase6-foundation-${{ github.sha }}
+          path: |
+            .artifacts/phase6/foundation/
+            .artifacts/diagnostics/
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
+
+      - name: Undeploy GitOps
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 7
+        shell: pwsh
+        run: ./scripts/dev.ps1 undeploy-gitops
+
+      - name: Destroy cluster
+        if: always()
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/dev.ps1 destroy

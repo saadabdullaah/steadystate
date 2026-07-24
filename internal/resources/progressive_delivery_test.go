@@ -196,7 +196,7 @@ func TestProgressiveResourcesGoldenDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(payload))
-	const want = "e86aead0a31864f0537f1afa7bf4f7ad9b084013648ad989808039d5fa0c1922"
+	const want = "eaf7031b8b8b0cebb2b3f1f92f34015d8fac230a437d1541c34e3e6f4e16e5e1"
 	if digest != want {
 		t.Fatalf("progressive resource golden digest=%s, want %s", digest, want)
 	}

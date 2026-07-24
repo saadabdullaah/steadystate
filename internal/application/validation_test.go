@@ -84,7 +84,7 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestUnsupportedFeaturesAreOrdered(t *testing.T) {
+func TestPhase6SecurityFeaturesAreActive(t *testing.T) {
 	t.Parallel()
 	app := validApplication()
 	app.Spec.Deployment.Strategy = platformv1alpha1.DeploymentStrategyCanary
@@ -92,14 +92,8 @@ func TestUnsupportedFeaturesAreOrdered(t *testing.T) {
 	app.Spec.Observability.Metrics = true
 	app.Spec.Security.NetworkIsolation = true
 	got := UnsupportedFeatures(app)
-	want := []string{"security.networkIsolation"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for index := range want {
-		if got[index] != want[index] {
-			t.Fatalf("got %v, want %v", got, want)
-		}
+	if len(got) != 0 {
+		t.Fatalf("Phase 6 security features must be active, got unsupported list %v", got)
 	}
 }
 

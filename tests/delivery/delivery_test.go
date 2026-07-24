@@ -15,8 +15,8 @@ func TestDemoVersionContract(t *testing.T) {
 	if !regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`).MatchString(version) {
 		t.Fatalf("demo VERSION %q is not strict semver", version)
 	}
-	if version != "v0.5.1" {
-		t.Fatalf("Phase 5 security patch must declare v0.5.1, got %q", version)
+	if version != "v0.6.0" {
+		t.Fatalf("Phase 6 must declare v0.6.0, got %q", version)
 	}
 	manifest := read(t, filepath.Join(root, "gitops", "applications", "demo", "application.yaml"))
 	tagPattern := regexp.MustCompile(`(?m)^    tag: (v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
@@ -25,8 +25,8 @@ func TestDemoVersionContract(t *testing.T) {
 		t.Fatal("the demo manifest must contain exactly one strict semver image tag")
 	}
 	manifestVersion := tagMatches[0][1]
-	if manifestVersion != version && manifestVersion != "v0.5.0" {
-		t.Fatalf("demo manifest tag %q must be the released v0.5.0 baseline or match VERSION %q", manifestVersion, version)
+	if manifestVersion != version && manifestVersion != "v0.5.1" {
+		t.Fatalf("demo manifest tag %q must be the released v0.5.1 baseline or match VERSION %q", manifestVersion, version)
 	}
 }
 
@@ -40,6 +40,7 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 		"Get-ChildItem -LiteralPath apps/demo-app -Filter '*.go' -File",
 		"contents: read",
 		"packages: write",
+		"id-token: write",
 		"platforms: linux/amd64",
 		"provenance: false",
 		"sbom: false",
@@ -62,6 +63,14 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 		"needs: impact",
 		"if: needs.impact.outputs.release == 'true'",
 		"'apps/demo-app/VERSION' -in $changed",
+		"cosign sign --yes",
+		"cosign attest --yes --type spdxjson",
+		"cosign verify-attestation --type spdxjson",
+		"demo-good.spdx.json",
+		"demo-bad.spdx.json",
+		"requireSignedImage: true",
+		"networkIsolation: true",
+		"Phase 6 delivery did not activate signed-image verification and network isolation.",
 	}
 	for _, value := range required {
 		if !strings.Contains(workflow, value) {
@@ -75,6 +84,8 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 		"docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
 		"docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0",
 		"docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf",
+		"sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6",
+		"anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
 	}
 	for _, pin := range pins {
 		if !strings.Contains(workflow, pin) {

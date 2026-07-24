@@ -61,6 +61,7 @@ type ApplicationReconciler struct {
 // +kubebuilder:rbac:groups=argoproj.io,resources=rollouts;analysistemplates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=analysisruns,verbs=get;list;watch
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors;prometheusrules,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=wgpolicyk8s.io,resources=policyreports,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=services;configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
@@ -145,13 +146,30 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	runtimeState, err := r.reconcileRuntimeChildren(ctx, app)
 	if err != nil {
+		reason := "ReconciliationFailed"
 		message := fmt.Sprintf("failed to reconcile owned resources: %v", err)
-		_, statusErr := r.patchStatus(ctx, app, degradedStatus(app, "ReconciliationFailed", message))
-		r.event(app, corev1.EventTypeWarning, "ReconciliationFailed", message)
+		if isSecurityAdmissionRejection(err) {
+			reason = "SecurityPolicyRejected"
+			message = sanitizedAdmissionMessage(err)
+		}
+		_, statusErr := r.patchStatus(ctx, app, degradedStatus(app, reason, message))
+		r.event(app, corev1.EventTypeWarning, reason, message)
 		if statusErr != nil {
 			return ctrl.Result{}, fmt.Errorf("reconcile children: %w; patch status: %v", err, statusErr)
 		}
 		return ctrl.Result{}, err
+	}
+	securityFailure, err := r.securityAdmissionFailure(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("inspect workload admission state: %w", err)
+	}
+	if securityFailure != "" {
+		status := degradedStatus(app, "SecurityPolicyRejected", securityFailure)
+		changed, statusErr := r.patchStatus(ctx, app, status)
+		if changed {
+			r.event(app, corev1.EventTypeWarning, "SecurityPolicyRejected", securityFailure)
+		}
+		return ctrl.Result{}, statusErr
 	}
 
 	digestResolution, digestErr := r.resolveImageDigest(ctx, app)
@@ -185,6 +203,47 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.event(app, corev1.EventTypeNormal, "Reconciled", "Application resources and status were reconciled")
 	}
 	return ctrl.Result{RequeueAfter: runtimeState.requeueAfter}, nil
+}
+
+func isSecurityAdmissionRejection(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "denied the request") ||
+		strings.Contains(message, "imagevalidatingpolicy") ||
+		strings.Contains(message, "validatingpolicy") ||
+		strings.Contains(message, "kyverno")
+}
+
+func sanitizedAdmissionMessage(err error) string {
+	message := strings.Join(strings.Fields(err.Error()), " ")
+	if len(message) > 512 {
+		message = message[:512]
+	}
+	return "workload admission was rejected by platform security policy: " + message
+}
+
+func (r *ApplicationReconciler) securityAdmissionFailure(ctx context.Context, app *platformv1alpha1.Application) (string, error) {
+	replicaSets := &appsv1.ReplicaSetList{}
+	if err := r.List(ctx, replicaSets, client.InNamespace(app.Namespace), client.MatchingLabels(resources.SelectorLabels(app))); err != nil {
+		return "", err
+	}
+	for i := range replicaSets.Items {
+		for _, condition := range replicaSets.Items[i].Status.Conditions {
+			if condition.Type != appsv1.ReplicaSetReplicaFailure || condition.Status != corev1.ConditionTrue {
+				continue
+			}
+			combined := strings.Join(strings.Fields(condition.Reason+" "+condition.Message), " ")
+			lower := strings.ToLower(combined)
+			if strings.Contains(lower, "denied") || strings.Contains(lower, "kyverno") ||
+				strings.Contains(lower, "validatingpolicy") || strings.Contains(lower, "signature") ||
+				strings.Contains(lower, "attestation") {
+				if len(combined) > 512 {
+					combined = combined[:512]
+				}
+				return "workload admission was rejected by platform security policy: " + combined, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 type applicationTenancyFailure struct {
@@ -280,7 +339,7 @@ func mergeStringMap(current *map[string]string, desired map[string]string) {
 func workloadStatus(app *platformv1alpha1.Application, deployment *appsv1.Deployment, route *gatewayv1.HTTPRoute, digest imageDigestResolution, sourceRevision string) (platformv1alpha1.ApplicationStatus, bool) {
 	status := baseStatus(app)
 	setCondition(&status, app.Generation, conditionConfigurationReady, metav1.ConditionTrue, "ResourcesReconciled", "All generated resources match the Application specification")
-	setCondition(&status, app.Generation, conditionSecurityPolicyReady, metav1.ConditionTrue, "Hardened", "Phase 1 workload security settings are applied")
+	setSecurityPolicyReady(&status, app)
 
 	deploymentReady, deploymentFailed := deploymentState(deployment, app.Spec.Runtime.Replicas.Min)
 	routeReady, routeRejected := routeState(route)
@@ -334,13 +393,22 @@ func degradedStatus(app *platformv1alpha1.Application, reason, message string) p
 	status.CandidateVersion = ""
 	setCondition(&status, app.Generation, conditionConfigurationReady, metav1.ConditionFalse, reason, message)
 	securityStatus := metav1.ConditionUnknown
-	if reason == "UnsupportedFeature" && (app.Spec.Security.RequireSignedImage || app.Spec.Security.NetworkIsolation) {
+	if reason == "SecurityPolicyRejected" ||
+		(reason == "UnsupportedFeature" && (app.Spec.Security.RequireSignedImage || app.Spec.Security.NetworkIsolation)) {
 		securityStatus = metav1.ConditionFalse
 	}
 	setCondition(&status, app.Generation, conditionSecurityPolicyReady, securityStatus, reason, message)
 	setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionUnknown, reason, "No child resources were mutated")
 	setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, reason, message)
 	return status
+}
+
+func setSecurityPolicyReady(status *platformv1alpha1.ApplicationStatus, app *platformv1alpha1.Application) {
+	if app.Spec.Security.RequireSignedImage {
+		setCondition(status, app.Generation, conditionSecurityPolicyReady, metav1.ConditionTrue, "SignatureVerificationRequested", "Kyverno signature and SPDX attestation enforcement is requested for the current workload")
+		return
+	}
+	setCondition(status, app.Generation, conditionSecurityPolicyReady, metav1.ConditionTrue, "SignatureVerificationNotRequested", "The workload meets baseline policy; signature verification was not requested")
 }
 
 func setServiceHealth(status *platformv1alpha1.ApplicationStatus, app *platformv1alpha1.Application, available, routeRejected bool) {
@@ -469,6 +537,10 @@ func (r *ApplicationReconciler) applicationsForTeam(ctx context.Context, object 
 	return r.applicationRequestsInNamespace(ctx, resources.TeamNamespacePrefix+object.GetName())
 }
 
+func (r *ApplicationReconciler) applicationsForSecurityReport(ctx context.Context, object client.Object) []ctrlreconcile.Request {
+	return r.applicationRequestsInNamespace(ctx, object.GetNamespace())
+}
+
 func optionalResourceAvailable(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (bool, error) {
 	_, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 	if err == nil {
@@ -499,16 +571,20 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&platformv1alpha1.Team{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForTeam))
 
 	optionalWatches := []struct {
-		gvk      schema.GroupVersionKind
-		register func()
+		gvk         schema.GroupVersionKind
+		progressive bool
+		register    func()
 	}{
-		{schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Rollout"}, func() { builder = builder.Owns(&rolloutsv1alpha1.Rollout{}) }},
-		{schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "AnalysisTemplate"}, func() { builder = builder.Owns(&rolloutsv1alpha1.AnalysisTemplate{}) }},
-		{schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "AnalysisRun"}, func() {
+		{schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Rollout"}, true, func() { builder = builder.Owns(&rolloutsv1alpha1.Rollout{}) }},
+		{schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "AnalysisTemplate"}, true, func() { builder = builder.Owns(&rolloutsv1alpha1.AnalysisTemplate{}) }},
+		{schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "AnalysisRun"}, true, func() {
 			builder = builder.Watches(&rolloutsv1alpha1.AnalysisRun{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod))
 		}},
-		{schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "ServiceMonitor"}, func() { builder = builder.Owns(monitoringWatchObject("ServiceMonitor")) }},
-		{schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "PrometheusRule"}, func() { builder = builder.Owns(monitoringWatchObject("PrometheusRule")) }},
+		{schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "ServiceMonitor"}, true, func() { builder = builder.Owns(monitoringWatchObject("ServiceMonitor")) }},
+		{schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "PrometheusRule"}, true, func() { builder = builder.Owns(monitoringWatchObject("PrometheusRule")) }},
+		{schema.GroupVersionKind{Group: "wgpolicyk8s.io", Version: "v1alpha2", Kind: "PolicyReport"}, false, func() {
+			builder = builder.Watches(securityReportWatchObject(), handler.EnqueueRequestsFromMapFunc(r.applicationsForSecurityReport))
+		}},
 	}
 	allProgressiveResourcesAvailable := true
 	for _, watch := range optionalWatches {
@@ -516,7 +592,9 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		if err != nil {
 			return err
 		}
-		allProgressiveResourcesAvailable = allProgressiveResourcesAvailable && available
+		if watch.progressive {
+			allProgressiveResourcesAvailable = allProgressiveResourcesAvailable && available
+		}
 		if available {
 			watch.register()
 		}

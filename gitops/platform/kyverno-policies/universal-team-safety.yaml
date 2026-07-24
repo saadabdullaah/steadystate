@@ -1,0 +1,68 @@
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: steadystate-universal-team-safety
+  labels:
+    app.kubernetes.io/part-of: steadystate
+spec:
+  validationActions:
+    - Deny
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 15
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: steadystate.dev/team
+          operator: Exists
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+  variables:
+    - name: containers
+      expression: >-
+        object.spec.containers +
+        object.spec.?initContainers.orValue([]) +
+        object.spec.?ephemeralContainers.orValue([])
+  validations:
+    - expression: >-
+        (!has(object.spec.hostNetwork) || !object.spec.hostNetwork) &&
+        (!has(object.spec.hostPID) || !object.spec.hostPID) &&
+        (!has(object.spec.hostIPC) || !object.spec.hostIPC)
+      message: Team Pods must not use host namespaces.
+    - expression: >-
+        !has(object.spec.volumes) ||
+        object.spec.volumes.all(volume, !has(volume.hostPath))
+      message: Team Pods must not use hostPath volumes.
+    - expression: >-
+        variables.containers.all(container,
+          !has(container.securityContext) ||
+          !has(container.securityContext.privileged) ||
+          !container.securityContext.privileged)
+      message: Team Pods must not use privileged containers.
+    - expression: >-
+        variables.containers.all(container,
+          !container.image.matches('(^|.*/)[^:@]+(:latest)?$'))
+      message: Team Pod images must use an explicit immutable version or digest, never latest.
+    - expression: >-
+        variables.containers.all(container,
+          has(container.resources) &&
+          has(container.resources.requests) &&
+          has(container.resources.limits) &&
+          has(container.resources.requests.cpu) &&
+          has(container.resources.requests.memory) &&
+          has(container.resources.limits.cpu) &&
+          has(container.resources.limits.memory))
+      message: Team Pod containers must declare CPU and memory requests and limits.

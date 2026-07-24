@@ -21,9 +21,12 @@ alertmanager:
 
 grafana:
   enabled: true
+  admin:
+    existingSecret: steadystate-grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
   defaultDashboardsEnabled: false
   env:
-    GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "true"
     # SteadyState provisions built-in datasources and dashboards only. Disable
     # Grafana's suggested-plugin downloads to keep hosted startup deterministic.
     GF_PLUGINS_PREINSTALL_DISABLED: "true"

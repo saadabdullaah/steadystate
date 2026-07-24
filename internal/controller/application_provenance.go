@@ -61,7 +61,7 @@ func resolvePodImageDigest(pods []corev1.Pod, desiredImage string) imageDigestRe
 	missingImageID := false
 	for i := range pods {
 		pod := &pods[i]
-		if !pod.DeletionTimestamp.IsZero() || !podIsReady(pod) || podContainerImage(pod, "application") != desiredImage {
+		if !pod.DeletionTimestamp.IsZero() || !podIsReady(pod) || !podImageMatchesDesired(podContainerImage(pod, "application"), desiredImage) {
 			continue
 		}
 		readyDesiredPods++
@@ -98,6 +98,18 @@ func resolvePodImageDigest(pods []corev1.Pod, desiredImage string) imageDigestRe
 		return imageDigestResolution{state: imageDigestResolved, digest: digest}
 	}
 	return imageDigestResolution{state: imageDigestPending, message: "waiting for the runtime image digest"}
+}
+
+func podImageMatchesDesired(observed, desired string) bool {
+	if observed == desired {
+		return true
+	}
+	separator := strings.LastIndex(desired, ":")
+	if separator < 0 {
+		return false
+	}
+	return strings.HasPrefix(observed, desired[:separator]+"@sha256:") &&
+		imageDigestPattern.MatchString(observed)
 }
 func podIsReady(pod *corev1.Pod) bool {
 	for i := range pod.Status.Conditions {

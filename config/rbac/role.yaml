@@ -182,3 +182,11 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - wgpolicyk8s.io
+  resources:
+  - policyreports
+  verbs:
+  - get
+  - list
+  - watch

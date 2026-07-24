@@ -1,0 +1,74 @@
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: steadystate-application-pod-security
+  labels:
+    app.kubernetes.io/part-of: steadystate
+spec:
+  validationActions:
+    - Deny
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 15
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: steadystate.dev/team
+          operator: Exists
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+  matchConditions:
+    - name: steadystate-application
+      expression: >-
+        has(object.metadata.labels) &&
+        (
+          ('steadystate.dev/workload-kind' in object.metadata.labels &&
+           object.metadata.labels['steadystate.dev/workload-kind'] == 'application') ||
+          ('app.kubernetes.io/managed-by' in object.metadata.labels &&
+           object.metadata.labels['app.kubernetes.io/managed-by'] == 'steadystate')
+        )
+  variables:
+    - name: containers
+      expression: >-
+        object.spec.containers +
+        object.spec.?initContainers.orValue([]) +
+        object.spec.?ephemeralContainers.orValue([])
+  validations:
+    - expression: >-
+        variables.containers.all(container,
+          has(container.securityContext) &&
+          has(container.securityContext.runAsNonRoot) &&
+          container.securityContext.runAsNonRoot)
+      message: SteadyState Application containers must run as non-root.
+    - expression: >-
+        variables.containers.all(container,
+          has(container.securityContext) &&
+          has(container.securityContext.readOnlyRootFilesystem) &&
+          container.securityContext.readOnlyRootFilesystem)
+      message: SteadyState Application containers must use a read-only root filesystem.
+    - expression: >-
+        variables.containers.all(container,
+          has(container.securityContext) &&
+          has(container.securityContext.allowPrivilegeEscalation) &&
+          !container.securityContext.allowPrivilegeEscalation)
+      message: SteadyState Application containers must disable privilege escalation.
+    - expression: >-
+        variables.containers.all(container,
+          has(container.securityContext) &&
+          has(container.securityContext.capabilities) &&
+          has(container.securityContext.capabilities.drop) &&
+          container.securityContext.capabilities.drop.exists(capability, capability == 'ALL'))
+      message: SteadyState Application containers must drop all Linux capabilities.

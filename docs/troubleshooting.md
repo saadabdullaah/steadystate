@@ -322,3 +322,45 @@ kubectl get service,endpointslice -n team-payments demo
 ```
 
 Fast burn requires both five-minute and one-hour windows above `14.4`; slow burn requires both 30-minute and six-hour windows above `6`. A single short spike must not satisfy the multi-window alert.
+
+## A Team Pod is denied by Kyverno
+
+```powershell
+kubectl get validatingpolicy,imagevalidatingpolicy
+kubectl get policyreport -A
+kubectl get replicaset -n team-payments -o yaml
+kubectl logs -n kyverno -l app.kubernetes.io/component=admission-controller --all-containers --tail=300
+.\scripts\dev.ps1 verify-security
+```
+
+Read the admission message before changing a policy. Universal controls reject privileged containers, host namespaces, hostPath, `latest`, missing resources, and weak security contexts. Unmanaged Team Pods always require a trusted signature and SPDX attestation. Managed Applications require them only when `requireSignedImage=true`. Do not bypass policy by copying controller labels; Team owners cannot create native Pods or Deployments, and the label-spoofing regression is tested.
+
+## A signed image is still rejected
+
+Verify the immutable digest and exact certificate identity:
+
+```powershell
+cosign verify --certificate-identity 'https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' ghcr.io/saadabdullaah/steadystate-demo-app:v0.6.0
+cosign verify-attestation --type spdxjson --certificate-identity 'https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' ghcr.io/saadabdullaah/steadystate-demo-app:v0.6.0
+```
+
+A valid signature from a branch, another workflow, or the Phase 6 acceptance workflow is intentionally denied. A Sigstore/Rekor or GHCR outage fails closed and must not be worked around by disabling `failurePolicy: Fail`. Wait for the dependency to recover, retain the last healthy workload, and rerun delivery.
+
+## Application reports SecurityPolicyRejected
+
+```powershell
+kubectl get application -n team-payments demo -o yaml
+kubectl describe replicaset -n team-payments
+kubectl get policyreport -n team-payments -o yaml
+```
+
+The controller preserves the active version, runtime digest, Git revision, and serving children while the rejected candidate remains desired. Fix the image signature, attestation, or Pod contract in Git and merge a recovery commit. Do not patch status or delete the healthy ReplicaSet.
+
+## SOPS decryption or Grafana login fails
+
+```powershell
+.\scripts\dev.ps1 verify-secrets
+.\scripts\dev.ps1 decrypt-secrets
+```
+
+The local identity belongs only at `.artifacts/secrets/steadystate.agekey`; GitHub uses the `SOPS_AGE_KEY` repository secret. Never commit the decrypted `.artifacts/secrets/rendered/grafana-admin.yaml` or paste the private key into logs. To rotate the Grafana credential, run `rotate-secrets`, review only the encrypted diff, deploy it, verify login, and retire the prior credential. If the age private key is lost, recover it from the repository secret or rotate to a new recipient and re-encrypt before deleting the old key.

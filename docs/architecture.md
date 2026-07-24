@@ -1,4 +1,4 @@
-# Architecture Through Phase 5 Observability
+# Architecture Through Phase 6 Supply-Chain Security
 
 ```mermaid
 flowchart TB
@@ -36,6 +36,8 @@ flowchart TB
         Loki["Loki 24h logs"]
         OTel["OpenTelemetry Collector"]
         Tempo["Tempo 24h traces"]
+        Kyverno["Kyverno stable CEL admission"]
+        Policies["Safety / signature / SBOM policies"]
         Rollouts["Argo Rollouts / Gateway plugin"]
         EG["Envoy Gateway / shared Gateway"]
         Argo --> TeamCR
@@ -48,6 +50,7 @@ flowchart TB
         Argo --> Loki
         Argo --> OTel
         Argo --> Tempo
+        Argo --> Kyverno --> Policies
         TeamCR --> Manager --> Boundary
         AppCR --> Manager
         Manager --> Rolling
@@ -87,7 +90,19 @@ flowchart TB
 
 Every profile disables kindnet and installs Calico, making NetworkPolicy behavior observable. Envoy Gateway provides the maintained Gateway API implementation for north-south traffic.
 
-Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Phase 4 adds pinned Argo Rollouts, the Gateway API traffic-router plugin, a trimmed Prometheus stack, operator-generated analysis/monitoring resources, reversible strategy migration, and automatic metric-gated promotion or rollback. Phase 5 extends that monitoring plane with logs, traces, SLO rules, dashboards, and truthful service health. Admission policy and stateful recovery remain later phases.
+Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Phase 4 adds pinned Argo Rollouts, the Gateway API traffic-router plugin, a trimmed Prometheus stack, operator-generated analysis/monitoring resources, reversible strategy migration, and automatic metric-gated promotion or rollback. Phase 5 extends that monitoring plane with logs, traces, SLO rules, dashboards, and truthful service health. Phase 6 adds OIDC-signed/SBOM-attested images, stable CEL admission policy, SOPS/age secret custody, security status, and network isolation. Stateful recovery remains Phase 7.
+
+## Supply-chain trust and admission contract
+
+The Demo release workflow is the only trusted image issuer. GitHub OIDC keylessly signs the immutable good and bad digests and attaches separate SPDX JSON attestations. Kyverno accepts a signature only when its certificate subject is the exact `demo-release.yml@refs/heads/main` workflow and its issuer is GitHub Actions. Tags are mutated to verified digests at admission. A signature from any other repository, workflow, or ref remains untrusted even when cryptographically valid.
+
+Stable Kyverno `ValidatingPolicy` resources enforce universal Team safety and the stricter SteadyState application Pod contract. The `ImageValidatingPolicy` applies to every unmanaged Team Pod and to managed Applications labeled `steadystate.dev/require-signed-image=true`. Platform namespaces are selected out explicitly; Team users cannot create native workloads or forge the trusted operator path through their namespaced RBAC.
+
+Every Application Pod carries deterministic workload-kind, signature-request, and isolation labels. Team default-deny remains the base. Non-isolated Applications may communicate only with other non-isolated Applications inside their Team; isolated Applications retain only the already declared Gateway, Prometheus, OTel, and DNS paths. A future Database path must be added explicitly.
+
+Admission failure is observed through ReplicaSet failure state and optional PolicyReport watches. The controller reports `SecurityPolicyReady=False` with reason `SecurityPolicyRejected`, sanitizes the message, and preserves the last healthy active version, digest, revision, and serving children. When signature verification is not requested, status says `SignatureVerificationNotRequested`; it never claims verification occurred.
+
+Grafana credentials are encrypted in Git using SOPS and a committed public age recipient. The private identity is ignored locally and stored in GitHub as `SOPS_AGE_KEY`. Bootstrap decrypts into one ignored short-lived file, applies it before the monitoring child, and deletes the plaintext. Secret values are excluded from logs, evidence, and diagnostics.
 
 ## Observability ownership and data flow
 

@@ -14,6 +14,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 concurrency:
   group: demo-release
@@ -77,6 +78,7 @@ jobs:
       - name: Test demo application
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path .artifacts/security | Out-Null
           $goFiles = @(Get-ChildItem -LiteralPath apps/demo-app -Filter '*.go' -File | ForEach-Object FullName)
           $unformatted = @(gofmt -l @goFiles)
           if ($LASTEXITCODE -ne 0) { throw 'gofmt failed.' }
@@ -85,6 +87,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'go vet failed for the demo application.' }
           go test -race ./apps/demo-app/...
           if ($LASTEXITCODE -ne 0) { throw 'Demo application tests failed.' }
+
+      - name: Scan source before publication
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL
+          ignore-unfixed: true
+          skip-dirs: tests/security
+          format: json
+          output: .artifacts/security/demo-source-trivy.json
+          exit-code: "1"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
@@ -232,6 +247,88 @@ jobs:
           "digest=$goodDigest" >> $env:GITHUB_OUTPUT
           "bad_digest=$badDigest" >> $env:GITHUB_OUTPUT
 
+      - name: Scan immutable good image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.registry.outputs.digest }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: .artifacts/security/demo-good-trivy.json
+          exit-code: "1"
+
+      - name: Scan immutable bad image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.registry.outputs.bad_digest }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: .artifacts/security/demo-bad-trivy.json
+          exit-code: "1"
+
+      - name: Generate good-image SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.registry.outputs.digest }}
+          format: spdx-json
+          output-file: .artifacts/security/demo-good.spdx.json
+          artifact-name: demo-good-${{ steps.metadata.outputs.version }}.spdx.json
+          syft-version: v1.48.0
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate bad-image SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.registry.outputs.bad_digest }}
+          format: spdx-json
+          output-file: .artifacts/security/demo-bad.spdx.json
+          artifact-name: demo-bad-${{ steps.metadata.outputs.version }}.spdx.json
+          syft-version: v1.48.0
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Install pinned Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v3.1.2
+
+      - name: Sign, attest, and verify immutable images
+        shell: pwsh
+        env:
+          GOOD_DIGEST: ${{ steps.registry.outputs.digest }}
+          BAD_DIGEST: ${{ steps.registry.outputs.bad_digest }}
+        run: |
+          $identity = 'https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main'
+          $issuer = 'https://token.actions.githubusercontent.com'
+          $subjects = @(
+            @{ Reference = "$env:IMAGE@$env:GOOD_DIGEST"; SBOM = '.artifacts/security/demo-good.spdx.json' },
+            @{ Reference = "$env:IMAGE@$env:BAD_DIGEST"; SBOM = '.artifacts/security/demo-bad.spdx.json' }
+          )
+          foreach ($subject in $subjects) {
+            cosign sign --yes $subject.Reference
+            if ($LASTEXITCODE -ne 0) { throw "Cosign signing failed for $($subject.Reference)." }
+            cosign attest --yes --type spdxjson --predicate $subject.SBOM $subject.Reference
+            if ($LASTEXITCODE -ne 0) { throw "Cosign SBOM attestation failed for $($subject.Reference)." }
+            cosign verify --certificate-identity $identity --certificate-oidc-issuer $issuer $subject.Reference | Out-File -Encoding utf8 "$($subject.SBOM).signature.json"
+            if ($LASTEXITCODE -ne 0) { throw "Cosign signature verification failed for $($subject.Reference)." }
+            cosign verify-attestation --type spdxjson --certificate-identity $identity --certificate-oidc-issuer $issuer $subject.Reference | Out-File -Encoding utf8 "$($subject.SBOM).attestation.json"
+            if ($LASTEXITCODE -ne 0) { throw "Cosign SBOM attestation verification failed for $($subject.Reference)." }
+          }
+
+      - name: Upload security reports and SBOMs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: demo-security-${{ github.sha }}
+          path: .artifacts/security/
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
+
       - name: Create delivery installation token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -255,6 +352,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ steps.metadata.outputs.version }}
           DIGEST: ${{ steps.registry.outputs.digest }}
+          BAD_DIGEST: ${{ steps.registry.outputs.bad_digest }}
         run: |
           $manifest = 'gitops/applications/demo/application.yaml'
           $branch = "automation/demo-app-$env:VERSION"
@@ -264,6 +362,10 @@ jobs:
           $tagMatches = [regex]::Matches($content, $tagPattern)
           if ($tagMatches.Count -ne 1) { throw "Expected exactly one demo image tag in $manifest." }
           if ($tagMatches[0].Value -eq "    tag: $env:VERSION") {
+              if ($env:VERSION -eq 'v0.6.0' -and
+                  ($content -notmatch '(?m)^    requireSignedImage: true$' -or $content -notmatch '(?m)^    networkIsolation: true$')) {
+                  throw 'The Phase 6 image is current but its signed-image and network-isolation controls are not active.'
+              }
               Write-Host "$manifest already deploys $env:VERSION; no delivery PR is required."
               exit 0
           }
@@ -301,6 +403,13 @@ jobs:
           $tagMatches = [regex]::Matches($content, $tagPattern)
           if ($tagMatches.Count -ne 1) { throw "Expected exactly one demo image tag in $manifest." }
           $updated = [regex]::Replace($content, $tagPattern, "    tag: $env:VERSION")
+          if ($env:VERSION -eq 'v0.6.0') {
+              $updated = $updated -replace '(?m)^    requireSignedImage: false$', '    requireSignedImage: true'
+              $updated = $updated -replace '(?m)^    networkIsolation: false$', '    networkIsolation: true'
+              if ($updated -notmatch '(?m)^    requireSignedImage: true$' -or $updated -notmatch '(?m)^    networkIsolation: true$') {
+                  throw 'Phase 6 delivery did not activate signed-image verification and network isolation.'
+              }
+          }
           [IO.File]::WriteAllText($manifest, $updated, [Text.UTF8Encoding]::new($false))
           $worktreeChanges = @(git diff --name-only)
           $unexpected = @($worktreeChanges | Where-Object { $_ -ne $manifest })
@@ -327,6 +436,9 @@ jobs:
           - Source commit: $env:GITHUB_SHA
           - Semver: $env:VERSION
           - Image digest: $env:DIGEST
+          - Bad-variant digest: $env:BAD_DIGEST
+          - SBOM attestation: SPDX JSON, verified with Cosign
+          - Security activation: signed-image verification and network isolation
           - Workflow: $workflowUrl
           - Manifest: $manifest
           "@

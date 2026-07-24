@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cnpg-label-bypass
+  namespace: team-payments
+  labels:
+    cnpg.io/cluster: fake
+    app.kubernetes.io/managed-by: steadystate
+    steadystate.dev/workload-kind: application
+    steadystate.dev/require-signed-image: "false"
+spec:
+  hostPID: true
+  containers:
+    - name: application
+      image: alpine:latest
+      securityContext:
+        privileged: true

@@ -15,12 +15,14 @@ export XDG_CACHE_HOME="$TOOLS_ROOT/cache/xdg/$PLATFORM"
 FORCE=false
 BASE_ONLY=false
 SKIP_LINT=false
+INCLUDE_SECURITY=false
 
 for argument in "$@"; do
   case "$argument" in
     --force) FORCE=true ;;
     --base-only) BASE_ONLY=true ;;
     --skip-lint) SKIP_LINT=true ;;
+    --include-security) INCLUDE_SECURITY=true ;;
     *) echo "Unknown argument: $argument" >&2; exit 2 ;;
   esac
 done
@@ -88,6 +90,50 @@ download_verified \
 mkdir -p "$TOOLS_ROOT/k6-extract"
 tar -xzf "$k6_archive" -C "$TOOLS_ROOT/k6-extract"
 cp "$TOOLS_ROOT/k6-extract/k6-v${K6_VERSION}-linux-amd64/k6" "$BIN_DIR/k6"
+
+if [[ "$BASE_ONLY" == false || "$INCLUDE_SECURITY" == true ]]; then
+  kyverno_archive="$DOWNLOAD_DIR/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz"
+  download_verified \
+    "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz" \
+    "$kyverno_archive" \
+    "$KYVERNO_CLI_LINUX_AMD64_SHA256"
+  mkdir -p "$TOOLS_ROOT/kyverno-extract/linux-amd64"
+  tar -xzf "$kyverno_archive" -C "$TOOLS_ROOT/kyverno-extract/linux-amd64"
+  cp "$TOOLS_ROOT/kyverno-extract/linux-amd64/kyverno" "$BIN_DIR/kyverno"
+  chmod +x "$BIN_DIR/kyverno"
+
+  download_verified \
+    "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64" \
+    "$BIN_DIR/cosign" \
+    "$COSIGN_LINUX_AMD64_SHA256"
+  syft_archive="$DOWNLOAD_DIR/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+  download_verified \
+    "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" \
+    "$syft_archive" \
+    "$SYFT_LINUX_AMD64_SHA256"
+  mkdir -p "$TOOLS_ROOT/syft-extract/linux-amd64"
+  tar -xzf "$syft_archive" -C "$TOOLS_ROOT/syft-extract/linux-amd64"
+  cp "$TOOLS_ROOT/syft-extract/linux-amd64/syft" "$BIN_DIR/syft"
+
+  chmod +x "$BIN_DIR/cosign" "$BIN_DIR/syft"
+fi
+
+# GitOps bootstrap decrypts the committed platform Secret, so SOPS and age are
+# part of the base deployment toolchain rather than optional scanners.
+download_verified \
+  "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64" \
+  "$BIN_DIR/sops" \
+  "$SOPS_LINUX_AMD64_SHA256"
+age_archive="$DOWNLOAD_DIR/age-v${AGE_VERSION}-linux-amd64.tar.gz"
+download_verified \
+  "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz" \
+  "$age_archive" \
+  "$AGE_LINUX_AMD64_SHA256"
+mkdir -p "$TOOLS_ROOT/age-extract/linux-amd64"
+tar -xzf "$age_archive" -C "$TOOLS_ROOT/age-extract/linux-amd64"
+cp "$TOOLS_ROOT/age-extract/linux-amd64/age/age" "$BIN_DIR/age"
+cp "$TOOLS_ROOT/age-extract/linux-amd64/age/age-keygen" "$BIN_DIR/age-keygen"
+chmod +x "$BIN_DIR/sops" "$BIN_DIR/age" "$BIN_DIR/age-keygen"
 
 download_verified \
   "https://github.com/kubernetes-sigs/kubebuilder/releases/download/v${KUBEBUILDER_VERSION}/kubebuilder_linux_amd64" \

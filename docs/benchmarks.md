@@ -12,6 +12,8 @@ SteadyState's limits are acceptance boundaries for a disposable laptop-scale pla
 | Phase 4 | Bad-candidate abort | `<=180s` after 10% | passed in run `29681093123` |
 | Phase 5 | Loki + Tempo + OTel + Alloy + existing monitoring | `<=900 MiB` | 844,398,592 bytes in run `29843478650` |
 | Phase 5 | Standard-profile in-cluster total | `<=6.5 GiB` | 5,272,350,720 bytes in run `29843478650` |
+| Phase 6 | Kyverno working set | `<=500 MiB` | pending exact-main acceptance |
+| Phase 6 | Secured standard-profile in-cluster total | `<=7 GiB` | pending exact-main acceptance |
 
 Phase 5 measures `container_memory_working_set_bytes` from Prometheus after telemetry and SLO checks have run. To distinguish the bounded steady working set from the intentional fast-burn load spike, both budgets must hold for three consecutive samples 15 seconds apart within a five-minute window. Zero/absent measurements and a budget that never stabilizes fail acceptance. Evidence records every sample, the final raw byte counts, timestamps, and a per-container observability breakdown; diagnostics capture the corresponding Pods and resource declarations.
 

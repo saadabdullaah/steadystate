@@ -93,7 +93,7 @@ jobs:
   security:
     name: security
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write
@@ -102,12 +102,15 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+      - name: Prepare security report directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path .artifacts/security | Out-Null
       - name: Scan Git history for secrets
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_VERSION: 8.28.0
-      - name: Trivy repository and IaC scan
+      - name: Trivy repository and IaC machine-readable report
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
@@ -115,15 +118,68 @@ jobs:
           scanners: vuln,secret,misconfig
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+          skip-dirs: tests/security
+          trivyignores: .trivyignore.yaml
+          format: json
+          output: .artifacts/security/trivy.json
+          exit-code: "0"
+      - name: Gosec machine-readable report
+        continue-on-error: true
+        uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3
+        with:
+          args: "-no-fail -fmt sarif -out .artifacts/security/gosec.sarif ./..."
+      - name: Go vulnerability machine-readable report
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f
+        with:
+          repo-checkout: false
+          go-version-input: "1.25.12"
+          go-package: ./...
+          output-format: sarif
+          output-file: .artifacts/security/govulncheck.sarif
+      - name: Gosec blocking gate
+        uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3
+        with:
+          args: "-severity high -confidence medium ./..."
+      - name: Go vulnerability gate
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f
+        with:
+          repo-checkout: false
+          go-version-input: "1.25.12"
+          go-package: ./...
+      - name: Trivy repository and IaC blocking gate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          skip-dirs: tests/security
           trivyignores: .trivyignore.yaml
           exit-code: "1"
+      - name: Install security policy CLI
+        shell: pwsh
+        run: ./scripts/install-tools.ps1 -BaseOnly -IncludeSecurity
+      - name: Test enforced Kyverno policies
+        shell: pwsh
+        run: ./scripts/security-static.ps1
       - name: Checkov IaC scan
         uses: bridgecrewio/checkov-action@7b972723c44fb3d256283fac96fae5d7c1894bb7 # pinned snapshot
         with:
           directory: .
           framework: kubernetes,github_actions
+          skip_path: tests/security
           quiet: true
           soft_fail: false
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: security-reports-${{ github.sha }}
+          path: .artifacts/security/
+          retention-days: 30
+          if-no-files-found: warn
+          include-hidden-files: true
 
   kind-smoke:
     name: kind-smoke

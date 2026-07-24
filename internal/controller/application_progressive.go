@@ -690,7 +690,7 @@ func failedMetricMessage(run *rolloutsv1alpha1.AnalysisRun) string {
 func canaryWorkloadStatus(app *platformv1alpha1.Application, state *applicationRuntimeState, digest imageDigestResolution, sourceRevision string) (platformv1alpha1.ApplicationStatus, bool) {
 	status := baseStatus(app)
 	setCondition(&status, app.Generation, conditionConfigurationReady, metav1.ConditionTrue, "ResourcesReconciled", "Progressive-delivery resources match the Application specification")
-	setCondition(&status, app.Generation, conditionSecurityPolicyReady, metav1.ConditionTrue, "Hardened", "Workload security settings are applied")
+	setSecurityPolicyReady(&status, app)
 	setCandidateVersion(&status, app)
 
 	routeReady, routeRejected := routeState(state.route)
@@ -783,7 +783,7 @@ func strategyMigrationStatus(app *platformv1alpha1.Application, state *applicati
 	status.Phase = platformv1alpha1.ApplicationPhaseProgressing
 	setCandidateVersion(&status, app)
 	setCondition(&status, app.Generation, conditionConfigurationReady, metav1.ConditionTrue, "ResourcesReconciled", "Migration resources are reconciled")
-	setCondition(&status, app.Generation, conditionSecurityPolicyReady, metav1.ConditionTrue, "Hardened", "Workload security settings are applied")
+	setSecurityPolicyReady(&status, app)
 	deploymentReady, _ := deploymentState(state.deployment, app.Spec.Runtime.Replicas.Min)
 	routeReady, routeRejected := routeState(state.route)
 	rolloutAvailable := state.rollout != nil && state.rollout.Status.AvailableReplicas >= app.Spec.Runtime.Replicas.Min
@@ -847,5 +847,11 @@ func servingApplicationAtVersion(app *platformv1alpha1.Application, version stri
 func monitoringWatchObject(kind string) *unstructured.Unstructured {
 	object := &unstructured.Unstructured{}
 	object.SetGroupVersionKind(schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: kind})
+	return object
+}
+
+func securityReportWatchObject() *unstructured.Unstructured {
+	object := &unstructured.Unstructured{}
+	object.SetGroupVersionKind(schema.GroupVersionKind{Group: "wgpolicyk8s.io", Version: "v1alpha2", Kind: "PolicyReport"})
 	return object
 }

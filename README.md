@@ -2,9 +2,9 @@
 
 SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, and tested recovery without requiring a cloud account.
 
-Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`.
+Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`. Phase 6 adds signed and SPDX-attested demo images, fail-closed Kyverno admission, workload isolation, truthful security status, encrypted Git secrets, security scanners, and a documented threat model.
 
-> Status: Phases 0 through 4 are released through `v0.4.0`. Phase 5 is implemented as a `v0.5.0` release candidate, and its branch acceptance evidence is verified. Merge, demo-image delivery, exact-`main` regression workflows, tag, and release remain required.
+> Status: Phases 0 through 5 are released through `v0.5.0`. Phase 6 is implemented on its consolidated release-candidate branch; signed `v0.6.0` image publication, the generated security-activation PR, hosted acceptance, exact-`main` regression gates, tag, and release remain required.
 
 ## Architecture
 
@@ -148,6 +148,18 @@ Grafana is available through `http://grafana.localtest.me:8080`; Prometheus, Lok
 
 [Hosted Phase 5 acceptance run 29843478650](https://github.com/saadabdullaah/steadystate/actions/runs/29843478650) passed all eight checks against PR merge revision `1ba5bfa`: healthy pinned backends and Grafana datasources, one request correlated across Prometheus/Loki/Tempo, log/trace and metrics opt-outs, fast-burn alert propagation through Prometheus/Alertmanager/Grafana, resource budgets, and the progressive-delivery regression. [Artifact 8500873862](https://github.com/saadabdullaah/steadystate/actions/runs/29843478650/artifacts/8500873862) contains the 197,514-byte GIF, schema-versioned JSON, queries, alert and dashboard snapshots, rendered state, component logs, and success diagnostics. GitHub records artifact SHA-256 `f67b3e7090ee00ed60853dcfdbdffdc209a55c4bd7d56a4b7f56119852827cd9`; the GIF SHA-256 is `3791b01210e9842a0a32ae6ce6170a78a31fa8c8134fc61919a1c0398d0665d7`.
 
+To verify Phase 6 security contracts:
+
+```powershell
+.\scripts\dev.ps1 tools
+.\scripts\dev.ps1 verify-security
+.\scripts\dev.ps1 verify-secrets
+```
+
+`verify-security` renders the GitOps graph and runs the pinned Kyverno CLI against compliant, vulnerable, and label-spoofing fixtures. The encrypted Grafana administrator Secret is safe to commit; its private age identity remains only in `.artifacts/secrets/steadystate.agekey` locally and the `SOPS_AGE_KEY` repository secret in GitHub. `decrypt-secrets` writes plaintext only to the ignored short-lived render directory. `rotate-secrets` creates a new random password and re-encrypts it to the committed public recipient.
+
+After the consolidated Phase 6 change reaches `main`, the Demo release workflow publishes immutable `v0.6.0` and `v0.6.0-bad` images, generates separate SPDX JSON SBOMs, signs and attests both digests with GitHub OIDC, verifies the exact workflow identity and issuer, and opens one GitOps PR. That PR changes only the demo manifest: it advances the tag and activates `requireSignedImage` and `networkIsolation`.
+
 Use `-Profile standard` for one worker or `-Profile full` for two workers. Override ports consistently when the defaults are occupied:
 
 ```powershell
@@ -171,13 +183,16 @@ make phase4-acceptance PROFILE=standard
 make verify-observability
 make test-observability PROFILE=standard
 make phase5-acceptance PROFILE=standard
+make verify-security
+make verify-secrets
+make phase6-acceptance PROFILE=standard
 make undeploy-gitops
 make destroy
 ```
 
 ## Automated demo delivery
 
-`apps/demo-app/VERSION` is the authoritative strict semver. A runtime-affecting demo change merged to `main` must bump it. The serialized Demo release workflow tests and publishes `linux/amd64` images to the public [SteadyState demo-app package](https://github.com/saadabdullaah/steadystate/pkgs/container/steadystate-demo-app) under immutable semver and full-source-SHA tags, verifies tag reuse by digest, and uses the repository-scoped delivery GitHub App only to open or update the GitOps manifest PR. Good and deterministic ten-percent-error variants remain immutable inputs for progressive-delivery and SLO acceptance. The `v0.5.0` binary adds JSON access logs and OTLP tracing without logging bodies, query strings, credentials, or request values. No mutable `latest` tag is published, and normal application delivery begins only after the generated good-image PR is reviewed and merged.
+`apps/demo-app/VERSION` is the authoritative strict semver. A runtime-affecting demo change merged to `main` must bump it. The serialized Demo release workflow tests and publishes `linux/amd64` images to the public [SteadyState demo-app package](https://github.com/saadabdullaah/steadystate/pkgs/container/steadystate-demo-app) under immutable semver and full-source-SHA tags, verifies tag reuse by digest, and uses the repository-scoped delivery GitHub App only to open or update the GitOps manifest PR. Good and deterministic ten-percent-error variants remain immutable inputs for progressive-delivery and SLO acceptance. From `v0.6.0`, both variants are scanned, described by separate SPDX JSON SBOMs, keylessly signed, attested, and verified against the exact main-branch release workflow identity. No mutable `latest` tag is published, and normal application delivery begins only after the generated PR is reviewed and merged.
 
 ## Commands
 
@@ -205,6 +220,10 @@ make destroy
 | `verify-observability` | Verify chart checksums, deterministic GitOps renders, telemetry builders, SLO rules, datasources, and dashboards |
 | `test-observability` | Run the Phase 5 correlated telemetry, opt-out, SLO alert, regression, and memory-budget proof on a prepared cluster |
 | `phase5-acceptance` | Run one workflow-controlled Prepare, Test, Finalize, or failure-capture stage of Phase 5 acceptance |
+| `decrypt-secrets` / `verify-secrets` / `rotate-secrets` | Manage the SOPS-encrypted Grafana Secret without tracking or printing plaintext |
+| `verify-security` | Verify Kyverno pins, GitOps policy structure, enforced policy fixtures, and encrypted-secret custody |
+| `test-security` | Run the live signed-admission contract on a prepared secured cluster |
+| `phase6-acceptance` | Run one workflow-controlled Prepare, Test, Finalize, or failure-capture stage of Phase 6 acceptance |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |
 
