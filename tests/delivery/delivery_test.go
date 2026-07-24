@@ -146,7 +146,17 @@ func TestPhase4DemoProgressiveDeliveryContract(t *testing.T) {
 		}
 	}
 	phase3 := read(t, filepath.Join(root, "scripts", "phase3-acceptance.ps1"))
-	for _, value := range []string{"strategy: rolling", "strategy: canary", "metrics: false", "metrics: true"} {
+	for _, value := range []string{
+		"strategy: rolling",
+		"strategy: canary",
+		"metrics: false",
+		"metrics: true",
+		"logs: false",
+		"traces: false",
+		"requireSignedImage: false",
+		"networkIsolation: false",
+		"-DisableTelemetryPipeline -DisableSecurity",
+	} {
 		if !strings.Contains(phase3, value) {
 			t.Errorf("Phase 3 acceptance rolling override is missing %q", value)
 		}

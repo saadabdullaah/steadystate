@@ -759,6 +759,9 @@ func TestPhase6AcceptanceAndSecretCustodyContracts(t *testing.T) {
 		"sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6",
 		"cosign attest --yes --type spdxjson",
 		"cosign verify-attestation --type spdxjson",
+		"name: Build and load local platform images",
+		"./scripts/dev.ps1 build-images",
+		"./scripts/dev.ps1 load-images",
 		"phase6-acceptance-${{ github.sha }}",
 		".artifacts/phase6/acceptance/evidence.json",
 		".artifacts/diagnostics/",
@@ -941,6 +944,11 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 		"[Alias('o')]",
 		"Invoke-External git commit -m $Message | Out-Host",
 		"Write-Evidence -EvidenceResult failed",
+		"deploy-gitops -Profile $Profile -GitRevision $BranchName -DisableTelemetryPipeline -DisableSecurity",
+		"requireSignedImage: true$', '    requireSignedImage: false",
+		"networkIsolation: true$', '    networkIsolation: false",
+		"logs: true$', '    logs: false",
+		"traces: true$', '    traces: false",
 	} {
 		if !strings.Contains(script, token) {
 			t.Errorf("Phase 3 acceptance script is missing %q", token)

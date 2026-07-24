@@ -252,10 +252,16 @@ function Set-DemoManifest {
     )
     $content = Get-Content -Raw -LiteralPath $ManifestPath -Encoding UTF8
     # Keep the Phase 3 regression on its original rolling-delivery contract
-    # after the repository default advances to progressive delivery.
+    # after the repository default advances through later platform phases.
+    # Phase 3 intentionally proves Git-to-cluster delivery, not telemetry or
+    # signed-image admission, and its historical v0.1.0 baseline is local-only.
     $content = [regex]::Replace($content, '(?m)^    strategy: canary$', '    strategy: rolling')
     $content = [regex]::Replace($content, '(?ms)^    steps:\r?\n(?:      - weight: [0-9]+\r?\n        pause: [^\r\n]+\r?\n)+', '')
     $content = [regex]::Replace($content, '(?m)^    metrics: true$', '    metrics: false')
+    $content = [regex]::Replace($content, '(?m)^    logs: true$', '    logs: false')
+    $content = [regex]::Replace($content, '(?m)^    traces: true$', '    traces: false')
+    $content = [regex]::Replace($content, '(?m)^    requireSignedImage: true$', '    requireSignedImage: false')
+    $content = [regex]::Replace($content, '(?m)^    networkIsolation: true$', '    networkIsolation: false')
     $repositoryPattern = '(?m)^    repository: .+$'
     $tagPattern = '(?m)^    tag: v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$'
     if ([regex]::Matches($content, $repositoryPattern).Count -ne 1 -or
@@ -473,7 +479,7 @@ try {
     $timestamps.baselinePushedAt = (Get-Date).ToUniversalTime().ToString('o')
 
     $deployStarted = Get-Date
-    & (Join-Path $Root 'scripts/dev.ps1') deploy-gitops -Profile $Profile -GitRevision $BranchName
+    & (Join-Path $Root 'scripts/dev.ps1') deploy-gitops -Profile $Profile -GitRevision $BranchName -DisableTelemetryPipeline -DisableSecurity
     if ($LASTEXITCODE -ne 0) { throw 'GitOps deployment failed.' }
     Assert-DexAbsent
     foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root')) {

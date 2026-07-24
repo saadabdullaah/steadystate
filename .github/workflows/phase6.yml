@@ -189,6 +189,13 @@ jobs:
         shell: pwsh
         run: ./scripts/dev.ps1 bootstrap -Profile standard
 
+      - name: Build and load local platform images
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          ./scripts/dev.ps1 build-images
+          ./scripts/dev.ps1 load-images
+
       - name: Deploy exact-revision secured GitOps platform
         timeout-minutes: 15
         shell: pwsh
