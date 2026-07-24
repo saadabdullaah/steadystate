@@ -9,7 +9,7 @@ spec:
   owner: platform-team
   image:
     repository: ghcr.io/saadabdullaah/steadystate-demo-app
-    tag: v0.5.1
+    tag: v0.6.0
   runtime:
     port: 8080
     replicas:
@@ -43,6 +43,6 @@ spec:
     logs: true
     traces: true
   security:
-    requireSignedImage: false
+    requireSignedImage: true
     runAsNonRoot: true
-    networkIsolation: false
+    networkIsolation: true
