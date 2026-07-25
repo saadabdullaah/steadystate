@@ -88,11 +88,12 @@ spec:
 }
 
 function Test-SignedPod {
+    $podName = 'signed-phase6'
     $manifest = @"
 apiVersion: v1
 kind: Pod
 metadata:
-  name: signed-phase6
+  name: $podName
   namespace: $Namespace
   labels:
     steadystate.dev/security-acceptance: "true"
@@ -110,13 +111,25 @@ spec:
         readOnlyRootFilesystem: true
         runAsNonRoot: true
 "@
-    $object = $manifest | & kubectl apply --dry-run=server -f - -o json | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0) { throw 'The signed and attested v0.6.0 image was denied.' }
-    $admittedImage = [string]$object.spec.containers[0].image
-    if ($admittedImage -cnotmatch '^ghcr\.io/saadabdullaah/steadystate-demo-app@sha256:[0-9a-f]{64}$') {
-        throw "Kyverno did not digest-pin the admitted image: $admittedImage"
+    # ImageValidatingPolicy verifies dry-run requests but its digest mutation
+    # is observable on a persisted admission response. Create one disposable
+    # Pod, read the API-server object, and delete it before testing workloads.
+    & kubectl delete pod $podName -n $Namespace --ignore-not-found=true --wait=true --timeout=30s *> $null
+    try {
+        $null = @($manifest | & kubectl create -f - -o json)
+        if ($LASTEXITCODE -ne 0) { throw 'The signed and attested v0.6.0 image was denied.' }
+        $object = Invoke-KubectlJSON @('get','pod',$podName,'-n',$Namespace,'-o','json')
+        $admittedImage = [string]$object.spec.containers[0].image
+        if ($admittedImage -cnotmatch '^ghcr\.io/saadabdullaah/steadystate-demo-app@sha256:[0-9a-f]{64}$') {
+            throw "Kyverno did not digest-pin the admitted image: $admittedImage"
+        }
+        return $admittedImage
+    } finally {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & kubectl delete pod $podName -n $Namespace --ignore-not-found=true --wait=true --timeout=30s *> $null
+        $ErrorActionPreference = $previous
     }
-    return $admittedImage
 }
 
 function New-SecurityApplication([string]$Tag) {

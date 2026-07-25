@@ -784,6 +784,15 @@ func TestPhase6AcceptanceAndSecretCustodyContracts(t *testing.T) {
 			t.Errorf("Phase 6 acceptance is missing check %q", check)
 		}
 	}
+	for _, token := range []string{
+		"kubectl create -f - -o json",
+		"Invoke-KubectlJSON @('get','pod',$podName,'-n',$Namespace,'-o','json')",
+		"kubectl delete pod $podName",
+	} {
+		if !strings.Contains(script, token) {
+			t.Errorf("Phase 6 digest-pinning proof is missing %q", token)
+		}
+	}
 
 	encrypted := string(readFile(t, filepath.Join(root, "gitops", "secrets", "grafana-admin.enc.yaml")))
 	if !strings.Contains(encrypted, "ENC[AES256_GCM") ||
