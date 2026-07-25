@@ -2,8 +2,9 @@
 
 Phase 6 installs Kyverno `1.18.2` through chart `3.8.2` on Kubernetes
 `1.35.5`. The foundation checkpoint uses only the stable
-`policies.kyverno.io/v1` `ValidatingPolicy` and `ImageValidatingPolicy`
-APIs. Legacy `ClusterPolicy` resources are not installed.
+`policies.kyverno.io/v1` `ValidatingPolicy`, `MutatingPolicy`, and
+`ImageValidatingPolicy` APIs. Legacy `ClusterPolicy` resources are not
+installed.
 
 ## Enforced foundation
 
@@ -22,9 +23,16 @@ The tiers are:
   mutable latest images, or missing CPU/memory requests and limits;
 - SteadyState Application hardening: non-root, read-only root filesystem,
   no privilege escalation, and all capabilities dropped;
-- image verification: unmanaged Team Pods and managed Applications explicitly
-  requesting verification are resolved to digests and checked against the exact
-  main-branch demo-release OIDC identity.
+- image custody: a registry-aware `MutatingPolicy` rewrites unmanaged Team Pods
+  and managed Applications explicitly requesting verification to
+  `repository@sha256:...`; an `ImageValidatingPolicy` independently checks the
+  exact main-branch demo-release OIDC identity and SPDX attestation.
+
+Kyverno `1.18.2` evaluates `ImageValidatingPolicy.validationConfigurations`
+and records verification outcomes, but its CEL handler does not itself emit an
+image-field patch. Keeping resolution in a separate stable `MutatingPolicy`
+makes the immutable-reference boundary explicit and testable without falling
+back to deprecated `ClusterPolicy`.
 
 The image policy excludes a managed Application only when its operator-owned
 label explicitly says `steadystate.dev/require-signed-image=false`. Status then

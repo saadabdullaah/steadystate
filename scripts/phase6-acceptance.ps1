@@ -111,8 +111,8 @@ spec:
         readOnlyRootFilesystem: true
         runAsNonRoot: true
 "@
-    # ImageValidatingPolicy verifies dry-run requests but its digest mutation
-    # is observable on a persisted admission response. Create one disposable
+    # Signature/SBOM verification and registry-backed digest mutation are
+    # observable only on a persisted admission response. Create one disposable
     # Pod, read the API-server object, and delete it before testing workloads.
     & kubectl delete pod $podName -n $Namespace --ignore-not-found=true --wait=true --timeout=30s *> $null
     try {
@@ -160,7 +160,8 @@ spec:
 
 function Save-Snapshots {
     New-Item -ItemType Directory -Force -Path (Join-Path $ArtifactRoot 'snapshots'), (Join-Path $ArtifactRoot 'logs') | Out-Null
-    & kubectl get validatingpolicies.policies.kyverno.io,imagevalidatingpolicies.policies.kyverno.io -o yaml *> (Join-Path $ArtifactRoot 'snapshots/policies.yaml')
+    & kubectl get validatingpolicies.policies.kyverno.io,imagevalidatingpolicies.policies.kyverno.io,mutatingpolicies.policies.kyverno.io -o yaml *> (Join-Path $ArtifactRoot 'snapshots/policies.yaml')
+    & kubectl get mutatingwebhookconfiguration kyverno-resource-mutating-webhook-cfg -o yaml *> (Join-Path $ArtifactRoot 'snapshots/mutating-webhook.yaml')
     & kubectl get policyreports.wgpolicyk8s.io -A -o yaml *> (Join-Path $ArtifactRoot 'snapshots/policyreports.yaml')
     & kubectl get applications.platform.steadystate.dev,deployments,replicasets,pods,networkpolicies -n $Namespace -o yaml *> (Join-Path $ArtifactRoot 'snapshots/workloads.yaml')
     & kubectl logs -n kyverno -l app.kubernetes.io/part-of=kyverno --all-containers --tail=500 --prefix=true *> (Join-Path $ArtifactRoot 'logs/kyverno.log')
@@ -176,6 +177,20 @@ switch ($Stage) {
             & kubectl rollout status "deployment/$deployment" -n kyverno --timeout=180s
             if ($LASTEXITCODE -ne 0) { throw "$deployment is not ready." }
         }
+        $deadline = (Get-Date).AddMinutes(3)
+        $mutationReady = $false
+        do {
+            $ready = (& kubectl get mutatingpolicy.policies.kyverno.io/steadystate-pin-team-images -o jsonpath='{.status.conditionStatus.ready}' 2>$null)
+            $configuration = Invoke-KubectlJSON @('get','mutatingwebhookconfiguration','kyverno-resource-mutating-webhook-cfg','-o','json')
+            $mutationReady = $ready -eq 'true' -and @(
+                $configuration.webhooks | Where-Object {
+                    [string]$_.clientConfig.service.path -like '/mpol*' -and
+                    @($_.rules | Where-Object { 'pods' -in @($_.resources) }).Count -gt 0
+                }
+            ).Count -gt 0
+            if (-not $mutationReady) { Start-Sleep -Seconds 2 }
+        } while (-not $mutationReady -and (Get-Date) -lt $deadline)
+        if (-not $mutationReady) { throw 'The fail-closed image digest mutation webhook is not ready.' }
         $state = [pscustomobject]@{
             schemaVersion = 1
             result = 'running'

@@ -231,6 +231,7 @@ func TestProjectRestrictions(t *testing.T) {
 		"rbac.authorization.k8s.io/ClusterRole",
 		"rbac.authorization.k8s.io/ClusterRoleBinding",
 		"policies.kyverno.io/ImageValidatingPolicy",
+		"policies.kyverno.io/MutatingPolicy",
 		"policies.kyverno.io/ValidatingPolicy",
 		"/ConfigMap",
 		"/Secret",
@@ -475,8 +476,8 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 
 	policyPath := filepath.Join(root, "gitops", "platform", "kyverno-policies")
 	objects := decodeManifests(t, run(t, root, "kustomize", "build", policyPath))
-	if len(objects) != 3 {
-		t.Fatalf("Kyverno policy leaf rendered %d objects, want 3", len(objects))
+	if len(objects) != 4 {
+		t.Fatalf("Kyverno policy leaf rendered %d objects, want 4", len(objects))
 	}
 	for _, object := range objects {
 		name := objectString(object, "metadata", "name")
@@ -486,18 +487,10 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 		if objectString(object, "kind") == "ClusterPolicy" {
 			t.Fatal("legacy ClusterPolicy resources are forbidden")
 		}
-		actions, found, err := unstructured.NestedStringSlice(object, "spec", "validationActions")
-		if err != nil || !found || len(actions) != 1 || actions[0] != "Deny" {
-			t.Errorf("policy %s must enforce Deny: %#v", name, actions)
-		}
 		assertString(t, object, "Fail", "spec", "failurePolicy")
 		timeout, found, err := unstructured.NestedFieldNoCopy(object, "spec", "webhookConfiguration", "timeoutSeconds")
 		if err != nil || !found || timeout != float64(15) {
 			t.Errorf("policy %s must use a 15-second webhook timeout: found=%v value=%v err=%v", name, found, timeout, err)
-		}
-		background, found, err := unstructured.NestedBool(object, "spec", "evaluation", "background", "enabled")
-		if err != nil || !found || !background {
-			t.Errorf("policy %s must enable background evaluation", name)
 		}
 		selectors := nestedSlice(t, object, "spec", "matchConstraints", "namespaceSelector", "matchExpressions")
 		if len(selectors) != 1 {
@@ -507,6 +500,29 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 		selector := selectors[0].(map[string]any)
 		assertString(t, selector, "steadystate.dev/team", "key")
 		assertString(t, selector, "Exists", "operator")
+		if objectString(object, "kind") == "MutatingPolicy" {
+			continue
+		}
+		actions, found, err := unstructured.NestedStringSlice(object, "spec", "validationActions")
+		if err != nil || !found || len(actions) != 1 || actions[0] != "Deny" {
+			t.Errorf("policy %s must enforce Deny: %#v", name, actions)
+		}
+		background, found, err := unstructured.NestedBool(object, "spec", "evaluation", "background", "enabled")
+		if err != nil || !found || !background {
+			t.Errorf("policy %s must enable background evaluation", name)
+		}
+	}
+
+	pinPolicy := findObject(t, objects, "MutatingPolicy", "steadystate-pin-team-images")
+	mutations := nestedSlice(t, pinPolicy, "spec", "mutations")
+	if len(mutations) != 3 {
+		t.Fatalf("digest pinning policy rendered %d mutations, want containers, initContainers, and ephemeralContainers", len(mutations))
+	}
+	pinPolicyText := string(readFile(t, filepath.Join(policyPath, "pin-team-images.yaml")))
+	for _, token := range []string{"image.GetMetadata", ".registry", ".repository", ".digest", `+ "@" +`, "initContainers", "ephemeralContainers"} {
+		if !strings.Contains(pinPolicyText, token) {
+			t.Errorf("MutatingPolicy is missing digest-pinning contract %q", token)
+		}
 	}
 
 	imagePolicy := findObject(t, objects, "ImageValidatingPolicy", "steadystate-verify-team-images")
@@ -764,6 +780,7 @@ func TestPhase6AcceptanceAndSecretCustodyContracts(t *testing.T) {
 		"./scripts/dev.ps1 load-images",
 		"phase6-acceptance-${{ github.sha }}",
 		".artifacts/phase6/acceptance/evidence.json",
+		".artifacts/phase6/acceptance/snapshots/mutating-webhook.yaml",
 		".artifacts/diagnostics/",
 		"if-no-files-found: error",
 	} {
@@ -788,6 +805,8 @@ func TestPhase6AcceptanceAndSecretCustodyContracts(t *testing.T) {
 		"kubectl create -f - -o json",
 		"Invoke-KubectlJSON @('get','pod',$podName,'-n',$Namespace,'-o','json')",
 		"kubectl delete pod $podName",
+		"mutatingpolicy.policies.kyverno.io/steadystate-pin-team-images",
+		"kyverno-resource-mutating-webhook-cfg",
 	} {
 		if !strings.Contains(script, token) {
 			t.Errorf("Phase 6 digest-pinning proof is missing %q", token)
