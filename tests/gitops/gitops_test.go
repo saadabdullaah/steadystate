@@ -807,6 +807,9 @@ func TestPhase6AcceptanceAndSecretCustodyContracts(t *testing.T) {
 		"kubectl delete pod $podName",
 		"mutatingpolicy.policies.kyverno.io/steadystate-pin-team-images",
 		"kyverno-resource-mutating-webhook-cfg",
+		"'applications.platform.steadystate.dev','security-acceptance'",
+		"kubectl patch applications.platform.steadystate.dev security-acceptance",
+		"kubectl delete applications.platform.steadystate.dev security-acceptance",
 	} {
 		if !strings.Contains(script, token) {
 			t.Errorf("Phase 6 digest-pinning proof is missing %q", token)

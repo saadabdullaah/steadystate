@@ -241,19 +241,19 @@ switch ($Stage) {
             $started = Get-Date
             New-SecurityApplication -Tag 'v0.6.0'
             Wait-Until 300 'Signed security Application did not become Healthy.' {
-                $app = Invoke-KubectlJSON @('get','application','security-acceptance','-n',$Namespace,'-o','json')
+                $app = Invoke-KubectlJSON @('get','applications.platform.steadystate.dev','security-acceptance','-n',$Namespace,'-o','json')
                 return $app.status.phase -eq 'Healthy'
             }
-            $healthy = Invoke-KubectlJSON @('get','application','security-acceptance','-n',$Namespace,'-o','json')
+            $healthy = Invoke-KubectlJSON @('get','applications.platform.steadystate.dev','security-acceptance','-n',$Namespace,'-o','json')
             $tuple = [pscustomobject]@{version=$healthy.status.activeVersion;digest=$healthy.status.resolvedImageDigest;revision=$healthy.status.resolvedGitRevision}
-            & kubectl patch application security-acceptance -n $Namespace --type merge -p '{"spec":{"image":{"tag":"v0.5.0"}}}' | Out-Null
+            & kubectl patch applications.platform.steadystate.dev security-acceptance -n $Namespace --type merge -p '{"spec":{"image":{"tag":"v0.5.0"}}}' | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'Patching the unsigned candidate failed.' }
             Wait-Until 240 'Application did not report SecurityPolicyRejected.' {
-                $app = Invoke-KubectlJSON @('get','application','security-acceptance','-n',$Namespace,'-o','json')
+                $app = Invoke-KubectlJSON @('get','applications.platform.steadystate.dev','security-acceptance','-n',$Namespace,'-o','json')
                 $security = @($app.status.conditions | Where-Object {$_.type -eq 'SecurityPolicyReady'})[0]
                 return $app.status.phase -eq 'Degraded' -and $security.status -eq 'False' -and $security.reason -eq 'SecurityPolicyRejected'
             }
-            $rejected = Invoke-KubectlJSON @('get','application','security-acceptance','-n',$Namespace,'-o','json')
+            $rejected = Invoke-KubectlJSON @('get','applications.platform.steadystate.dev','security-acceptance','-n',$Namespace,'-o','json')
             if ($rejected.status.activeVersion -ne $tuple.version -or $rejected.status.resolvedImageDigest -ne $tuple.digest -or $rejected.status.resolvedGitRevision -ne $tuple.revision) {
                 throw 'Admission rejection overwrote the last healthy release tuple.'
             }
@@ -292,7 +292,7 @@ switch ($Stage) {
             Write-Host 'PHASE6_ACCEPTANCE_RESULT_FAILED' -ForegroundColor Red
             throw
         } finally {
-            & kubectl delete application security-acceptance -n $Namespace --ignore-not-found=true --wait=false *> $null
+            & kubectl delete applications.platform.steadystate.dev security-acceptance -n $Namespace --ignore-not-found=true --wait=false *> $null
         }
     }
     'Finalize' {
