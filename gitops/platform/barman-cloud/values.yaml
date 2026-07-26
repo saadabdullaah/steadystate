@@ -1,0 +1,10 @@
+replicaCount: 1
+crds:
+  create: true
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 192Mi

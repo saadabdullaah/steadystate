@@ -2,6 +2,8 @@ package gitops_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"os/exec"
@@ -37,6 +39,8 @@ func TestGitOpsRendersDeterministically(t *testing.T) {
 		"gitops/platform",
 		"gitops/platform/observability",
 		"gitops/platform/kyverno-policies",
+		"gitops/platform/data-namespaces",
+		"gitops/platform/local-path",
 		"gitops/teams/payments",
 		"gitops/applications/demo",
 	} {
@@ -77,6 +81,8 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"https://grafana.github.io/helm-charts",
 		"https://open-telemetry.github.io/opentelemetry-helm-charts",
 		"https://kyverno.github.io/kyverno/",
+		"https://charts.jetstack.io",
+		"https://cloudnative-pg.github.io/charts",
 	})
 
 	expectedWaves := map[string]string{
@@ -233,6 +239,9 @@ func TestProjectRestrictions(t *testing.T) {
 		"policies.kyverno.io/ImageValidatingPolicy",
 		"policies.kyverno.io/MutatingPolicy",
 		"policies.kyverno.io/ValidatingPolicy",
+		"admissionregistration.k8s.io/MutatingWebhookConfiguration",
+		"admissionregistration.k8s.io/ValidatingWebhookConfiguration",
+		"storage.k8s.io/StorageClass",
 		"/ConfigMap",
 		"/Secret",
 		"/ServiceAccount",
@@ -248,13 +257,16 @@ func TestProjectRestrictions(t *testing.T) {
 		"monitoring.coreos.com/Prometheus",
 		"monitoring.coreos.com/ServiceMonitor",
 		"policy/PodDisruptionBudget",
+		"batch/Job",
+		"cert-manager.io/Certificate",
+		"cert-manager.io/Issuer",
 	})
 	platformDestinations := nestedSlice(t, platform, "spec", "destinations")
 	actualDestinations := make([]string, 0, len(platformDestinations))
 	for _, raw := range platformDestinations {
 		actualDestinations = append(actualDestinations, raw.(map[string]any)["namespace"].(string))
 	}
-	assertExactSet(t, actualDestinations, []string{"argocd", "steadystate-system", "monitoring", "argo-rollouts", "kyverno"})
+	assertExactSet(t, actualDestinations, []string{"argocd", "steadystate-system", "monitoring", "argo-rollouts", "kyverno", "local-path-storage", "cert-manager", "cnpg-system"})
 
 	tenant := findObject(t, objects, "AppProject", "tenant")
 	assertExactSet(t, resourceKinds(t, tenant, "clusterResourceWhitelist"), []string{"platform.steadystate.dev/Team"})
@@ -601,13 +613,14 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 3 {
+	if len(parameters) != 4 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
 		"gitRevision":             "$ARGOCD_APP_REVISION",
 		"enableTelemetryPipeline": "true",
 		"enableSecurity":          "true",
+		"enableDataFoundation":    "false",
 	}
 	for _, raw := range parameters {
 		parameter := raw.(map[string]any)
@@ -645,6 +658,43 @@ func TestGitOpsCommandsAreMirrored(t *testing.T) {
 	}
 }
 
+func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
+	root := repositoryRoot(t)
+	rendered := run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--namespace", "argocd",
+		"--set-string", "gitRevision="+testRevision,
+		"--set", "enableDataFoundation=true",
+	)
+	objects := decodeManifests(t, rendered)
+	if len(objects) != 19 {
+		t.Fatalf("full data foundation rendered %d objects, want 19", len(objects))
+	}
+	expectedWaves := map[string]string{
+		"data-namespaces":   "-10",
+		"local-path-storage": "-9",
+		"cert-manager":       "-8",
+		"cloudnative-pg":     "-7",
+		"barman-cloud":       "-6",
+	}
+	for name, wave := range expectedWaves {
+		assertAnnotation(t, findObject(t, objects, "Application", name), "argocd.argoproj.io/sync-wave", wave)
+	}
+	assertExternalChartApplication(t, objects, "cert-manager", "https://charts.jetstack.io", "cert-manager", "v1.21.0", "gitops/platform/cert-manager/values.yaml", "cert-manager")
+	assertExternalChartApplication(t, objects, "cloudnative-pg", "https://cloudnative-pg.github.io/charts", "cloudnative-pg", "0.29.0", "gitops/platform/cloudnative-pg/values.yaml", "cnpg-system")
+	assertExternalChartApplication(t, objects, "barman-cloud", "https://cloudnative-pg.github.io/charts", "plugin-barman-cloud", "0.7.0", "gitops/platform/barman-cloud/values.yaml", "cnpg-system")
+
+	manifest := readFile(t, filepath.Join(root, "gitops", "platform", "local-path", "local-path-storage.yaml"))
+	sum := sha256.Sum256(manifest)
+	if actual := hex.EncodeToString(sum[:]); actual != "a5b4b057e4e400a2ca7188b03dc11303f874bfe600fc837d5446d86b3d13e26c" {
+		t.Fatalf("vendored local-path manifest checksum = %s", actual)
+	}
+	localPath := string(run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "platform", "local-path")))
+	if !strings.Contains(localPath, `storageclass.kubernetes.io/is-default-class: "true"`) {
+		t.Fatal("local-path StorageClass is not rendered as the local default")
+	}
+}
+
 func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 	root := repositoryRoot(t)
 	content, err := os.ReadFile(filepath.Join(root, "scripts", "gitops.ps1"))
@@ -672,7 +722,7 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 
 	for _, command := range []string{
 		"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s",
-		"payments kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s",
+		"payments barman-cloud cloudnative-pg cert-manager local-path-storage data-namespaces kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s",
 		"kyverno -n argocd --ignore-not-found=true --wait=true --timeout=180s",
 		"applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s",
 		"teams.platform.steadystate.dev --all --ignore-not-found=true --wait=true --timeout=180s",
@@ -681,7 +731,7 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 		"config/default') --ignore-not-found=true --wait=true --timeout=180s",
 		"validatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno",
 		"mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno",
-		"namespace monitoring argo-rollouts kyverno --ignore-not-found=true --wait=true --timeout=180s",
+		"namespace monitoring argo-rollouts kyverno cnpg-system cert-manager local-path-storage --ignore-not-found=true --wait=true --timeout=180s",
 		"validatingpolicies.policies.kyverno.io",
 	} {
 		if !strings.Contains(text, command) {

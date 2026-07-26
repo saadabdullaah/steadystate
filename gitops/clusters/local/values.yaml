@@ -4,6 +4,7 @@ bootstrapRoot: false
 rootTargetRevision: main
 enableTelemetryPipeline: true
 enableSecurity: true
+enableDataFoundation: false
 operatorImage: ghcr.io/saadabdullaah/steadystate-operator:v0.3.0
 argoRolloutsChartVersion: 2.41.0
 kubePrometheusStackChartVersion: 87.16.1
@@ -12,3 +13,6 @@ alloyChartVersion: 1.10.1
 tempoChartVersion: 1.24.4
 otelCollectorChartVersion: 0.165.0
 kyvernoChartVersion: 3.8.2
+certManagerChartVersion: v1.21.0
+cloudNativePGChartVersion: 0.29.0
+barmanCloudChartVersion: 0.7.0

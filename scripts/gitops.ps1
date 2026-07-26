@@ -142,12 +142,14 @@ function Render-RootTemplate {
     )
     $telemetryPipeline = if ($DisableTelemetryPipeline) { 'false' } else { 'true' }
     $security = if ($DisableSecurity) { 'false' } else { 'true' }
+    $dataFoundation = if ($Profile -eq 'full') { 'true' } else { 'false' }
     $arguments = @(
         'template', 'steadystate-root', $ChartPath,
         '--namespace', 'argocd',
         '--set-string', "gitRevision=$GitRevision",
         '--set', "enableTelemetryPipeline=$telemetryPipeline",
         '--set', "enableSecurity=$security",
+        '--set', "enableDataFoundation=$dataFoundation",
         '--show-only', $Template
     )
     if ($BootstrapRoot) {
@@ -314,6 +316,9 @@ function Invoke-Test {
     if (-not $DisableSecurity) {
         $applicationNames += @('kyverno','kyverno-policies')
     }
+    if ($Profile -eq 'full') {
+        $applicationNames += @('data-namespaces','local-path-storage','cert-manager','cloudnative-pg','barman-cloud')
+    }
     $applicationNames += @('steadystate-operator','payments','steadystate-root')
 
     $applications = @{}
@@ -384,6 +389,14 @@ function Invoke-Verify {
     Assert-ChartChecksum 'https://grafana.github.io/helm-charts' 'tempo' $versions.TEMPO_CHART_VERSION $versions.TEMPO_CHART_SHA256
     Assert-ChartChecksum 'https://open-telemetry.github.io/opentelemetry-helm-charts' 'opentelemetry-collector' $versions.OTEL_COLLECTOR_CHART_VERSION $versions.OTEL_COLLECTOR_CHART_SHA256
     Assert-ChartChecksum 'https://kyverno.github.io/kyverno/' 'kyverno' $versions.KYVERNO_CHART_VERSION $versions.KYVERNO_CHART_SHA256
+    Assert-ChartChecksum 'https://charts.jetstack.io' 'cert-manager' $versions.CERT_MANAGER_CHART_VERSION $versions.CERT_MANAGER_CHART_SHA256
+    Assert-ChartChecksum 'https://cloudnative-pg.github.io/charts' 'cloudnative-pg' $versions.CLOUDNATIVE_PG_CHART_VERSION $versions.CLOUDNATIVE_PG_CHART_SHA256
+    Assert-ChartChecksum 'https://cloudnative-pg.github.io/charts' 'plugin-barman-cloud' $versions.BARMAN_CLOUD_CHART_VERSION $versions.BARMAN_CLOUD_CHART_SHA256
+    $localPathManifest = Join-Path $Root 'gitops/platform/local-path/local-path-storage.yaml'
+    $localPathHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $localPathManifest).Hash.ToLowerInvariant()
+    if ($localPathHash -ne $versions.LOCAL_PATH_PROVISIONER_MANIFEST_SHA256) {
+        throw "Vendored local-path manifest checksum mismatch: expected $($versions.LOCAL_PATH_PROVISIONER_MANIFEST_SHA256), got $localPathHash"
+    }
     Push-Location $Root
     try {
         Invoke-External go test ./tests/gitops/...
@@ -408,7 +421,7 @@ function Invoke-Undeploy {
 
     if ($argoApplicationsExist) {
         Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s
-        Invoke-External kubectl delete application.argoproj.io payments kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s
+        Invoke-External kubectl delete application.argoproj.io payments barman-cloud cloudnative-pg cert-manager local-path-storage data-namespaces kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s
         Invoke-External kubectl delete application.argoproj.io kyverno -n argocd --ignore-not-found=true --wait=true --timeout=180s
     }
     if ($steadyStateApplicationsExist) {
@@ -424,7 +437,7 @@ function Invoke-Undeploy {
     Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true --wait=true --timeout=180s
     Invoke-External kubectl delete validatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno --ignore-not-found=true --wait=true --timeout=60s
     Invoke-External kubectl delete mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno --ignore-not-found=true --wait=true --timeout=60s
-    Invoke-External kubectl delete namespace monitoring argo-rollouts kyverno --ignore-not-found=true --wait=true --timeout=180s
+    Invoke-External kubectl delete namespace monitoring argo-rollouts kyverno cnpg-system cert-manager local-path-storage --ignore-not-found=true --wait=true --timeout=180s
     Invoke-External kubectl delete customresourcedefinition `
         rollouts.argoproj.io analysisruns.argoproj.io analysistemplates.argoproj.io clusteranalysistemplates.argoproj.io experiments.argoproj.io `
         alertmanagerconfigs.monitoring.coreos.com alertmanagers.monitoring.coreos.com podmonitors.monitoring.coreos.com probes.monitoring.coreos.com `

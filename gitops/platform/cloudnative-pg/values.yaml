@@ -1,0 +1,14 @@
+replicaCount: 1
+crds:
+  create: true
+config:
+  clusterWide: true
+rbac:
+  aggregateClusterRoles: false
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
