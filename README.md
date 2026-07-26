@@ -4,7 +4,7 @@ SteadyState is a laptop-scale internal developer platform built around a Kuberne
 
 Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`. Phase 6 adds signed and SPDX-attested demo images, fail-closed Kyverno admission, workload isolation, truthful security status, encrypted Git secrets, security scanners, and a documented threat model.
 
-> Status: Phases 0 through 5 are released through `v0.5.0`. Phase 6 is implemented on its consolidated release-candidate branch; signed `v0.6.0` image publication, the generated security-activation PR, hosted acceptance, exact-`main` regression gates, tag, and release remain required.
+> Status: Phases 0 through 6 are complete and released through [`v0.6.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.6.0). The exact release commit passed CI, CodeQL, Nightly Integration, and Phase 4–6 acceptance with retained security evidence. Phase 7 data and recovery work is next.
 
 ## Architecture
 
@@ -158,7 +158,7 @@ To verify Phase 6 security contracts:
 
 `verify-security` renders the GitOps graph and runs the pinned Kyverno CLI against compliant, vulnerable, and label-spoofing fixtures. The encrypted Grafana administrator Secret is safe to commit; its private age identity remains only in `.artifacts/secrets/steadystate.agekey` locally and the `SOPS_AGE_KEY` repository secret in GitHub. `decrypt-secrets` writes plaintext only to the ignored short-lived render directory. `rotate-secrets` creates a new random password and re-encrypts it to the committed public recipient.
 
-After the consolidated Phase 6 change reaches `main`, the Demo release workflow publishes immutable `v0.6.0` and `v0.6.0-bad` images, generates separate SPDX JSON SBOMs, signs and attests both digests with GitHub OIDC, verifies the exact workflow identity and issuer, and opens one GitOps PR. That PR changes only the demo manifest: it advances the tag and activates `requireSignedImage` and `networkIsolation`.
+The main-branch Demo release workflow published immutable `v0.6.0` and `v0.6.0-bad` images, generated separate SPDX JSON SBOMs, signed and attested both digests with GitHub OIDC, verified the exact workflow identity and issuer, and opened GitOps PR #44. That single-file PR advanced the demo tag and activated `requireSignedImage` and `networkIsolation`.
 
 Use `-Profile standard` for one worker or `-Profile full` for two workers. Override ports consistently when the defaults are occupied:
 
