@@ -34,6 +34,30 @@ function Add-Check([System.Collections.Generic.List[object]]$Checks, [string]$Na
     })
 }
 
+function Wait-ArgoApplicationsHealthy([string[]]$Names, [int]$TimeoutSeconds = 600) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $pending = [System.Collections.Generic.List[string]]::new()
+        foreach ($name in $Names) {
+            $raw = @(& kubectl get applications.argoproj.io $name -n argocd -o json 2>$null)
+            if ($LASTEXITCODE -ne 0 -or -not $raw) {
+                $pending.Add($name)
+                continue
+            }
+            $application = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
+            if ($application.status.sync.status -ne 'Synced' -or
+                $application.status.health.status -ne 'Healthy') {
+                $pending.Add($name)
+            }
+        }
+        if ($pending.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw "Argo Applications did not appear and become Synced/Healthy within $TimeoutSeconds seconds: $($pending -join ', ')."
+}
+
 function New-DatabaseDocument([string]$RecoverySource = '') {
     $metadata = [ordered]@{name=$DatabaseName;namespace=$Namespace}
     if ($env:GITHUB_SHA -match '^([0-9a-f]{40}|[0-9a-f]{64})$') {
@@ -147,9 +171,7 @@ $started = Get-Date
 Add-Check $checks 'seaweedfs-exact-store-healthy' $started 'The exact pinned SeaweedFS store is healthy and bound only to loopback on the host.'
 
 $started = Get-Date
-foreach ($application in @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')) {
-    Invoke-Kubectl wait -n argocd "--for=jsonpath={.status.health.status}=Healthy" "application/$application" --timeout=600s
-}
+Wait-ArgoApplicationsHealthy @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')
 Add-Check $checks 'pinned-data-stack-ready' $started 'StorageClass, cert-manager, CloudNativePG, Barman, and the SteadyState operator are Healthy.'
 
 Invoke-Kubectl delete database $DatabaseName -n $Namespace --ignore-not-found=true --wait=false

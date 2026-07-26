@@ -297,3 +297,30 @@
   the byte-exact upstream local-path manifest. Time-bounded, path-specific
   exceptions document those required trust boundaries without weakening
   application policy or changing the checksum-pinned manifest.
+- Corrected head `f28b59a` passed Windows, envtest, kind-smoke, Phase 5
+  acceptance, and Phase 6 compatibility in runs
+  [30213150530](https://github.com/saadabdullaah/steadystate/actions/runs/30213150530),
+  [30213150482](https://github.com/saadabdullaah/steadystate/actions/runs/30213150482),
+  and
+  [30213150474](https://github.com/saadabdullaah/steadystate/actions/runs/30213150474).
+- Quality failed before repository checks because the Kubernetes checksum
+  download received a connection reset. All PowerShell checksum and binary
+  downloads now share the existing bounded five-attempt retry contract.
+- Security artifact `8635080653` showed Trivy, Gosec, Govulncheck, Gitleaks,
+  and Kyverno gates passing. Checkov's 19 findings were all against the
+  byte-exact upstream local-path manifest. Checkov now excludes only that
+  immutable source fixture; checksum, Kustomize rendering, namespace
+  ownership, and platform-boundary tests remain blocking.
+- Phase 4 artifact `8635247414` from run
+  [30213150538](https://github.com/saadabdullaah/steadystate/actions/runs/30213150538)
+  proved every platform child Healthy but captured a deterministic Kustomize
+  comparison error: the standard-profile remove patch targeted a
+  `databaseRef` already removed by the acceptance branch. The reusable demo
+  leaf now omits the binding, and only the full profile adds it.
+- Phase 7 artifact `8635239188` from run
+  [30213150486](https://github.com/saadabdullaah/steadystate/actions/runs/30213150486)
+  proved bootstrap, the exact backup store, branch images, and full GitOps
+  deployment. The compatibility script then queried the later-wave
+  `cloudnative-pg` Application before Argo created it. Its bounded wait now
+  tolerates absence while waves advance and requires eventual Synced/Healthy
+  state rather than failing immediately.

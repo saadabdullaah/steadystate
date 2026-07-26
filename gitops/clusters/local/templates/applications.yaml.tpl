@@ -466,7 +466,7 @@ spec:
         commonAnnotations:
           steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
         commonAnnotationsEnvsubst: true
-{{- if not .Values.enableDataFoundation }}
+{{- if .Values.enableDataFoundation }}
         patches:
           - target:
               group: platform.steadystate.dev
@@ -474,8 +474,10 @@ spec:
               kind: Application
               name: demo
             patch: |-
-              - op: remove
+              - op: add
                 path: /spec/databaseRef
+                value:
+                  name: orders
 {{- end }}
   destination:
     server: https://kubernetes.default.svc

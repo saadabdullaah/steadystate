@@ -182,10 +182,8 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		}
 	}
 	applicationSource := sources[1].(map[string]any)
-	standardPatches := nestedSlice(t, applicationSource, "kustomize", "patches")
-	if len(standardPatches) != 1 ||
-		!strings.Contains(standardPatches[0].(map[string]any)["patch"].(string), "path: /spec/databaseRef") {
-		t.Fatalf("standard profile must remove the full-profile database binding: %#v", standardPatches)
+	if _, found, err := unstructured.NestedSlice(applicationSource, "kustomize", "patches"); err != nil || found {
+		t.Fatalf("standard profile must not carry a database binding patch: found=%v err=%v", found, err)
 	}
 	options, found, err := unstructured.NestedStringSlice(payments, "spec", "syncPolicy", "syncOptions")
 	if err != nil || !found || !contains(options, "RespectIgnoreDifferences=true") {
@@ -723,8 +721,19 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 	if objectString(sources[1].(map[string]any), "path") != "gitops/databases/orders" {
 		t.Fatalf("full profile is missing the Database source: %#v", sources[1])
 	}
-	if _, found, err := unstructured.NestedSlice(sources[2].(map[string]any), "kustomize", "patches"); err != nil || found {
-		t.Fatalf("full profile must retain databaseRef without a removal patch: found=%v err=%v", found, err)
+	databasePatches := nestedSlice(t, sources[2].(map[string]any), "kustomize", "patches")
+	if len(databasePatches) != 1 {
+		t.Fatalf("full profile must add exactly one database binding patch: %#v", databasePatches)
+	}
+	databasePatch, ok := databasePatches[0].(map[string]any)
+	if !ok {
+		t.Fatalf("full-profile database patch has type %T", databasePatches[0])
+	}
+	databasePatchBody, ok := databasePatch["patch"].(string)
+	if !ok || !strings.Contains(databasePatchBody, "path: /spec/databaseRef") ||
+		!strings.Contains(databasePatchBody, "name: orders") ||
+		strings.Contains(databasePatchBody, "op: remove") {
+		t.Fatalf("full profile database binding patch is invalid: %q", databasePatchBody)
 	}
 
 	manifest := readFile(t, filepath.Join(root, "gitops", "platform", "local-path", "local-path-storage.yaml"))
@@ -763,6 +772,20 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		if !strings.Contains(phase5, contract) {
 			t.Fatalf("Phase 5 deployment-failure evidence is missing %q", contract)
 		}
+	}
+	ci := string(readFile(t, filepath.Join(root, ".github", "workflows", "ci.yml")))
+	if !strings.Contains(ci, "tests/security|gitops/platform/local-path/local-path-storage.yaml") {
+		t.Fatal("Checkov must exclude only the checksum-pinned local-path source fixture")
+	}
+	installTools := string(readFile(t, filepath.Join(root, "scripts", "install-tools.ps1")))
+	if !strings.Contains(installTools, "Invoke-Download -Url $ChecksumUrl -Destination $checksumPath") ||
+		!strings.Contains(installTools, "for ($attempt = 1; $attempt -le 5; $attempt++)") {
+		t.Fatal("PowerShell checksum downloads must use bounded retries")
+	}
+	phase7Foundation := string(readFile(t, filepath.Join(root, "scripts", "phase7-foundation.ps1")))
+	if !strings.Contains(phase7Foundation, "Wait-ArgoApplicationsHealthy @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')") ||
+		strings.Contains(phase7Foundation, `Invoke-Kubectl wait -n argocd "--for=jsonpath={.status.health.status}=Healthy"`) {
+		t.Fatal("Phase 7 foundation must tolerate later-wave Argo Applications not existing yet")
 	}
 	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
 	for _, contract := range []string{

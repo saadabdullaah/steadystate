@@ -185,8 +185,9 @@ before deploying full-profile GitOps:
 .\scripts\dev.ps1 test-gitops -Profile full
 ```
 
-The sample `orders` Database is created before the database-bound demo
-Application. The application exposes `POST /orders`, `GET /orders`, and
+The reusable demo manifest remains database-optional; full-profile GitOps adds
+the `orders` binding after creating that Database. The application exposes
+`POST /orders`, `GET /orders`, and
 `GET /orders/{id}` while retaining the original no-database behavior when no
 binding is declared. Database connection values are injected through explicit
 SecretKeyRefs and never enter status, ConfigMaps, logs, or evidence.

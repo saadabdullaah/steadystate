@@ -168,7 +168,9 @@ jobs:
         with:
           directory: .
           framework: kubernetes,github_actions
-          skip_path: tests/security
+          # The local-path source is an exact checksum-pinned upstream
+          # manifest. Its rendered leaf and integrity remain repository-tested.
+          skip_path: 'tests/security|gitops/platform/local-path/local-path-storage.yaml'
           quiet: true
           soft_fail: false
       - name: Upload security reports

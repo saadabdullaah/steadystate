@@ -7,8 +7,6 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   owner: platform-team
-  databaseRef:
-    name: orders
   image:
     repository: ghcr.io/saadabdullaah/steadystate-demo-app
     tag: v0.6.0

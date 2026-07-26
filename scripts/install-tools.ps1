@@ -34,6 +34,34 @@ function Read-Versions {
     return $values
 }
 
+function Invoke-Download {
+    param(
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$Destination
+    )
+
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if (-not $curl) { $curl = Get-Command curl -ErrorAction SilentlyContinue }
+    if ($curl) {
+        & $curl.Source --location --fail --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 --output $Destination $Url
+        if ($LASTEXITCODE -ne 0) { throw "Download failed after retries: $Url" }
+        return
+    }
+
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Destination
+            return
+        } catch {
+            if (Test-Path -LiteralPath $Destination) {
+                Remove-Item -LiteralPath $Destination -Force
+            }
+            if ($attempt -eq 5) { throw }
+            Start-Sleep -Seconds ([Math]::Min(2 * $attempt, 10))
+        }
+    }
+}
+
 function Get-VerifiedFile {
     param(
         [Parameter(Mandatory)][string]$Url,
@@ -45,7 +73,7 @@ function Get-VerifiedFile {
     if (-not $ExpectedSha256) {
         if (-not $ChecksumUrl) { throw "No checksum source provided for $Url" }
         $checksumPath = "$Destination.sha256"
-        Invoke-WebRequest -UseBasicParsing -Uri $ChecksumUrl -OutFile $checksumPath
+        Invoke-Download -Url $ChecksumUrl -Destination $checksumPath
         $ExpectedSha256 = ((Get-Content -Raw -LiteralPath $checksumPath).Trim() -split '\s+')[0]
     }
 
@@ -59,14 +87,7 @@ function Get-VerifiedFile {
     if (Test-Path -LiteralPath $Destination) {
         Remove-Item -LiteralPath $Destination -Force
     }
-    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
-    if (-not $curl) { $curl = Get-Command curl -ErrorAction SilentlyContinue }
-    if ($curl) {
-        & $curl.Source --location --fail --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 --output $Destination $Url
-        if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
-    } else {
-        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Destination
-    }
+    Invoke-Download -Url $Url -Destination $Destination
 
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Destination).Hash.ToLowerInvariant()
     if ($actual -ne $ExpectedSha256.ToLowerInvariant()) {

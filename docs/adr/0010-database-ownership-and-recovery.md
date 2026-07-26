@@ -27,9 +27,10 @@ SeaweedFS is not an officially tested Barman target, so a hosted
 provision/WAL/base-backup/delete/restore/checksum compatibility gate is
 mandatory and has no silent fallback.
 
-The data graph is full-profile-only. Standard-profile tenant rendering omits
-the Database source and removes the sample Application's `databaseRef`, while
-the full profile retains Team/Database/Application waves. Cert-manager leader
+The data graph is full-profile-only. The reusable Application leaf omits
+`databaseRef`; standard-profile tenant rendering uses that leaf unchanged,
+while the full profile adds `databaseRef.name=orders` and retains
+Team/Database/Application waves. Cert-manager leader
 election is explicitly moved from its chart default in `kube-system` to the
 dedicated `cert-manager` Namespace so the platform AppProject does not gain an
 unrelated destination.
@@ -72,6 +73,8 @@ plugin status metrics; failure is fast, while stale-success age remains a
 - The checksum-pinned upstream local-path manifest retains its root helper and
   writable filesystem. Path-specific, expiring exceptions apply only to that
   isolated platform add-on; Team workloads receive no policy exemption.
+  Checkov excludes only that byte-exact source fixture, while checksum and
+  rendered-leaf tests remain blocking.
 - Recovery is reviewable Git intent, never a patch to generated CNPG objects.
 - Hosted objectives are RTO at most 30 minutes and a confirmed archive RPO
   boundary at most five minutes.
