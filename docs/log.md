@@ -219,3 +219,56 @@
 - All seven security checks passed. The admitted workload was rewritten to the verified immutable digest, unsigned and wrong-identity images were denied, unsafe Pod fixtures and CNPG-label spoofing were denied, `SecurityPolicyReady` preserved the healthy tuple, and SOPS decryption left no tracked plaintext.
 - Evidence retained 178 diagnostic files. Kyverno used 220,540,928 bytes and the standard profile used 6,059,945,984 bytes, within the unchanged 500 MiB and 7 GiB budgets. Evidence JSON SHA-256 is `b98d06b3035af17e3e4bc3a589cac06c7c5bf7c852b539e2ad1688cbba199fec`; the 31,604-byte GIF SHA-256 is `1d6fc52a43ccf3815e3042bb06e28aebc987566c0f0a8fb427f71a431013b246`.
 - Published annotated tag and GitHub release [`v0.6.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.6.0) from the exact validated commit with the GIF, evidence JSON, and both SPDX SBOMs attached. No remote Phase 6 branch or PR remains; Dependabot PR #42 stays separate.
+
+## 2026-07-26 - Phase 7 data and recovery release candidate
+
+- Added exact full-profile pins for local-path-provisioner, cert-manager,
+  CloudNativePG, Barman Cloud Plugin, PostgreSQL, and SeaweedFS, including
+  chart/manifest/CRD integrity and a mandatory hosted compatibility gate.
+- Added SOPS-encrypted backup credentials and an exact-name, loopback-only
+  SeaweedFS lifecycle whose named volume is preserved unless purge is
+  explicit.
+- Added the `Database` API, deterministic CNPG/Barman/monitoring/network
+  resources, UID-derived archives, Argo health/waves/project boundaries,
+  controller watches/status/drift repair, backup-first finalization, ordered
+  Team deletion, and the emergency force-delete contract.
+- Activated `Application.spec.databaseRef`, `DatabaseReady`, explicit
+  SecretKeyRefs, database NetworkPolicies, and the demo orders API with
+  database-aware readiness and value-free spans.
+- Added the full disaster-recovery workflow: signed image, 100 acknowledged
+  orders, WAL/base backup, complete kind destruction, Git-only recovery,
+  exact checksum, RTO/RPO, backup alert/recovery, final backup, retained
+  objects, budgets, redacted diagnostics, and VHS evidence.
+- Initial foundation commit is `7d5b6b7`. PR, hosted artifact, signed image,
+  generated delivery PR, exact-main gates, tag, and release identifiers will
+  be recorded after validation. Phase 7 is not yet published.
+
+### Draft validation
+
+- Opened consolidated draft PR [#47](https://github.com/saadabdullaah/steadystate/pull/47),
+  `feat: complete Phase 7 data and recovery`, from
+  `phase-7/storage-foundation`. The first head combined foundation commit
+  `7d5b6b7` and implementation commit `afdfb4d`.
+- Initial CI run
+  [30205678023](https://github.com/saadabdullaah/steadystate/actions/runs/30205678023)
+  passed quality, Windows, envtest, and kind-smoke. Security correctly failed
+  on two high-entropy test SHA fixtures; the unpublished implementation
+  commit is being rewritten with deterministic low-entropy fixtures rather
+  than adding a scanner exception.
+- Phase 4 run
+  [30205678008](https://github.com/saadabdullaah/steadystate/actions/runs/30205678008)
+  and Phase 5 run
+  [30205678009](https://github.com/saadabdullaah/steadystate/actions/runs/30205678009)
+  retained diagnostics showing that the operator Argo child could not render:
+  its JSON patch appended to an absent container `env` list. The correction
+  creates that list atomically and adds a render-contract regression test.
+- Phase 7 foundation run
+  [30205678027](https://github.com/saadabdullaah/steadystate/actions/runs/30205678027)
+  proved the exact SeaweedFS image started and wrote its named volume, but the
+  health check incorrectly probed the authenticated S3 root. It now uses the
+  image's internal master `/cluster/status` readiness endpoint while keeping
+  the S3 port loopback-only. Phase 6 compatibility run
+  [30205678031](https://github.com/saadabdullaah/steadystate/actions/runs/30205678031)
+  passed unchanged.
+- Corrected run, artifact, and final commit identifiers remain pending; this
+  section will be completed rather than replaced after hosted validation.

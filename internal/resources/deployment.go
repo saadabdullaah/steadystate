@@ -24,6 +24,29 @@ func Deployment(application *platformv1alpha1.Application) *appsv1.Deployment {
 	templateLabels[RequireSignedImageLabelKey] = strconv.FormatBool(application.Spec.Security.RequireSignedImage)
 	templateLabels[NetworkIsolationLabelKey] = strconv.FormatBool(application.Spec.Security.NetworkIsolation)
 	environment := []corev1.EnvVar{}
+	if application.Spec.DatabaseRef != nil {
+		templateLabels[DatabaseLabelKey] = application.Spec.DatabaseRef.Name
+		connectionSecret := DatabaseConnectionSecretNameFor(application.Spec.DatabaseRef.Name)
+		for _, binding := range []struct {
+			env string
+			key string
+		}{
+			{"DATABASE_URL", "uri"},
+			{"PGHOST", "host"},
+			{"PGPORT", "port"},
+			{"PGUSER", "user"},
+			{"PGPASSWORD", "password"},
+			{"PGDATABASE", "dbname"},
+		} {
+			environment = append(environment, corev1.EnvVar{
+				Name: binding.env,
+				ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: connectionSecret},
+					Key:                  binding.key,
+				}},
+			})
+		}
+	}
 	if application.Spec.Observability.Traces {
 		environment = append(environment,
 			corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: "otel-collector.monitoring.svc.cluster.local:4317"},

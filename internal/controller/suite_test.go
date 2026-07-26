@@ -64,6 +64,7 @@ var _ = BeforeSuite(func() {
 			filepath.Join("..", "..", "config", "gateway-api", "crds"),
 			filepath.Join("..", "..", "config", "rollouts", "crds"),
 			filepath.Join("..", "..", "config", "monitoring", "crds"),
+			filepath.Join("..", "..", "config", "data", "crds"),
 		},
 		ErrorIfCRDPathMissing: true,
 	}

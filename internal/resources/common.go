@@ -91,13 +91,22 @@ func OTelEgressPolicyName(application *platformv1alpha1.Application) string {
 	return suffixedName(application.Name, "-otel-egress")
 }
 
+// DatabaseEgressPolicyName returns the declared database egress policy name.
+func DatabaseEgressPolicyName(application *platformv1alpha1.Application) string {
+	return suffixedName(application.Name, "-database-egress")
+}
+
 func suffixedName(name, suffix string) string {
+	return suffixedNameWithLimit(name, suffix, 63)
+}
+
+func suffixedNameWithLimit(name, suffix string, limit int) string {
 	candidate := name + suffix
-	if len(candidate) <= 63 {
+	if len(candidate) <= limit {
 		return candidate
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(candidate)))[:8]
-	prefixLength := 63 - len(suffix) - len(digest) - 1
+	prefixLength := limit - len(suffix) - len(digest) - 1
 	return name[:prefixLength] + "-" + digest + suffix
 }
 

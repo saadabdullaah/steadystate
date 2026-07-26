@@ -122,6 +122,45 @@ func TestGeneratedResources(t *testing.T) {
 	}
 }
 
+func TestDatabaseBindingUsesExplicitSecretKeysAndExactNetworkTarget(t *testing.T) {
+	t.Parallel()
+	app := testApplication()
+	databaseName := strings.Repeat("d", 63)
+	app.Spec.DatabaseRef = &platformv1alpha1.ApplicationDatabaseReference{Name: databaseName}
+
+	deployment := Deployment(app)
+	container := deployment.Spec.Template.Spec.Containers[0]
+	if len(container.Env) != 6 {
+		t.Fatalf("database binding generated %d environment variables, want 6", len(container.Env))
+	}
+	expectedKeys := map[string]string{
+		"DATABASE_URL": "uri",
+		"PGHOST":       "host",
+		"PGPORT":       "port",
+		"PGUSER":       "user",
+		"PGPASSWORD":   "password",
+		"PGDATABASE":   "dbname",
+	}
+	for _, environment := range container.Env {
+		expectedKey, found := expectedKeys[environment.Name]
+		if !found || environment.ValueFrom == nil || environment.ValueFrom.SecretKeyRef == nil ||
+			environment.ValueFrom.SecretKeyRef.Name != DatabaseConnectionSecretNameFor(databaseName) ||
+			environment.ValueFrom.SecretKeyRef.Key != expectedKey {
+			t.Fatalf("unexpected database environment binding: %#v", environment)
+		}
+	}
+	if len(container.EnvFrom) != 1 || container.EnvFrom[0].ConfigMapRef == nil {
+		t.Fatalf("database Secret must not be injected through EnvFrom: %#v", container.EnvFrom)
+	}
+	policy := DatabaseEgressNetworkPolicy(app)
+	if got := policy.Spec.Egress[0].To[0].PodSelector.MatchLabels["cnpg.io/cluster"]; got != DatabaseClusterNameFor(databaseName) {
+		t.Fatalf("database egress targets %q, want %q", got, DatabaseClusterNameFor(databaseName))
+	}
+	if got := policy.Spec.Egress[0].Ports[0].Port.IntVal; got != 5432 {
+		t.Fatalf("database egress port = %d, want 5432", got)
+	}
+}
+
 func TestBuildersAreByteStableAndIndependent(t *testing.T) {
 	t.Parallel()
 	app := testApplication()

@@ -20,6 +20,8 @@ $expected = @{
     'config/rollouts/crds/argoproj.io_analysisruns.yaml' = $versions.ARGO_ANALYSIS_RUN_CRD_SHA256
     'config/monitoring/crds/monitoring.coreos.com_servicemonitors.yaml' = $versions.SERVICE_MONITOR_CRD_SHA256
     'config/monitoring/crds/monitoring.coreos.com_prometheusrules.yaml' = $versions.PROMETHEUS_RULE_CRD_SHA256
+    'config/data/crds/cloudnative-pg-crds.yaml' = $versions.CNPG_CRDS_SHA256
+    'config/data/crds/barman-cloud-crds.yaml' = $versions.BARMAN_CLOUD_CRDS_SHA256
 }
 
 foreach ($entry in $expected.GetEnumerator()) {

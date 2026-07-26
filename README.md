@@ -1,10 +1,10 @@
 # SteadyState
 
-SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, and tested recovery without requiring a cloud account.
+SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, durable PostgreSQL, and tested recovery without requiring a cloud account.
 
-Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`. Phase 6 adds signed and SPDX-attested demo images, fail-closed Kyverno admission, workload isolation, truthful security status, encrypted Git secrets, security scanners, and a documented threat model.
+Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`. Phase 6 adds signed and SPDX-attested demo images, fail-closed Kyverno admission, workload isolation, truthful security status, encrypted Git secrets, security scanners, and a documented threat model. Phase 7 adds a `Database` API, CloudNativePG, continuous WAL/base backups to external SeaweedFS, application bindings, final-backup deletion, and declarative whole-cluster recovery.
 
-> Status: Phases 0 through 6 are complete and released through [`v0.6.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.6.0). The exact release commit passed CI, CodeQL, Nightly Integration, and Phase 4–6 acceptance with retained security evidence. Phase 7 data and recovery work is next.
+> Status: Phases 0 through 6 are complete and released through [`v0.6.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.6.0). Phase 7 implementation is complete in draft [PR #47](https://github.com/saadabdullaah/steadystate/pull/47) and remains gated on hosted SeaweedFS/Barman compatibility, signed `v0.7.0` delivery, exact-main disaster-recovery acceptance, and publication of `v0.7.0`.
 
 ## Architecture
 
@@ -16,11 +16,12 @@ flowchart LR
     Release --> PR["GitOps version-bump PR"]
     PR --> Git["Merged monorepo desired state"]
     Git --> Argo["Argo CD app-of-apps"]
-    Argo --> Team["Team and Application CRs"]
+    Argo --> Team["Team / Database / Application CRs"]
     Argo --> Operator["SteadyState operator"]
     Team --> Operator
     Operator --> Children["Deployment or Rollout / Services / ConfigMap / HTTPRoute"]
     Operator --> Analysis["AnalysisTemplate / ServiceMonitor / PrometheusRule"]
+    Operator --> Data["CloudNativePG / Barman resources"]
     Rollouts["Argo Rollouts + Gateway plugin"] --> Children
     Prometheus["Prometheus"] --> Analysis
     Prometheus --> Rollouts
@@ -32,6 +33,8 @@ flowchart LR
     Grafana --> Loki
     Grafana --> Tempo
     GHCR --> Children
+    App --> Data
+    Data --> Seaweed["External SeaweedFS named volume"]
     Children --> Gateway["Gateway API and Envoy Gateway"]
     Gateway --> App["Reachable application"]
     PS["Windows PowerShell command contract"] --> Tools["Pinned repository-local tools"]
@@ -166,6 +169,32 @@ Use `-Profile standard` for one worker or `-Profile full` for two workers. Overr
 .\scripts\dev.ps1 bootstrap -Profile minimal -ClusterName demo -HttpPort 9080 -HttpsPort 9443
 ```
 
+## Data and disaster recovery
+
+The full profile adds local-path storage, cert-manager, CloudNativePG, the
+Barman Cloud Plugin, and an external SeaweedFS service. Start the backup store
+before deploying full-profile GitOps:
+
+```powershell
+.\scripts\dev.ps1 bootstrap -Profile full
+.\scripts\dev.ps1 start-backup-store
+.\scripts\dev.ps1 build-images
+.\scripts\dev.ps1 load-images
+.\scripts\dev.ps1 deploy-gitops -Profile full
+.\scripts\dev.ps1 verify-data -Profile full
+.\scripts\dev.ps1 test-gitops -Profile full
+```
+
+The sample `orders` Database is created before the database-bound demo
+Application. The application exposes `POST /orders`, `GET /orders`, and
+`GET /orders/{id}` while retaining the original no-database behavior when no
+binding is declared. Database connection values are injected through explicit
+SecretKeyRefs and never enter status, ConfigMaps, logs, or evidence.
+
+`stop-backup-store` removes only the exact named container and network; it
+preserves `steadystate-backup-data`. Purging requires the explicit
+`scripts/backup-store.ps1 -Action Stop -PurgeData` contract.
+
 ## Linux and CI
 
 Linux and GitHub Actions use the same PowerShell implementation through Make:
@@ -186,6 +215,10 @@ make phase5-acceptance PROFILE=standard
 make verify-security
 make verify-secrets
 make phase6-acceptance PROFILE=standard
+make start-backup-store PROFILE=full
+make verify-data PROFILE=full
+make test-data-recovery PROFILE=full
+make phase7-acceptance PROFILE=full
 make undeploy-gitops
 make destroy
 ```
@@ -224,12 +257,17 @@ make destroy
 | `verify-security` | Verify Kyverno pins, GitOps policy structure, enforced policy fixtures, and encrypted-secret custody |
 | `test-security` | Run the live signed-admission contract on a prepared secured cluster |
 | `phase6-acceptance` | Run one workflow-controlled Prepare, Test, Finalize, or failure-capture stage of Phase 6 acceptance |
+| `start-backup-store` / `stop-backup-store` | Start or stop the exact SeaweedFS resources while preserving the named volume by default |
+| `verify-data` | Verify data pins, encrypted credentials, GitOps renders, CRDs, and Database resource contracts |
+| `phase7-foundation` | Prove SeaweedFS/Barman backup, WAL, deletion, restore, and checksum compatibility |
+| `test-data-recovery` / `phase7-acceptance` | Run the workflow-controlled whole-cluster recovery, RTO/RPO, alert, final-backup, and evidence proof |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |
 
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Data and recovery runbook](docs/data-recovery.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

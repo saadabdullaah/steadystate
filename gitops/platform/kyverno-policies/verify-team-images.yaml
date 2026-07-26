@@ -31,6 +31,25 @@ spec:
         resources:
           - pods
   matchConditions:
+    - name: exclude-exact-cnpg-operands
+      expression: >-
+        !(
+          has(object.metadata.labels) &&
+          'cnpg.io/cluster' in object.metadata.labels &&
+          has(object.metadata.ownerReferences) &&
+          object.metadata.ownerReferences.exists(owner,
+            owner.apiVersion == 'postgresql.cnpg.io/v1' &&
+            owner.kind == 'Cluster' &&
+            has(owner.controller) &&
+            owner.controller) &&
+          object.spec.containers.all(container,
+            container.image ==
+              'ghcr.io/cloudnative-pg/postgresql@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' ||
+            container.image ==
+              'ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0' ||
+            container.image ==
+              'ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar@sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288')
+        )
     - name: unmanaged-or-signature-requested
       expression: >-
         !has(object.metadata.labels) ||

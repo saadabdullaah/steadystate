@@ -104,6 +104,10 @@ spec:
       kind: Prometheus
     - group: monitoring.coreos.com
       kind: ServiceMonitor
+    - group: monitoring.coreos.com
+      kind: PodMonitor
+    - group: coordination.k8s.io
+      kind: Lease
     - group: policy
       kind: PodDisruptionBudget
     - group: batch
@@ -121,7 +125,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-30"
 spec:
-  description: Team boundaries and namespaced SteadyState Applications only.
+  description: Team boundaries and namespaced SteadyState Databases and Applications only.
   sourceRepos:
     - {{ .Values.repoURL | quote }}
   destinations:
@@ -131,6 +135,8 @@ spec:
     - group: platform.steadystate.dev
       kind: Team
   namespaceResourceWhitelist:
+    - group: platform.steadystate.dev
+      kind: Database
     - group: platform.steadystate.dev
       kind: Application
   orphanedResources:

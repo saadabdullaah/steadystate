@@ -28,3 +28,17 @@ Phase 6 uploads `phase6-acceptance-<commit>` with:
 - Kyverno/operator logs, resource measurements, scanner reports where applicable, and redacted cluster diagnostics.
 
 The Phase 6 schema is version `1`. Evidence never contains credentials, decrypted Secret values, private age material, GitHub tokens, or request authorization. Success requires every named check, a non-empty recording, Cosign/SBOM evidence, security snapshots, logs, and common diagnostics. Failure capture runs before bounded cleanup and remains uploadable.
+
+Phase 7 uploads a compatibility artifact and
+`phase7-acceptance-<commit>`. The latter contains the disaster-recovery GIF
+and tape, schema-versioned evidence, RTO/RPO report, Git revisions, canonical
+source/recovery checksums, backup/WAL metadata, sanitized object inventory,
+CNPG/Barman/Argo/platform snapshots, anonymous signature/attestation proof,
+resource measurements, component logs, and common diagnostics.
+
+Phase 7 schema version `1` forbids Secret data, S3 credentials, PostgreSQL
+passwords/URIs, GitHub tokens, SQL values, and authorization headers. Its ten
+named checks require exact pinned data/security state, a value-free database
+span in Tempo, checksum equality, RTO `<=30m`, confirmed archive RPO boundary
+`<=5m`, a backup-freshness alert that fires and clears, final-backup deletion
+with retained objects, all memory budgets, and a non-empty recording.

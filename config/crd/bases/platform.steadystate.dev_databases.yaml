@@ -1,0 +1,198 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: databases.platform.steadystate.dev
+spec:
+  group: platform.steadystate.dev
+  names:
+    kind: Database
+    listKind: DatabaseList
+    plural: databases
+    shortNames:
+    - db
+    singular: database
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.backupServerName
+      name: Backup Server
+      priority: 1
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              backups:
+                default:
+                  enabled: true
+                  retention: 7d
+                  schedule: 0 0 2 * * *
+                properties:
+                  enabled:
+                    default: true
+                    type: boolean
+                  retention:
+                    default: 7d
+                    pattern: ^[1-9][0-9]*[dwm]$
+                    type: string
+                  schedule:
+                    default: 0 0 2 * * *
+                    minLength: 11
+                    type: string
+                required:
+                - enabled
+                - retention
+                - schedule
+                type: object
+              engine:
+                default: postgres
+                enum:
+                - postgres
+                type: string
+              instances:
+                default: 1
+                format: int32
+                maximum: 3
+                minimum: 1
+                type: integer
+              recovery:
+                properties:
+                  sourceServerName:
+                    minLength: 1
+                    type: string
+                  targetTime:
+                    format: date-time
+                    type: string
+                required:
+                - sourceServerName
+                type: object
+                x-kubernetes-validations:
+                - message: recovery is immutable
+                  rule: self == oldSelf
+              storage:
+                default:
+                  size: 1Gi
+                properties:
+                  size:
+                    default: 1Gi
+                    type: string
+                    x-kubernetes-validations:
+                    - message: storage size must be at least 1Gi
+                      rule: quantity(self).compareTo(quantity('1Gi')) >= 0
+                  storageClassName:
+                    type: string
+                required:
+                - size
+                type: object
+                x-kubernetes-validations:
+                - message: storageClassName is immutable
+                  rule: has(self.storageClassName) == has(oldSelf.storageClassName)
+                    && (!has(self.storageClassName) || self.storageClassName == oldSelf.storageClassName)
+                - message: storage size may only increase
+                  rule: quantity(self.size).compareTo(quantity(oldSelf.size)) >= 0
+            required:
+            - backups
+            - engine
+            - instances
+            - storage
+            type: object
+            x-kubernetes-validations:
+            - message: recovery requires backups.enabled=true
+              rule: '!has(self.recovery) || self.backups.enabled'
+            - message: recovery is immutable from object creation
+              rule: '!has(oldSelf.recovery) ? !has(self.recovery) : self.recovery
+                == oldSelf.recovery'
+          status:
+            properties:
+              backupServerName:
+                type: string
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              connectionSecretName:
+                type: string
+              lastSuccessfulBackup:
+                format: date-time
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                enum:
+                - Pending
+                - Provisioning
+                - Restoring
+                - Healthy
+                - Degraded
+                - BackingUp
+                - Deleting
+                type: string
+              recoverySourceServerName:
+                type: string
+              resolvedGitRevision:
+                pattern: ^([0-9a-f]{40}|[0-9a-f]{64})$
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: Database names must contain at most 63 characters
+          rule: size(self.metadata.name) <= 63
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -364,3 +364,73 @@ The controller preserves the active version, runtime digest, Git revision, and s
 ```
 
 The local identity belongs only at `.artifacts/secrets/steadystate.agekey`; GitHub uses the `SOPS_AGE_KEY` repository secret. Never commit the decrypted `.artifacts/secrets/rendered/grafana-admin.yaml` or paste the private key into logs. To rotate the Grafana credential, run `rotate-secrets`, review only the encrypted diff, deploy it, verify login, and retire the prior credential. If the age private key is lost, recover it from the repository secret or rotate to a new recipient and re-encrypt before deleting the old key.
+
+## Database stays Provisioning or Degraded
+
+```powershell
+.\scripts\dev.ps1 start-backup-store -Profile full
+kubectl get database,cluster.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n team-payments -o yaml
+kubectl get pod,pvc -n team-payments -l cnpg.io/cluster
+kubectl logs -n steadystate-system deployment/steadystate-controller-manager --tail=300
+kubectl logs -n cnpg-system deployment/cloudnative-pg --tail=300
+kubectl logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --tail=300
+```
+
+Confirm the encrypted platform backup Secret was applied, the exact SeaweedFS
+container is healthy, and the kind nodes are attached to
+`steadystate-backup`. Never print the Secret keys. Recovery must be declared
+at Database creation; do not patch the generated Cluster or set
+`ObjectStore.spec.serverName`.
+
+## SeaweedFS is running but Docker reports unhealthy
+
+```powershell
+docker inspect steadystate-seaweedfs --format '{{json .State.Health}}'
+docker inspect steadystate-seaweedfs --format '{{json .NetworkSettings.Networks.steadystate-backup}}'
+.\scripts\dev.ps1 stop-backup-store
+.\scripts\dev.ps1 start-backup-store
+```
+
+The authenticated S3 root on port `8333` is not a readiness endpoint and may
+return a non-success response without credentials. The exact container health
+check uses SeaweedFS mini's internal master endpoint
+`http://127.0.0.1:9333/cluster/status`; external backup traffic continues to
+use only the loopback-bound S3 port. Do not weaken the probe to process-only
+health, expose the master port, recreate the named volume, or print the S3
+credentials while diagnosing.
+
+## The operator Argo Application is Unknown or has a manifest-generation error
+
+```powershell
+kubectl get application -n argocd steadystate-operator -o yaml
+helm template steadystate-root .\gitops\clusters\local --namespace argocd
+kustomize build .\config\default
+```
+
+Read `status.conditions` before waiting longer. A manifest-generation error
+cannot become healthy through retries. The root chart must create the
+controller container's `env` list atomically when injecting
+`BACKUP_STORE_ENDPOINT`; appending to `/env/-` is invalid when the base
+Deployment has no environment list. Fix the chart in Git and let Argo render
+it again—do not patch the live Deployment or create CRDs manually.
+
+## Application reports DatabaseUnavailable
+
+Inspect the Application and Database conditions, connection Secret metadata,
+and owned database egress policy. The operator preserves existing healthy
+children while a new reference is missing or unready. Fix the Database in Git
+and wait for current-generation `Ready=True`; never copy connection values to
+a ConfigMap or patch status.
+
+## Database deletion is blocked
+
+```powershell
+kubectl get database,backup.postgresql.cnpg.io -n team-payments -o yaml
+kubectl logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --tail=300
+```
+
+Deletion intentionally waits for the deterministic final Backup. Restore
+external-store connectivity and let it complete. Only when data loss is
+explicitly accepted may an administrator add
+`steadystate.dev/force-delete: "true"`. The operator never adds it
+automatically, and external objects remain after deletion.

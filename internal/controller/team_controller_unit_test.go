@@ -47,3 +47,16 @@ func TestTeamOwnershipRequiresMatchingUID(t *testing.T) {
 		t.Fatal("finalization ownership must require both the Team label and UID")
 	}
 }
+
+func TestPlatformObjectMapsToOwningTeam(t *testing.T) {
+	t.Parallel()
+	database := &platformv1alpha1.Database{ObjectMeta: metav1.ObjectMeta{Name: "orders", Namespace: "team-payments"}}
+	requests := teamRequestForPlatformObject(context.Background(), database)
+	if len(requests) != 1 || requests[0].NamespacedName != (types.NamespacedName{Name: "payments"}) {
+		t.Fatalf("unexpected Database-to-Team mapping: %#v", requests)
+	}
+	database.Namespace = "unmanaged"
+	if requests := teamRequestForPlatformObject(context.Background(), database); requests != nil {
+		t.Fatalf("unmanaged Database mapped to Team: %#v", requests)
+	}
+}

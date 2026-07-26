@@ -8,6 +8,7 @@ param(
     [string]$EvidencePath,
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity,
+    [string]$BackupStoreEndpoint = $(if ($env:BACKUP_STORE_ENDPOINT) { $env:BACKUP_STORE_ENDPOINT } else { 'http://172.30.240.10:8333' }),
     [ValidateSet('minimal','standard','full')][string]$Profile = 'standard'
 )
 
@@ -150,6 +151,7 @@ function Render-RootTemplate {
         '--set', "enableTelemetryPipeline=$telemetryPipeline",
         '--set', "enableSecurity=$security",
         '--set', "enableDataFoundation=$dataFoundation",
+        '--set-string', "backupStoreEndpoint=$BackupStoreEndpoint",
         '--show-only', $Template
     )
     if ($BootstrapRoot) {
@@ -279,6 +281,14 @@ function Invoke-Deploy {
     Render-RootTemplate -Template 'templates/root-application.yaml.tpl' -Path $rootApplication -BootstrapRoot
     Invoke-External kubectl apply -f $projects
     Invoke-External kubectl apply -f $rootApplication
+    if ($Profile -eq 'full') {
+        $null = Wait-ArgoApplication -Name 'data-namespaces'
+        if (-not $env:SOPS_AGE_KEY -and -not (Test-Path -LiteralPath $localAgeKey -PathType Leaf)) {
+            throw 'The full profile requires SOPS_AGE_KEY or the ignored local age key to decrypt backup-store credentials.'
+        }
+        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyBackup
+        if ($LASTEXITCODE -ne 0) { throw 'Encrypted backup-store credential bootstrap failed.' }
+    }
     Write-Host "Argo CD and the SteadyState GitOps root are deployed at revision '$GitRevision'."
 }
 

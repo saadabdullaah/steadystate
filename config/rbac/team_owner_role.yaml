@@ -15,6 +15,7 @@ rules:
       - platform.steadystate.dev
     resources:
       - applications
+      - databases
     verbs:
       - create
       - delete
@@ -27,6 +28,7 @@ rules:
       - platform.steadystate.dev
     resources:
       - applications/status
+      - databases/status
     verbs:
       - get
   - apiGroups:

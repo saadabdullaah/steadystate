@@ -5,6 +5,7 @@ rootTargetRevision: main
 enableTelemetryPipeline: true
 enableSecurity: true
 enableDataFoundation: false
+backupStoreEndpoint: http://172.30.240.10:8333
 operatorImage: ghcr.io/saadabdullaah/steadystate-operator:v0.3.0
 argoRolloutsChartVersion: 2.41.0
 kubePrometheusStackChartVersion: 87.16.1

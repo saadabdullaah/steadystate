@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','start-backup-store','stop-backup-store','verify-data','test-data-recovery','phase7-foundation','phase7-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -15,6 +15,8 @@ param(
     [string]$Phase5AcceptanceStage = $(if ($env:PHASE5_ACCEPTANCE_STAGE) { $env:PHASE5_ACCEPTANCE_STAGE } else { 'Test' }),
     [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
     [string]$Phase6AcceptanceStage = $(if ($env:PHASE6_ACCEPTANCE_STAGE) { $env:PHASE6_ACCEPTANCE_STAGE } else { 'Test' }),
+    [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
+    [string]$Phase7AcceptanceStage = $(if ($env:PHASE7_ACCEPTANCE_STAGE) { $env:PHASE7_ACCEPTANCE_STAGE } else { 'Test' }),
     [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' }),
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity
@@ -256,6 +258,7 @@ function Invoke-GitOpsCommand {
         -EvidencePath $EvidencePath `
         -DisableTelemetryPipeline:$DisableTelemetryPipeline `
         -DisableSecurity:$DisableSecurity `
+        -BackupStoreEndpoint $(if ($env:BACKUP_STORE_ENDPOINT) { $env:BACKUP_STORE_ENDPOINT } else { 'http://172.30.240.10:8333' }) `
         -Profile $Profile
 }
 
@@ -395,6 +398,9 @@ function Invoke-Diagnostics {
         & kubectl get namespace,resourcequota,limitrange,serviceaccount,role.rbac.authorization.k8s.io,rolebinding.rbac.authorization.k8s.io,networkpolicy -A -l steadystate.dev/team -o yaml *> (Join-Path $directory 'team-boundaries.yaml')
         & kubectl get clusterrole steadystate-team-owner -o yaml *> (Join-Path $directory 'team-owner-clusterrole.yaml')
         & kubectl get applications.platform.steadystate.dev -A -o yaml *> (Join-Path $directory 'applications.yaml')
+        & kubectl get databases.platform.steadystate.dev -A -o yaml *> (Join-Path $directory 'databases.yaml')
+        & kubectl get clusters.postgresql.cnpg.io,backups.postgresql.cnpg.io,scheduledbackups.postgresql.cnpg.io,objectstores.barmancloud.cnpg.io -A -o yaml *> (Join-Path $directory 'data-resources.yaml')
+        & kubectl get pvc -A -o wide *> (Join-Path $directory 'persistent-volume-claims.txt')
         & kubectl get applications.argoproj.io,appprojects.argoproj.io -n argocd -o yaml *> (Join-Path $directory 'argocd-applications.yaml')
         & kubectl get all,configmap,httproute -n argocd -o yaml *> (Join-Path $directory 'argocd-resources.yaml')
         & kubectl logs -n argocd -l app.kubernetes.io/part-of=argocd --all-containers --tail=500 --prefix=true *> (Join-Path $directory 'argocd.log')
@@ -406,6 +412,8 @@ function Invoke-Diagnostics {
         & kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus-operator --all-containers --tail=500 --prefix=true *> (Join-Path $directory 'prometheus-operator.log')
         & kubectl get deployment,service,configmap -A -l app.kubernetes.io/managed-by=steadystate -o yaml *> (Join-Path $directory 'application-children.yaml')
         & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=500 *> (Join-Path $directory 'operator.log')
+        & kubectl logs -n cnpg-system deployment/cloudnative-pg --all-containers --tail=500 *> (Join-Path $directory 'cloudnative-pg.log')
+        & kubectl logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --all-containers --tail=500 *> (Join-Path $directory 'barman-cloud.log')
         & kubectl get events -A --sort-by=.lastTimestamp *> (Join-Path $directory 'events.txt')
         & kind export logs (Join-Path $directory 'kind') --name $ClusterName *> (Join-Path $directory 'kind-export.txt')
     } finally {
@@ -543,7 +551,7 @@ try {
             if ($unformatted) { throw "Go files require formatting: $($unformatted -join ', ')" }
             Invoke-External go vet ./...
             if (-not (Test-CommandAvailable 'kustomize')) { throw "kustomize is missing. Run '.\scripts\dev.ps1 tools'." }
-            foreach ($overlay in @('config/default','config/gateway','config/samples','gitops/platform','gitops/teams/payments','gitops/applications/demo')) {
+            foreach ($overlay in @('config/default','config/gateway','config/samples','config/data/crds','gitops/platform','gitops/teams/payments','gitops/databases/orders','gitops/applications/demo')) {
                 & kustomize build $overlay *> $null
                 if ($LASTEXITCODE -ne 0) { throw "Kustomize rendering failed for $overlay" }
             }
@@ -608,6 +616,30 @@ try {
         'phase6-acceptance' {
             Assert-Cluster
             & (Join-Path $PSScriptRoot 'phase6-acceptance.ps1') -Stage $Phase6AcceptanceStage -HttpPort $HttpPort
+        }
+        'start-backup-store' {
+            & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Start -ClusterName $ClusterName
+        }
+        'stop-backup-store' {
+            & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Stop -ClusterName $ClusterName
+        }
+        'verify-data' {
+            Invoke-GitOpsCommand -Mode Verify
+            & (Join-Path $PSScriptRoot 'secrets.ps1') -Action Verify
+            Assert-Tools
+            Invoke-External go test ./internal/database ./internal/resources ./tests/gitops ./tests/config
+        }
+        'phase7-foundation' {
+            Assert-Cluster
+            & (Join-Path $PSScriptRoot 'phase7-foundation.ps1') -Stage Test
+        }
+        'test-data-recovery' {
+            Assert-Cluster
+            & (Join-Path $PSScriptRoot 'phase7-acceptance.ps1') -Stage Test -HttpPort $HttpPort
+        }
+        'phase7-acceptance' {
+            Assert-Cluster
+            & (Join-Path $PSScriptRoot 'phase7-acceptance.ps1') -Stage $Phase7AcceptanceStage -HttpPort $HttpPort
         }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }

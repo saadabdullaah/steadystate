@@ -1,0 +1,150 @@
+name: Phase 7 foundation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/phase7-foundation.yml"
+      - "api/**"
+      - "cmd/**"
+      - "config/**"
+      - "gitops/**"
+      - "internal/**"
+      - "scripts/backup-store.ps1"
+      - "scripts/gitops.ps1"
+      - "scripts/phase7-foundation.ps1"
+      - "scripts/secrets.ps1"
+      - "scripts/versions.env"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase7-foundation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compatibility:
+    name: seaweedfs-barman-restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install and verify pinned tools
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          ./scripts/install-tools.ps1 -BaseOnly -IncludeSecurity
+          ./scripts/dev.ps1 check-versions
+          ./scripts/dev.ps1 verify-gitops
+          ./scripts/dev.ps1 verify-secrets
+
+      - name: Bootstrap full profile
+        timeout-minutes: 15
+        shell: pwsh
+        run: ./scripts/dev.ps1 bootstrap -Profile full
+
+      - name: Start exact durable backup store
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/backup-store.ps1 -Action Start
+
+      - name: Build and load branch images
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          ./scripts/dev.ps1 build-images
+          ./scripts/dev.ps1 load-images
+
+      - name: Deploy exact-revision full GitOps stack
+        timeout-minutes: 20
+        shell: pwsh
+        run: ./scripts/dev.ps1 deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA
+
+      - name: Prove backup, WAL archive, and restore compatibility
+        id: compatibility
+        timeout-minutes: 25
+        shell: pwsh
+        run: ./scripts/phase7-foundation.ps1 -Stage Test
+
+      - name: Capture failure evidence
+        if: always() && steps.compatibility.outcome != 'success'
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/phase7-foundation.ps1 -Stage CaptureFailure
+
+      - name: Capture cluster diagnostics
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/dev.ps1 diagnostics
+
+      - name: Verify evidence completeness
+        if: always() && steps.compatibility.outcome == 'success'
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $required = @(
+            '.artifacts/phase7/foundation/evidence.json',
+            '.artifacts/phase7/foundation/object-inventory.txt',
+            '.artifacts/phase7/foundation/success-data-resources.yaml',
+            '.artifacts/phase7/foundation/success-operator.log',
+            '.artifacts/phase7/foundation/success-cnpg.log',
+            '.artifacts/phase7/foundation/success-barman.log',
+            '.artifacts/phase7/foundation/success-seaweedfs.log'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -le 0) {
+              throw "Missing or empty Phase 7 foundation artifact: $path"
+            }
+          }
+          $evidence = Get-Content -Raw '.artifacts/phase7/foundation/evidence.json' | ConvertFrom-Json
+          if ($evidence.schemaVersion -ne 1 -or $evidence.result -ne 'passed' -or
+              $evidence.sourceSHA -ne $env:GITHUB_SHA -or @($evidence.checks).Count -ne 7 -or
+              [int]$evidence.walObjectCount -lt 1 -or
+              $evidence.sourceChecksum -ne $evidence.recoveredChecksum) {
+            throw 'Phase 7 foundation evidence is incomplete or inconsistent.'
+          }
+
+      - name: Upload foundation artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase7-foundation-${{ github.sha }}
+          path: |
+            .artifacts/phase7/foundation/
+            .artifacts/diagnostics/
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
+
+      - name: Undeploy GitOps
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 8
+        shell: pwsh
+        run: ./scripts/dev.ps1 undeploy-gitops
+
+      - name: Destroy cluster
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/dev.ps1 destroy
+
+      - name: Remove exact disposable backup resources
+        if: always()
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/backup-store.ps1 -Action Stop -PurgeData

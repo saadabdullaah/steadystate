@@ -71,6 +71,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.DatabaseReconciler{
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		Recorder:            mgr.GetEventRecorder("steadystate-database-controller"),
+		BackupStoreEndpoint: os.Getenv("BACKUP_STORE_ENDPOINT"),
+	}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.Error(err, "unable to create controller", "controller", "Database")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		ctrl.Log.Error(err, "unable to register health check")
 		os.Exit(1)

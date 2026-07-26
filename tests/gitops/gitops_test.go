@@ -42,6 +42,7 @@ func TestGitOpsRendersDeterministically(t *testing.T) {
 		"gitops/platform/data-namespaces",
 		"gitops/platform/local-path",
 		"gitops/teams/payments",
+		"gitops/databases/orders",
 		"gitops/applications/demo",
 	} {
 		arguments := []string{"build", filepath.Join(root, filepath.FromSlash(path))}
@@ -141,14 +142,28 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	if err != nil || !found || len(images) != 1 || images[0] != "ghcr.io/saadabdullaah/steadystate-operator:v0.3.0" {
 		t.Fatalf("operator image override is invalid: %#v, found=%v, err=%v", images, found, err)
 	}
+	patches := nestedSlice(t, operator, "spec", "source", "kustomize", "patches")
+	if len(patches) != 1 {
+		t.Fatalf("operator environment patch is invalid: %#v", patches)
+	}
+	patch, ok := patches[0].(map[string]any)
+	if !ok {
+		t.Fatalf("operator environment patch has type %T", patches[0])
+	}
+	patchBody, ok := patch["patch"].(string)
+	if !ok || strings.Contains(patchBody, "/spec/template/spec/containers/0/env/-") ||
+		!strings.Contains(patchBody, "path: /spec/template/spec/containers/0/env") ||
+		!strings.Contains(patchBody, "name: BACKUP_STORE_ENDPOINT") {
+		t.Fatalf("operator environment patch must create the absent env list atomically: %s", patchBody)
+	}
 
 	payments := findObject(t, objects, "Application", "payments")
 	assertAutomated(t, payments, false)
 	sources := nestedSlice(t, payments, "spec", "sources")
-	if len(sources) != 2 {
-		t.Fatalf("payments has %d sources, want 2", len(sources))
+	if len(sources) != 3 {
+		t.Fatalf("payments has %d sources, want 3", len(sources))
 	}
-	expectedPaths := []string{"gitops/teams/payments", "gitops/applications/demo"}
+	expectedPaths := []string{"gitops/teams/payments", "gitops/databases/orders", "gitops/applications/demo"}
 	for index, rawSource := range sources {
 		source, ok := rawSource.(map[string]any)
 		if !ok {
@@ -256,6 +271,8 @@ func TestProjectRestrictions(t *testing.T) {
 		"monitoring.coreos.com/Alertmanager",
 		"monitoring.coreos.com/Prometheus",
 		"monitoring.coreos.com/ServiceMonitor",
+		"monitoring.coreos.com/PodMonitor",
+		"coordination.k8s.io/Lease",
 		"policy/PodDisruptionBudget",
 		"batch/Job",
 		"cert-manager.io/Certificate",
@@ -270,7 +287,7 @@ func TestProjectRestrictions(t *testing.T) {
 
 	tenant := findObject(t, objects, "AppProject", "tenant")
 	assertExactSet(t, resourceKinds(t, tenant, "clusterResourceWhitelist"), []string{"platform.steadystate.dev/Team"})
-	assertExactSet(t, resourceKinds(t, tenant, "namespaceResourceWhitelist"), []string{"platform.steadystate.dev/Application"})
+	assertExactSet(t, resourceKinds(t, tenant, "namespaceResourceWhitelist"), []string{"platform.steadystate.dev/Application", "platform.steadystate.dev/Database"})
 	warn, found, err := unstructured.NestedBool(tenant, "spec", "orphanedResources", "warn")
 	if err != nil || !found || warn {
 		t.Fatalf("tenant orphan warning must be explicitly false: found=%v value=%v err=%v", found, warn, err)
@@ -291,12 +308,19 @@ func TestTenantLeavesContainOnlyOwnedCustomResources(t *testing.T) {
 	}
 	assertAnnotation(t, teamObjects[0], "argocd.argoproj.io/sync-wave", "-1")
 
+	databaseObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "databases", "orders")))
+	if len(databaseObjects) != 1 || objectString(databaseObjects[0], "kind") != "Database" ||
+		objectString(databaseObjects[0], "apiVersion") != "platform.steadystate.dev/v1alpha1" {
+		t.Fatalf("Database leaf rendered unexpected objects: %#v", objectIdentities(databaseObjects))
+	}
+	assertAnnotation(t, databaseObjects[0], "argocd.argoproj.io/sync-wave", "0")
+
 	applicationObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "applications", "demo")))
 	if len(applicationObjects) != 1 || objectString(applicationObjects[0], "kind") != "Application" ||
 		objectString(applicationObjects[0], "apiVersion") != "platform.steadystate.dev/v1alpha1" {
 		t.Fatalf("Application leaf rendered unexpected objects: %#v", objectIdentities(applicationObjects))
 	}
-	assertAnnotation(t, applicationObjects[0], "argocd.argoproj.io/sync-wave", "0")
+	assertAnnotation(t, applicationObjects[0], "argocd.argoproj.io/sync-wave", "1")
 }
 
 func TestArgoConfigurationContracts(t *testing.T) {
@@ -613,7 +637,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 4 {
+	if len(parameters) != 5 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
@@ -621,6 +645,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 		"enableTelemetryPipeline": "true",
 		"enableSecurity":          "true",
 		"enableDataFoundation":    "false",
+		"backupStoreEndpoint":     "http://172.30.240.10:8333",
 	}
 	for _, raw := range parameters {
 		parameter := raw.(map[string]any)
@@ -648,7 +673,7 @@ func TestGitOpsCommandsAreMirrored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery", "verify-observability", "test-observability", "phase5-acceptance"} {
+	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery", "verify-observability", "test-observability", "phase5-acceptance", "start-backup-store", "stop-backup-store", "verify-data", "test-data-recovery", "phase7-acceptance"} {
 		if !strings.Contains(string(makefile), command) {
 			t.Errorf("Makefile is missing %s", command)
 		}
@@ -671,7 +696,7 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 		t.Fatalf("full data foundation rendered %d objects, want 19", len(objects))
 	}
 	expectedWaves := map[string]string{
-		"data-namespaces":   "-10",
+		"data-namespaces":    "-10",
 		"local-path-storage": "-9",
 		"cert-manager":       "-8",
 		"cloudnative-pg":     "-7",
@@ -680,6 +705,7 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 	for name, wave := range expectedWaves {
 		assertAnnotation(t, findObject(t, objects, "Application", name), "argocd.argoproj.io/sync-wave", wave)
 	}
+	assertAnnotation(t, findObject(t, objects, "Application", "steadystate-operator"), "argocd.argoproj.io/sync-wave", "-5")
 	assertExternalChartApplication(t, objects, "cert-manager", "https://charts.jetstack.io", "cert-manager", "v1.21.0", "gitops/platform/cert-manager/values.yaml", "cert-manager")
 	assertExternalChartApplication(t, objects, "cloudnative-pg", "https://cloudnative-pg.github.io/charts", "cloudnative-pg", "0.29.0", "gitops/platform/cloudnative-pg/values.yaml", "cnpg-system")
 	assertExternalChartApplication(t, objects, "barman-cloud", "https://cloudnative-pg.github.io/charts", "plugin-barman-cloud", "0.7.0", "gitops/platform/barman-cloud/values.yaml", "cnpg-system")

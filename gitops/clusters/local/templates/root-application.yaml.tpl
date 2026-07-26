@@ -20,6 +20,8 @@ spec:
           value: {{ .Values.enableSecurity | quote }}
         - name: enableDataFoundation
           value: {{ .Values.enableDataFoundation | quote }}
+        - name: backupStoreEndpoint
+          value: {{ .Values.backupStoreEndpoint | quote }}
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

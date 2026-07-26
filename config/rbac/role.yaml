@@ -11,6 +11,7 @@ rules:
   - limitranges
   - namespaces
   - resourcequotas
+  - secrets
   - serviceaccounts
   - services
   verbs:
@@ -80,6 +81,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - barmancloud.cnpg.io
+  resources:
+  - objectstores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - gateway.networking.k8s.io
   resources:
   - httproutes
@@ -120,6 +133,7 @@ rules:
   - platform.steadystate.dev
   resources:
   - applications
+  - databases
   verbs:
   - create
   - delete
@@ -132,6 +146,7 @@ rules:
   - platform.steadystate.dev
   resources:
   - applications/finalizers
+  - databases/finalizers
   - teams/finalizers
   verbs:
   - update
@@ -139,6 +154,7 @@ rules:
   - platform.steadystate.dev
   resources:
   - applications/status
+  - databases/status
   - teams/status
   verbs:
   - get
@@ -149,6 +165,20 @@ rules:
   resources:
   - teams
   verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups
+  - clusters
+  - scheduledbackups
+  verbs:
+  - create
+  - delete
   - get
   - list
   - patch

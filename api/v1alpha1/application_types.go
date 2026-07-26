@@ -145,6 +145,14 @@ type SecurityOptions struct {
 	NetworkIsolation bool `json:"networkIsolation"`
 }
 
+// ApplicationDatabaseReference selects a same-namespace SteadyState Database.
+type ApplicationDatabaseReference struct {
+	// Name is the Database resource name in the Application namespace.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name"`
+}
+
 // ApplicationSpec defines the desired state of Application.
 // +kubebuilder:validation:XValidation:rule="self.deployment.strategy != 'canary' || self.observability.metrics",message="canary strategy requires observability.metrics=true"
 type ApplicationSpec struct {
@@ -172,6 +180,10 @@ type ApplicationSpec struct {
 	// +kubebuilder:default={requireSignedImage: false, runAsNonRoot: true, networkIsolation: false}
 	// +optional
 	Security SecurityOptions `json:"security,omitempty"`
+
+	// DatabaseRef optionally binds this workload to a ready same-namespace Database.
+	// +optional
+	DatabaseRef *ApplicationDatabaseReference `json:"databaseRef,omitempty"`
 }
 
 // ApplicationStatus defines the observed state of Application.

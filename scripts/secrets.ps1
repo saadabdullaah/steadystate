@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Decrypt','Verify','Rotate','Apply','ApplyEphemeral')]
+    [ValidateSet('Decrypt','Verify','Rotate','Apply','ApplyEphemeral','DecryptBackup','RotateBackup','ApplyBackup')]
     [string]$Action,
     [string]$KeyPath
 )
@@ -15,8 +15,10 @@ $Platform = if ($env:OS -eq 'Windows_NT') { 'windows-amd64' } else { 'linux-amd6
 $Extension = if ($env:OS -eq 'Windows_NT') { '.exe' } else { '' }
 $Sops = Join-Path $Root ".tools/bin/$Platform/sops$Extension"
 $Encrypted = Join-Path $Root 'gitops/secrets/grafana-admin.enc.yaml'
+$BackupEncrypted = Join-Path $Root 'gitops/secrets/backup-store.enc.yaml'
 $RenderedDirectory = Join-Path $Root '.artifacts/secrets/rendered'
 $Rendered = Join-Path $RenderedDirectory 'grafana-admin.yaml'
+$BackupRendered = Join-Path $RenderedDirectory 'backup-store.yaml'
 $Recipient = 'age19nqqe30cjcegfagf63ccamqd9a2qw9vv6xavscjcldsz6u2mpf3sm6qs0p'
 
 if (-not (Test-Path -LiteralPath $Sops -PathType Leaf)) {
@@ -50,6 +52,26 @@ function New-RandomPassword {
         $generator.Dispose()
     }
     return [Convert]::ToBase64String($passwordBytes)
+}
+
+function New-RandomIdentifier {
+    $bytes = [byte[]]::new(18)
+    $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($bytes)
+    } finally {
+        $generator.Dispose()
+    }
+    return ([BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
+}
+
+function Assert-NoTrackedPlaintext {
+    $trackedPlaintext = @(git -C $Root ls-files | Where-Object {
+        $_ -match '(?i)(^|/)(grafana-admin\.yaml|backup-store\.yaml|.*\.agekey)$'
+    })
+    if ($trackedPlaintext.Count -gt 0) {
+        throw "Tracked plaintext secret material found: $($trackedPlaintext -join ', ')"
+    }
 }
 
 switch ($Action) {
@@ -87,10 +109,11 @@ stringData:
         if ($LASTEXITCODE -ne 0) {
             throw 'The encrypted Grafana Secret cannot be decrypted with the configured age identity.'
         }
-        $trackedPlaintext = @(git -C $Root ls-files | Where-Object { $_ -match '(?i)(^|/)(grafana-admin\.yaml|.*\.agekey)$' })
-        if ($trackedPlaintext.Count -gt 0) {
-            throw "Tracked plaintext secret material found: $($trackedPlaintext -join ', ')"
+        $null = & $Sops --decrypt $BackupEncrypted
+        if ($LASTEXITCODE -ne 0) {
+            throw 'The encrypted backup-store Secret cannot be decrypted with the configured age identity.'
         }
+        Assert-NoTrackedPlaintext
         Write-Host 'Encrypted secret custody and decryption verified.'
     }
     'Apply' {
@@ -126,5 +149,48 @@ stringData:
             throw 'Applying the ephemeral Grafana Secret failed.'
         }
         Write-Host 'Applied an ephemeral Grafana administrator Secret for an untrusted/no-key validation context.'
+    }
+    'RotateBackup' {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $BackupEncrypted), $RenderedDirectory | Out-Null
+        $accessKey = "steadystate-$(New-RandomIdentifier)"
+        $secretKey = "$(New-RandomIdentifier)$(New-RandomIdentifier)"
+        $plain = @"
+apiVersion: v1
+kind: Secret
+metadata:
+  name: steadystate-backup-store
+  namespace: cnpg-system
+type: Opaque
+stringData:
+  ACCESS_KEY_ID: $accessKey
+  ACCESS_SECRET_KEY: $secretKey
+"@
+        [IO.File]::WriteAllText($BackupRendered, $plain, [Text.UTF8Encoding]::new($false))
+        try {
+            Invoke-Sops @('--encrypt','--filename-override','gitops/secrets/backup-store.enc.yaml','--age',$Recipient,'--encrypted-regex','^(data|stringData)$','--output',$BackupEncrypted,$BackupRendered)
+        } finally {
+            Remove-Item -LiteralPath $BackupRendered -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host 'Rotated the encrypted backup-store credential Secret.'
+    }
+    'DecryptBackup' {
+        Set-KeyEnvironment
+        New-Item -ItemType Directory -Force -Path $RenderedDirectory | Out-Null
+        Invoke-Sops @('--decrypt','--output',$BackupRendered,$BackupEncrypted)
+        Write-Host "Decrypted the backup-store Secret to the ignored short-lived path $BackupRendered"
+    }
+    'ApplyBackup' {
+        Set-KeyEnvironment
+        New-Item -ItemType Directory -Force -Path $RenderedDirectory | Out-Null
+        try {
+            Invoke-Sops @('--decrypt','--output',$BackupRendered,$BackupEncrypted)
+            & kubectl apply --server-side --force-conflicts -f $BackupRendered
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Applying the decrypted backup-store Secret failed.'
+            }
+        } finally {
+            Remove-Item -LiteralPath $BackupRendered -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host 'Applied the encrypted backup-store credential without retaining plaintext.'
     }
 }

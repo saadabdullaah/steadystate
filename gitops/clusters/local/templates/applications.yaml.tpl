@@ -335,7 +335,9 @@ metadata:
   name: steadystate-operator
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-10"
+    # Full-profile external CRDs must exist before manager discovery registers
+    # Database child watches. Standard profiles retain the historical wave.
+    argocd.argoproj.io/sync-wave: {{ if .Values.enableDataFoundation }}"-5"{{ else }}"-10"{{ end }}
 spec:
   project: platform
   source:
@@ -345,6 +347,18 @@ spec:
     kustomize:
       images:
         - {{ .Values.operatorImage | quote }}
+      patches:
+        - target:
+            group: apps
+            version: v1
+            kind: Deployment
+            name: controller-manager
+          patch: |-
+            - op: add
+              path: /spec/template/spec/containers/0/env
+              value:
+                - name: BACKUP_STORE_ENDPOINT
+                  value: {{ .Values.backupStoreEndpoint | quote }}
   destination:
     server: https://kubernetes.default.svc
     namespace: steadystate-system
@@ -438,6 +452,13 @@ spec:
         commonAnnotationsEnvsubst: true
     - repoURL: {{ .Values.repoURL | quote }}
       targetRevision: {{ .Values.gitRevision | quote }}
+      path: gitops/databases/orders
+      kustomize:
+        commonAnnotations:
+          steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
+        commonAnnotationsEnvsubst: true
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
       path: gitops/applications/demo
       kustomize:
         commonAnnotations:
@@ -454,6 +475,11 @@ spec:
   ignoreDifferences:
     - group: platform.steadystate.dev
       kind: Team
+      jsonPointers:
+        - /metadata/finalizers
+        - /status
+    - group: platform.steadystate.dev
+      kind: Database
       jsonPointers:
         - /metadata/finalizers
         - /status

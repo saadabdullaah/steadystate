@@ -1,4 +1,10 @@
-# Architecture Through Phase 6 Supply-Chain Security
+# Architecture Through Phase 7 Data Recovery
+
+Phase 7 adds a separate durable-data boundary: Argo applies only the
+`Database` CR, the SteadyState operator owns CNPG/Barman/monitoring/network
+children, and Barman writes through the kind node into a host-side SeaweedFS
+named volume. An `Application` may reference a current-generation ready
+Database in the same Team namespace; it never owns or deletes that Database.
 
 ```mermaid
 flowchart TB
@@ -15,8 +21,10 @@ flowchart TB
         Dev["scripts/dev.ps1"]
         Tools["Repository-local tools"]
         Docker["Docker Desktop"]
+        Seaweed["SeaweedFS S3 / named volume"]
         Dev --> Tools
         Dev --> Docker
+        Docker --> Seaweed
     end
     subgraph Cluster["kind: steadystate"]
         Calico["Calico CNI"]
@@ -24,7 +32,10 @@ flowchart TB
         TeamCR["Team CR"]
         Boundary["Team Namespace / quota / RBAC / NetworkPolicy"]
         AppCR["SteadyState Application CR"]
+        DatabaseCR["SteadyState Database CR"]
         Manager["SteadyState controller manager"]
+        CNPG["CloudNativePG Cluster / PVC"]
+        Barman["Barman WAL + base backups"]
         Rolling["Deployment"]
         Canary["Rollout / ReplicaSets / AnalysisRuns"]
         Services["Base / stable / canary Services"]
@@ -42,6 +53,7 @@ flowchart TB
         EG["Envoy Gateway / shared Gateway"]
         Argo --> TeamCR
         Argo --> AppCR
+        Argo --> DatabaseCR
         Argo --> Manager
         Argo --> Prometheus
         Argo --> Rollouts
@@ -53,6 +65,9 @@ flowchart TB
         Argo --> Kyverno --> Policies
         TeamCR --> Manager --> Boundary
         AppCR --> Manager
+        DatabaseCR --> Manager
+        Manager --> CNPG
+        Manager --> Barman
         Manager --> Rolling
         Manager --> Canary
         Manager --> Services
@@ -72,10 +87,14 @@ flowchart TB
         Canary --> OTel
         Rolling --> Services --> Route --> EG
         Canary --> Services
+        Rolling --> CNPG
+        Canary --> CNPG
+        CNPG --> Barman --> Seaweed
     end
     Docker --> Cluster
     Desired --> Argo
-    GHCR --> Children
+    GHCR --> Rolling
+    GHCR --> Canary
     Dev -->|"127.0.0.1:8080 to NodePort 30080"| EG
     Dev -->|"argocd.localtest.me"| Argo
 ```
@@ -86,11 +105,11 @@ flowchart TB
 |---|---:|---|
 | `minimal` | 1 control plane | Pull-request smoke tests and constrained machines |
 | `standard` | 1 control plane + 1 worker | Default development profile |
-| `full` | 1 control plane + 2 workers | Later end-to-end demonstrations |
+| `full` | 1 control plane + 2 workers | Data/recovery and complete end-to-end demonstrations |
 
 Every profile disables kindnet and installs Calico, making NetworkPolicy behavior observable. Envoy Gateway provides the maintained Gateway API implementation for north-south traffic.
 
-Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Phase 4 adds pinned Argo Rollouts, the Gateway API traffic-router plugin, a trimmed Prometheus stack, operator-generated analysis/monitoring resources, reversible strategy migration, and automatic metric-gated promotion or rollback. Phase 5 extends that monitoring plane with logs, traces, SLO rules, dashboards, and truthful service health. Phase 6 adds OIDC-signed/SBOM-attested images, stable CEL admission policy, SOPS/age secret custody, security status, and network isolation. Stateful recovery remains Phase 7.
+Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Phase 4 adds pinned Argo Rollouts, the Gateway API traffic-router plugin, a trimmed Prometheus stack, operator-generated analysis/monitoring resources, reversible strategy migration, and automatic metric-gated promotion or rollback. Phase 5 extends that monitoring plane with logs, traces, SLO rules, dashboards, and truthful service health. Phase 6 adds OIDC-signed/SBOM-attested images, stable CEL admission policy, SOPS/age secret custody, security status, and network isolation. Phase 7 adds declarative PostgreSQL, external backup durability, database binding, and measured whole-cluster recovery.
 
 ## Supply-chain trust and admission contract
 
@@ -98,7 +117,7 @@ The Demo release workflow is the only trusted image issuer. GitHub OIDC keylessl
 
 Stable Kyverno `ValidatingPolicy` resources enforce universal Team safety and the stricter SteadyState application Pod contract. The `ImageValidatingPolicy` applies to every unmanaged Team Pod and to managed Applications labeled `steadystate.dev/require-signed-image=true`. Platform namespaces are selected out explicitly; Team users cannot create native workloads or forge the trusted operator path through their namespaced RBAC.
 
-Every Application Pod carries deterministic workload-kind, signature-request, and isolation labels. Team default-deny remains the base. Non-isolated Applications may communicate only with other non-isolated Applications inside their Team; isolated Applications retain only the already declared Gateway, Prometheus, OTel, and DNS paths. A future Database path must be added explicitly.
+Every Application Pod carries deterministic workload-kind, signature-request, isolation, and optional database labels. Team default-deny remains the base. Non-isolated Applications may communicate only with other non-isolated Applications inside their Team; isolated Applications retain only the declared Gateway, Prometheus, OTel, DNS, and bound-Database paths. CNPG Pods receive only Application ingress, Prometheus ingress, DNS, and the exact SeaweedFS endpoint required for backups.
 
 Admission failure is observed through ReplicaSet failure state and optional PolicyReport watches. The controller reports `SecurityPolicyReady=False` with reason `SecurityPolicyRejected`, sanitizes the message, and preserves the last healthy active version, digest, revision, and serving children. When signature verification is not requested, status says `SignatureVerificationNotRequested`; it never claims verification occurred.
 
@@ -132,19 +151,19 @@ The command writes evidence only after every assertion passes. Hosted Nightly va
 
 The root Argo Application renders the small `gitops/clusters/local` Helm chart. Its resolved `$ARGOCD_APP_REVISION` becomes the `gitRevision` value for every child, preventing a root, platform, and tenant graph from mixing commits. Platform configuration and the operator use automated prune and self-heal. The tenant Application uses automated self-heal without prune; safe Git-driven Team deletion remains a later lifecycle design. `CreateNamespace` is intentionally absent because the Team controller must establish and own `team-payments` before the namespaced Application is admitted.
 
-Sync waves establish AppProjects at `-30`, Argo configuration at `-20`, monitoring at `-18`, Rollouts at `-17`, the operator at `-10`, the tenant child at `0`, the Team CR at `-1`, and the SteadyState Application CR at `0`. Kustomize substitutes the exact Argo source revision into `steadystate.dev/source-revision` on the Team and Application leaves. Argo ignores controller-owned status and finalizers with `RespectIgnoreDifferences=true`. The root ignores the monitoring child as a repeated sync-wave health gate so a transient Prometheus chart health refresh cannot block an otherwise unrelated tenant commit; deployment and acceptance still explicitly require every platform child, including monitoring, to be Healthy before delivery begins.
+Sync waves establish AppProjects at `-30`, Argo configuration at `-20`, monitoring at `-18`, Rollouts at `-17`, and full-profile data namespaces/storage/cert-manager/CNPG/Barman at `-10` through `-6`. The operator remains `-10` in standard profiles and moves to `-5` in the full profile so manager discovery sees the external CRDs before registering Database child watches. The tenant child is `0`; inside it, Team is `-1`, Database is `0`, and Application is `1`, so an Application cannot bind before its Database intent exists. Kustomize substitutes the exact Argo source revision into `steadystate.dev/source-revision` on Team, Database, and Application leaves. Argo ignores controller-owned status and finalizers with `RespectIgnoreDifferences=true`. The root ignores the monitoring child as a repeated sync-wave health gate so a transient Prometheus chart health refresh cannot block an otherwise unrelated tenant commit; deployment and acceptance still explicitly require every platform child, including monitoring, to be Healthy before delivery begins.
 
-The root project can create only AppProjects and Argo Applications in `argocd`. The platform project permits the exact cluster- and namespace-scoped kinds needed by Argo configuration and `config/default`. The tenant project permits only cluster-scoped Teams and namespaced SteadyState Applications from this repository into `team-*`; orphan warnings are disabled because generated application children belong to the operator.
+The root project can create only AppProjects and Argo Applications in `argocd`. The platform project permits the exact cluster- and namespace-scoped kinds needed by Argo configuration, `config/default`, and the pinned data controllers. The tenant project permits only cluster-scoped Teams and namespaced SteadyState Databases and Applications from this repository into `team-*`; orphan warnings are disabled because generated workload and data children belong to the operator.
 
 ## Argo health and ownership contract
 
-Argo uses annotation-based resource tracking. Lua health customizations require current observed generations: a Team is Healthy only with `Ready=True`; a SteadyState Application is Healthy only with `Phase=Healthy` and `Ready=True`, while `Phase=Degraded` maps to Degraded. The Argo Application customization forwards child health so the app-of-apps root waits truthfully.
+Argo uses annotation-based resource tracking. Lua health customizations require current observed generations: a Team is Healthy only with `Ready=True`; a Database or Application is Healthy only with `Phase=Healthy` and `Ready=True`, while `Phase=Degraded` maps to Degraded. The Argo Application customization forwards child health so the app-of-apps root waits truthfully.
 
 Argo owns platform configuration, monitoring, Rollouts, the operator installation, Team CRs, and Application CRs. It never owns operator-generated workload, traffic, analysis, or monitoring children. Those children retain controller owner references and explicit field-ownership boundaries. This prevents competing field managers and lets an operator outage leave the tenant Argo Application Healthy while the data plane and CR UIDs remain stable.
 
 ## Application ownership contract
 
-The `Application` controller owns the desired structure of its Deployment anchor, base/stable/canary Services, ConfigMap, HTTPRoute topology, Rollout, AnalysisTemplate, ServiceMonitor, and PrometheusRule. Every child has a controller owner reference and stable SteadyState labels. Owner watches enqueue reconciliation immediately when a child is deleted or changed; no polling interval is used. A rejected Application does not create or mutate children, so a newly unauthorized change cannot replace the last known-good workload.
+The `Application` controller owns the desired structure of its Deployment anchor, base/stable/canary Services, ConfigMap, HTTPRoute topology, Rollout, AnalysisTemplate, ServiceMonitor, PrometheusRule, and optional database egress policy. Every child has a controller owner reference and stable SteadyState labels. Owner watches enqueue reconciliation immediately when a child is deleted or changed; no polling interval is used. A rejected or database-blocked Application does not create or mutate children, so a newly unavailable dependency cannot replace the last known-good workload.
 
 In rolling mode, the Deployment is the active workload. In canary mode, a zero-replica Deployment remains the `workloadRef` template and reversible migration anchor. Rollouts owns ReplicaSets, Pods, AnalysisRuns, canary-mode Deployment replicas, and stable/canary Service selectors. The Gateway plugin temporarily owns HTTPRoute weights while its in-progress label is present. SteadyState preserves those fields during a rollout and repairs stable routing after temporary ownership ends. Replacement resources become ready before a route switch, and obsolete resources are removed only after the replacement data plane serves.
 
@@ -152,7 +171,7 @@ The reconciler preserves Kubernetes-assigned fields such as Service cluster IPs 
 
 ## Status contract
 
-`ConfigurationReady`, `SecurityPolicyReady`, `RolloutHealthy`, and `Ready` conditions are maintained with Kubernetes condition helpers. `Ready=True` requires an available active workload, an accepted HTTPRoute with resolved references, and exactly one canonical runtime digest from all ready active Pods. A GitOps-delivered Application may carry `steadystate.dev/source-revision` with a full lowercase SHA-1 or SHA-256 Git object ID. A successful promotion atomically records `activeVersion`, `resolvedImageDigest`, and `resolvedGitRevision`; an in-progress or failed candidate preserves that last healthy tuple. Rollout progress is `Progressing`; abort is `RollingBack`; restored stable traffic with the failed Git intent remains `Degraded/CanaryAnalysisFailed` until a recovery commit requests the healthy image. Invalid revisions are rejected before child mutation, while a revision-only change updates status without rewriting or restarting the workload. Status writes use conflict retry and record `observedGeneration`.
+`ConfigurationReady`, `DatabaseReady`, `SecurityPolicyReady`, `ServiceHealth`, `RolloutHealthy`, and `Ready` conditions are maintained with Kubernetes condition helpers. `Ready=True` requires a current ready referenced Database when requested, an available active workload, an accepted HTTPRoute with resolved references, and exactly one canonical runtime digest from all ready active Pods. A GitOps-delivered Application may carry `steadystate.dev/source-revision` with a full lowercase SHA-1 or SHA-256 Git object ID. A successful promotion atomically records `activeVersion`, `resolvedImageDigest`, and `resolvedGitRevision`; an in-progress or failed candidate preserves that last healthy tuple. Rollout progress is `Progressing`; abort is `RollingBack`; restored stable traffic with the failed Git intent remains `Degraded/CanaryAnalysisFailed` until a recovery commit requests the healthy image. Invalid revisions and recovery configurations are rejected before child mutation, while a revision-only change updates status without rewriting or restarting the workload. Status writes use conflict retry and record `observedGeneration`.
 
 ## Progressive-delivery and analysis contract
 
