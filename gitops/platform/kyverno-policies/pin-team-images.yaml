@@ -1,0 +1,78 @@
+apiVersion: policies.kyverno.io/v1
+kind: MutatingPolicy
+metadata:
+  name: steadystate-pin-team-images
+  labels:
+    app.kubernetes.io/part-of: steadystate
+spec:
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 15
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: steadystate.dev/team
+          operator: Exists
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - pods
+  matchConditions:
+    - name: unmanaged-or-signature-requested
+      expression: >-
+        !has(object.metadata.labels) ||
+        !('app.kubernetes.io/managed-by' in object.metadata.labels) ||
+        object.metadata.labels['app.kubernetes.io/managed-by'] != 'steadystate' ||
+        (
+          'steadystate.dev/require-signed-image' in object.metadata.labels &&
+          object.metadata.labels['steadystate.dev/require-signed-image'] == 'true'
+        )
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            spec: Object.spec{
+              containers: object.spec.containers.map(container, Object.spec.containers{
+                name: container.name,
+                image: image.GetMetadata(container.image).registry + "/" +
+                  image.GetMetadata(container.image).repository + "@" +
+                  image.GetMetadata(container.image).digest
+              })
+            }
+          }
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          has(object.spec.initContainers)
+            ? Object{
+                spec: Object.spec{
+                  initContainers: object.spec.initContainers.map(container, Object.spec.initContainers{
+                    name: container.name,
+                    image: image.GetMetadata(container.image).registry + "/" +
+                      image.GetMetadata(container.image).repository + "@" +
+                      image.GetMetadata(container.image).digest
+                  })
+                }
+              }
+            : Object{}
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          has(object.spec.ephemeralContainers)
+            ? Object{
+                spec: Object.spec{
+                  ephemeralContainers: object.spec.ephemeralContainers.map(container, Object.spec.ephemeralContainers{
+                    name: container.name,
+                    image: image.GetMetadata(container.image).registry + "/" +
+                      image.GetMetadata(container.image).repository + "@" +
+                      image.GetMetadata(container.image).digest
+                  })
+                }
+              }
+            : Object{}

@@ -3,4 +3,5 @@ kind: Kustomization
 resources:
   - universal-team-safety.yaml
   - application-pod-security.yaml
+  - pin-team-images.yaml
   - verify-team-images.yaml

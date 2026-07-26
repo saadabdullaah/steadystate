@@ -189,6 +189,13 @@ jobs:
         shell: pwsh
         run: ./scripts/dev.ps1 bootstrap -Profile standard
 
+      - name: Build and load local platform images
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          ./scripts/dev.ps1 build-images
+          ./scripts/dev.ps1 load-images
+
       - name: Deploy exact-revision secured GitOps platform
         timeout-minutes: 15
         shell: pwsh
@@ -242,6 +249,7 @@ jobs:
             'docs/demonstrations/phase6-admission-denial.tape',
             '.artifacts/phase6/acceptance/evidence.json',
             '.artifacts/phase6/acceptance/snapshots/policies.yaml',
+            '.artifacts/phase6/acceptance/snapshots/mutating-webhook.yaml',
             '.artifacts/phase6/acceptance/snapshots/policyreports.yaml',
             '.artifacts/phase6/acceptance/snapshots/workloads.yaml',
             '.artifacts/phase6/acceptance/logs/kyverno.log',

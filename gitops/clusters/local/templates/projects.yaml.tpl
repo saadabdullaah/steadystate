@@ -58,6 +58,8 @@ spec:
     - group: policies.kyverno.io
       kind: ImageValidatingPolicy
     - group: policies.kyverno.io
+      kind: MutatingPolicy
+    - group: policies.kyverno.io
       kind: ValidatingPolicy
   namespaceResourceWhitelist:
     - group: ""

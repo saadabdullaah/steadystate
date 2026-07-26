@@ -88,11 +88,12 @@ spec:
 }
 
 function Test-SignedPod {
+    $podName = 'signed-phase6'
     $manifest = @"
 apiVersion: v1
 kind: Pod
 metadata:
-  name: signed-phase6
+  name: $podName
   namespace: $Namespace
   labels:
     steadystate.dev/security-acceptance: "true"
@@ -110,13 +111,25 @@ spec:
         readOnlyRootFilesystem: true
         runAsNonRoot: true
 "@
-    $object = $manifest | & kubectl apply --dry-run=server -f - -o json | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0) { throw 'The signed and attested v0.6.0 image was denied.' }
-    $admittedImage = [string]$object.spec.containers[0].image
-    if ($admittedImage -cnotmatch '^ghcr\.io/saadabdullaah/steadystate-demo-app@sha256:[0-9a-f]{64}$') {
-        throw "Kyverno did not digest-pin the admitted image: $admittedImage"
+    # Signature/SBOM verification and registry-backed digest mutation are
+    # observable only on a persisted admission response. Create one disposable
+    # Pod, read the API-server object, and delete it before testing workloads.
+    & kubectl delete pod $podName -n $Namespace --ignore-not-found=true --wait=true --timeout=30s *> $null
+    try {
+        $null = @($manifest | & kubectl create -f - -o json)
+        if ($LASTEXITCODE -ne 0) { throw 'The signed and attested v0.6.0 image was denied.' }
+        $object = Invoke-KubectlJSON @('get','pod',$podName,'-n',$Namespace,'-o','json')
+        $admittedImage = [string]$object.spec.containers[0].image
+        if ($admittedImage -cnotmatch '^ghcr\.io/saadabdullaah/steadystate-demo-app@sha256:[0-9a-f]{64}$') {
+            throw "Kyverno did not digest-pin the admitted image: $admittedImage"
+        }
+        return $admittedImage
+    } finally {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & kubectl delete pod $podName -n $Namespace --ignore-not-found=true --wait=true --timeout=30s *> $null
+        $ErrorActionPreference = $previous
     }
-    return $admittedImage
 }
 
 function New-SecurityApplication([string]$Tag) {
@@ -147,7 +160,8 @@ spec:
 
 function Save-Snapshots {
     New-Item -ItemType Directory -Force -Path (Join-Path $ArtifactRoot 'snapshots'), (Join-Path $ArtifactRoot 'logs') | Out-Null
-    & kubectl get validatingpolicies.policies.kyverno.io,imagevalidatingpolicies.policies.kyverno.io -o yaml *> (Join-Path $ArtifactRoot 'snapshots/policies.yaml')
+    & kubectl get validatingpolicies.policies.kyverno.io,imagevalidatingpolicies.policies.kyverno.io,mutatingpolicies.policies.kyverno.io -o yaml *> (Join-Path $ArtifactRoot 'snapshots/policies.yaml')
+    & kubectl get mutatingwebhookconfiguration kyverno-resource-mutating-webhook-cfg -o yaml *> (Join-Path $ArtifactRoot 'snapshots/mutating-webhook.yaml')
     & kubectl get policyreports.wgpolicyk8s.io -A -o yaml *> (Join-Path $ArtifactRoot 'snapshots/policyreports.yaml')
     & kubectl get applications.platform.steadystate.dev,deployments,replicasets,pods,networkpolicies -n $Namespace -o yaml *> (Join-Path $ArtifactRoot 'snapshots/workloads.yaml')
     & kubectl logs -n kyverno -l app.kubernetes.io/part-of=kyverno --all-containers --tail=500 --prefix=true *> (Join-Path $ArtifactRoot 'logs/kyverno.log')
@@ -163,6 +177,20 @@ switch ($Stage) {
             & kubectl rollout status "deployment/$deployment" -n kyverno --timeout=180s
             if ($LASTEXITCODE -ne 0) { throw "$deployment is not ready." }
         }
+        $deadline = (Get-Date).AddMinutes(3)
+        $mutationReady = $false
+        do {
+            $ready = (& kubectl get mutatingpolicy.policies.kyverno.io/steadystate-pin-team-images -o jsonpath='{.status.conditionStatus.ready}' 2>$null)
+            $configuration = Invoke-KubectlJSON @('get','mutatingwebhookconfiguration','kyverno-resource-mutating-webhook-cfg','-o','json')
+            $mutationReady = $ready -eq 'true' -and @(
+                $configuration.webhooks | Where-Object {
+                    [string]$_.clientConfig.service.path -like '/mpol*' -and
+                    @($_.rules | Where-Object { 'pods' -in @($_.resources) }).Count -gt 0
+                }
+            ).Count -gt 0
+            if (-not $mutationReady) { Start-Sleep -Seconds 2 }
+        } while (-not $mutationReady -and (Get-Date) -lt $deadline)
+        if (-not $mutationReady) { throw 'The fail-closed image digest mutation webhook is not ready.' }
         $state = [pscustomobject]@{
             schemaVersion = 1
             result = 'running'
@@ -213,19 +241,19 @@ switch ($Stage) {
             $started = Get-Date
             New-SecurityApplication -Tag 'v0.6.0'
             Wait-Until 300 'Signed security Application did not become Healthy.' {
-                $app = Invoke-KubectlJSON @('get','application','security-acceptance','-n',$Namespace,'-o','json')
+                $app = Invoke-KubectlJSON @('get','applications.platform.steadystate.dev','security-acceptance','-n',$Namespace,'-o','json')
                 return $app.status.phase -eq 'Healthy'
             }
-            $healthy = Invoke-KubectlJSON @('get','application','security-acceptance','-n',$Namespace,'-o','json')
+            $healthy = Invoke-KubectlJSON @('get','applications.platform.steadystate.dev','security-acceptance','-n',$Namespace,'-o','json')
             $tuple = [pscustomobject]@{version=$healthy.status.activeVersion;digest=$healthy.status.resolvedImageDigest;revision=$healthy.status.resolvedGitRevision}
-            & kubectl patch application security-acceptance -n $Namespace --type merge -p '{"spec":{"image":{"tag":"v0.5.0"}}}' | Out-Null
+            & kubectl patch applications.platform.steadystate.dev security-acceptance -n $Namespace --type merge -p '{"spec":{"image":{"tag":"v0.5.0"}}}' | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'Patching the unsigned candidate failed.' }
             Wait-Until 240 'Application did not report SecurityPolicyRejected.' {
-                $app = Invoke-KubectlJSON @('get','application','security-acceptance','-n',$Namespace,'-o','json')
+                $app = Invoke-KubectlJSON @('get','applications.platform.steadystate.dev','security-acceptance','-n',$Namespace,'-o','json')
                 $security = @($app.status.conditions | Where-Object {$_.type -eq 'SecurityPolicyReady'})[0]
                 return $app.status.phase -eq 'Degraded' -and $security.status -eq 'False' -and $security.reason -eq 'SecurityPolicyRejected'
             }
-            $rejected = Invoke-KubectlJSON @('get','application','security-acceptance','-n',$Namespace,'-o','json')
+            $rejected = Invoke-KubectlJSON @('get','applications.platform.steadystate.dev','security-acceptance','-n',$Namespace,'-o','json')
             if ($rejected.status.activeVersion -ne $tuple.version -or $rejected.status.resolvedImageDigest -ne $tuple.digest -or $rejected.status.resolvedGitRevision -ne $tuple.revision) {
                 throw 'Admission rejection overwrote the last healthy release tuple.'
             }
@@ -264,7 +292,7 @@ switch ($Stage) {
             Write-Host 'PHASE6_ACCEPTANCE_RESULT_FAILED' -ForegroundColor Red
             throw
         } finally {
-            & kubectl delete application security-acceptance -n $Namespace --ignore-not-found=true --wait=false *> $null
+            & kubectl delete applications.platform.steadystate.dev security-acceptance -n $Namespace --ignore-not-found=true --wait=false *> $null
         }
     }
     'Finalize' {
