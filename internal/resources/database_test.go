@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
@@ -25,6 +26,24 @@ func TestDatabaseResourcesPreserveArchiveBoundary(t *testing.T) {
 	serverName, _, _ := unstructuredString(cluster.Object, "spec", "plugins", "0", "parameters", "serverName")
 	if serverName != DatabaseBackupServerName(database) {
 		t.Fatalf("write serverName = %q, want %q", serverName, DatabaseBackupServerName(database))
+	}
+}
+
+func TestDatabaseUnstructuredResourcesAreDeepCopySafe(t *testing.T) {
+	database := testDatabase("orders")
+	for name, object := range map[string]*unstructured.Unstructured{
+		"object store":     DatabaseObjectStore(database, ""),
+		"cluster":          DatabaseCluster(database),
+		"scheduled backup": DatabaseScheduledBackup(database),
+		"final backup":     DatabaseFinalBackup(database),
+		"service monitor":  DatabaseServiceMonitor(database),
+		"prometheus rule":  DatabasePrometheusRule(database),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if copy := object.DeepCopy(); copy.GetName() != object.GetName() {
+				t.Fatal("deep copy did not preserve resource identity")
+			}
+		})
 	}
 }
 

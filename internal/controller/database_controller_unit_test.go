@@ -125,6 +125,42 @@ func TestForceDeleteSkipsFinalBackup(t *testing.T) {
 	}
 }
 
+func TestDatabaseUnstructuredReconcileCreatesAbsentChildWithDesiredIdentity(t *testing.T) {
+	database := databaseStatusFixture()
+	scheme := runtime.NewScheme()
+	if err := platformv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	scheme.AddKnownTypeWithName(resources.BarmanObjectStoreGVK, &unstructured.Unstructured{})
+
+	reconciler := &DatabaseReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(database).Build(),
+		Scheme: scheme,
+	}
+	desired := resources.DatabaseObjectStore(database, resources.DefaultBackupStoreEndpoint)
+	changed, err := reconciler.reconcileDatabaseUnstructured(context.Background(), database, desired)
+	if err != nil {
+		t.Fatalf("create-on-not-found reconciliation failed: %v", err)
+	}
+	if !changed {
+		t.Fatal("create-on-not-found reconciliation reported no write")
+	}
+
+	current := &unstructured.Unstructured{}
+	current.SetGroupVersionKind(resources.BarmanObjectStoreGVK)
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(desired), current); err != nil {
+		t.Fatalf("created ObjectStore is unavailable: %v", err)
+	}
+	if current.GetName() != desired.GetName() || current.GetNamespace() != desired.GetNamespace() {
+		t.Fatalf("created ObjectStore identity = %s/%s, want %s/%s",
+			current.GetNamespace(), current.GetName(), desired.GetNamespace(), desired.GetName())
+	}
+	owner := metav1.GetControllerOf(current)
+	if owner == nil || owner.UID != database.UID || owner.Kind != "Database" {
+		t.Fatalf("created ObjectStore owner = %#v, want Database %s", owner, database.UID)
+	}
+}
+
 func databaseStatusFixture() *platformv1alpha1.Database {
 	return &platformv1alpha1.Database{
 		ObjectMeta: metav1.ObjectMeta{

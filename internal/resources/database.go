@@ -96,8 +96,8 @@ func databaseUnstructured(database *platformv1alpha1.Database, gvk schema.GroupV
 		"metadata": map[string]any{
 			"name":        name,
 			"namespace":   database.Namespace,
-			"labels":      DatabaseLabels(database),
-			"annotations": DatabaseAnnotations(database),
+			"labels":      stringMapAny(DatabaseLabels(database)),
+			"annotations": stringMapAny(DatabaseAnnotations(database)),
 		},
 		"spec": spec,
 	}}

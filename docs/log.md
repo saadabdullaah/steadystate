@@ -341,3 +341,16 @@
   Kyverno, CNPG, Barman, PostgreSQL, and SeaweedFS. Failure evidence now also
   records exact kind container state/OOM flags, resource use, and Docker disk
   consumption.
+- Corrected head `d02f8b1` passed all five CI jobs, Phase 4 acceptance,
+  Phase 5 acceptance, and Phase 6 compatibility. Phase 7 run
+  [30217802874](https://github.com/saadabdullaah/steadystate/actions/runs/30217802874)
+  and artifact `8636565821` proved that the focused full-profile graph kept
+  every kind node running without OOM, installed the complete data stack, and
+  reached the real Database reconciliation path.
+- That proof exposed a controller defect rather than an infrastructure
+  failure: create-on-not-found reconciliation initialized external resources
+  without the desired name and namespace, producing
+  `resource name may not be empty`. The correction preserves external-child
+  identity, keeps unstructured metadata JSON-compatible, and adds a direct
+  absent-child regression test. A corrected compatibility artifact remains
+  required before Phase 7 can close.

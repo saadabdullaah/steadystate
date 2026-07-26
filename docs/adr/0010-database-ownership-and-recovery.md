@@ -83,5 +83,9 @@ plugin status metrics; failure is fast, while stale-success age remains a
   Checkov excludes only that byte-exact source fixture, while checksum and
   rendered-leaf tests remain blocking.
 - Recovery is reviewable Git intent, never a patch to generated CNPG objects.
+- Every schema-tested unstructured child is created with its desired identity
+  before `CreateOrUpdate`, and its metadata uses JSON-compatible maps. This is
+  a controller contract covered by an absent-child regression test, not an
+  assumption delegated to the dynamic client.
 - Hosted objectives are RTO at most 30 minutes and a confirmed archive RPO
   boundary at most five minutes.

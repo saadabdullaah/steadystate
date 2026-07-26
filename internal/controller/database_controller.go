@@ -235,8 +235,12 @@ func (r *DatabaseReconciler) reconcileDatabaseObject(ctx context.Context, databa
 }
 
 func (r *DatabaseReconciler) reconcileDatabaseUnstructured(ctx context.Context, database *platformv1alpha1.Database, desired *unstructured.Unstructured) (bool, error) {
+	// Preserve the desired identity for the create-on-not-found path. Get
+	// populates the rest of the object when the child already exists.
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(desired.GroupVersionKind())
+	current.SetName(desired.GetName())
+	current.SetNamespace(desired.GetNamespace())
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), current)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err

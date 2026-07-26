@@ -389,6 +389,13 @@ source. If a standard regression unexpectedly shows `DatabaseUnavailable`,
 render the root chart and verify `enableDataFoundation=false`; do not install
 the data stack just to make an earlier-phase test green.
 
+If every Database condition reports `ReconciliationFailed` with
+`resource name may not be empty`, inspect the operator version before
+investigating CNPG or SeaweedFS. That message means the operator attempted to
+create an external child without preserving its desired identity. Upgrade to
+a build containing the create-on-not-found regression fix; do not work around
+it by manually creating the generated ObjectStore, Cluster, or Backup.
+
 ## SeaweedFS is running but Docker reports unhealthy
 
 ```powershell
