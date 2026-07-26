@@ -146,6 +146,16 @@ function Capture-Snapshots([string]$Prefix) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        & docker ps -a --filter 'label=io.x-k8s.kind.cluster=steadystate' --format '{{.Names}} {{.Status}}' *> (Join-Path $ArtifactDirectory "$Prefix-kind-containers.txt")
+        $kindContainerIDs = @(& docker ps -aq --filter 'label=io.x-k8s.kind.cluster=steadystate')
+        if ($kindContainerIDs.Count -gt 0) {
+            & docker inspect --format '{{.Name}} status={{.State.Status}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}}' @kindContainerIDs *> (Join-Path $ArtifactDirectory "$Prefix-kind-container-state.txt")
+            & docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' @kindContainerIDs *> (Join-Path $ArtifactDirectory "$Prefix-kind-container-resources.txt")
+        } else {
+            'No kind containers were discoverable.' | Set-Content -LiteralPath (Join-Path $ArtifactDirectory "$Prefix-kind-container-state.txt") -Encoding UTF8
+            'No kind container resource measurements were available.' | Set-Content -LiteralPath (Join-Path $ArtifactDirectory "$Prefix-kind-container-resources.txt") -Encoding UTF8
+        }
+        & docker system df *> (Join-Path $ArtifactDirectory "$Prefix-docker-disk.txt")
         & kubectl get database,cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactDirectory "$Prefix-data-resources.yaml")
         & kubectl get pod,pvc,service,networkpolicy -n $Namespace -o wide *> (Join-Path $ArtifactDirectory "$Prefix-workloads.txt")
         & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-operator.log")

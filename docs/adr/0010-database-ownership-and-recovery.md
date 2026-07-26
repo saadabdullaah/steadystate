@@ -27,6 +27,13 @@ SeaweedFS is not an officially tested Barman target, so a hosted
 provision/WAL/base-backup/delete/restore/checksum compatibility gate is
 mandatory and has no silent fallback.
 
+The focused foundation gate keeps Prometheus and Kyverno enabled but omits
+Loki, Tempo, Alloy, and OTel, which Phase 5 acceptance validates separately.
+This reserves the hosted runner for the storage controllers, PostgreSQL, and
+external backup service without weakening admission enforcement. Exact kind
+container OOM state, working set, and Docker disk use are captured if the
+Kubernetes API becomes unavailable.
+
 The data graph is full-profile-only. The reusable Application leaf omits
 `databaseRef`; standard-profile tenant rendering uses that leaf unchanged,
 while the full profile adds `databaseRef.name=orders` and retains

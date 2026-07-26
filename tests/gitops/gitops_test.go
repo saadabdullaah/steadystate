@@ -787,6 +787,20 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		strings.Contains(phase7Foundation, `Invoke-Kubectl wait -n argocd "--for=jsonpath={.status.health.status}=Healthy"`) {
 		t.Fatal("Phase 7 foundation must tolerate later-wave Argo Applications not existing yet")
 	}
+	for _, contract := range []string{
+		"label=io.x-k8s.kind.cluster=steadystate",
+		"oomKilled={{.State.OOMKilled}}",
+		"docker system df",
+	} {
+		if !strings.Contains(phase7Foundation, contract) {
+			t.Fatalf("Phase 7 failure diagnostics are missing %q", contract)
+		}
+	}
+	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
+	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline") ||
+		strings.Contains(phase7Workflow, "-DisableSecurity") {
+		t.Fatal("Phase 7 compatibility must isolate the data stack while retaining monitoring and Kyverno")
+	}
 	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
 	for _, contract := range []string{
 		"id: KSV-0041\n    paths:\n      - config/rbac/role.yaml",

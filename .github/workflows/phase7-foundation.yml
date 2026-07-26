@@ -65,10 +65,13 @@ jobs:
           ./scripts/dev.ps1 build-images
           ./scripts/dev.ps1 load-images
 
-      - name: Deploy exact-revision full GitOps stack
+      - name: Deploy exact-revision data compatibility stack
         timeout-minutes: 20
         shell: pwsh
-        run: ./scripts/dev.ps1 deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA
+        # Phase 5 acceptance validates Loki, Tempo, Alloy, and OTel separately.
+        # Keep Prometheus and Kyverno active here while reserving runner
+        # capacity for CNPG, Barman, PostgreSQL, and the external backup store.
+        run: ./scripts/dev.ps1 deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline
 
       - name: Prove backup, WAL archive, and restore compatibility
         id: compatibility

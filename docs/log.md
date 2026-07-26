@@ -324,3 +324,20 @@
   `cloudnative-pg` Application before Argo created it. Its bounded wait now
   tolerates absence while waves advance and requires eventual Synced/Healthy
   state rather than failing immediately.
+- Corrected head `cb10021` passed all five CI jobs, Phase 4 acceptance, Phase 5
+  acceptance, and Phase 6 compatibility in runs
+  [30214986778](https://github.com/saadabdullaah/steadystate/actions/runs/30214986778),
+  [30214986783](https://github.com/saadabdullaah/steadystate/actions/runs/30214986783),
+  [30214986781](https://github.com/saadabdullaah/steadystate/actions/runs/30214986781),
+  and
+  [30214986732](https://github.com/saadabdullaah/steadystate/actions/runs/30214986732).
+- Phase 7 run
+  [30214986776](https://github.com/saadabdullaah/steadystate/actions/runs/30214986776)
+  and artifact `8635863984` showed SeaweedFS remained healthy while every
+  Kubernetes diagnostic failed with API-server EOF/reset errors before the
+  Database proof began. This was full-graph runner pressure, not a backup or
+  restore assertion. The focused foundation job now omits the separately
+  validated Loki/Tempo/Alloy/OTel pipeline while retaining Prometheus,
+  Kyverno, CNPG, Barman, PostgreSQL, and SeaweedFS. Failure evidence now also
+  records exact kind container state/OOM flags, resource use, and Docker disk
+  consumption.

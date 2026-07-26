@@ -192,6 +192,11 @@ the `orders` binding after creating that Database. The application exposes
 binding is declared. Database connection values are injected through explicit
 SecretKeyRefs and never enter status, ConfigMaps, logs, or evidence.
 
+The focused `phase7-foundation` hosted proof retains Prometheus and Kyverno
+while omitting the separately validated Loki, Tempo, Alloy, and OTel pipeline.
+The final Phase 7 disaster-recovery acceptance still validates the integrated
+full product profile.
+
 `stop-backup-store` removes only the exact named container and network; it
 preserves `steadystate-backup-data`. Purging requires the explicit
 `scripts/backup-store.ps1 -Action Stop -PurgeData` contract.
