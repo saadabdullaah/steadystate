@@ -11,8 +11,8 @@ isolation, encrypted secrets, and the local single-cluster host.
 | Tampered image or tag | Immutable pairwise tags, recorded digests, signatures, SPDX attestations, admission digest pinning | GHCR is required for new admissions |
 | GitOps review bypass | One-manifest delivery PR, exact Argo revision, operator ownership of children | An authorized reviewer can approve malicious desired state |
 | Policy bypass | Stable CEL policy, fail-closed webhooks, immutable Team selector, no native workload rights, CNPG bypass regression | Cluster administrators can alter admission or Namespace labels |
-| Operator abuse | Explicit generated-resource RBAC and resource-name-scoped Team-owner binding | The cluster-wide operator remains trusted |
-| Secret disclosure | SOPS ciphertext only, ignored/repository-secret age identity, short-lived plaintext, redacted evidence | A compromised runner or host can read material while decrypted |
+| Operator abuse | Explicit generated-resource RBAC, resource-name-scoped Team-owner binding, and tested Database child ownership | The cluster-wide operator remains trusted and can create Database credential copies |
+| Secret disclosure | SOPS ciphertext only, ignored/repository-secret age identity, short-lived plaintext, explicit two-key Database copies, redacted evidence | A compromised runner, host, or operator can read material while decrypted |
 | Tenant network escape | Calico default deny and exact Gateway, monitoring, OTLP, DNS, and same-Team selectors | Shared kernel, CNI, Gateway, and host remain trusted |
 | Evidence repudiation | Source SHA, workflow, digest, identity, reports, checksums, and diagnostics | Repository administrators control retention |
 | Denial of service | Bounded workflows/resources and 15-second fail-closed webhook timeout | Provider outage blocks new Pods by design |

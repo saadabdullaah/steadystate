@@ -4,6 +4,16 @@ resources:
   - local-path-storage.yaml
 patches:
   - target:
+      version: v1
+      kind: Namespace
+      name: local-path-storage
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: local-path-storage
+  - target:
       group: storage.k8s.io
       version: v1
       kind: StorageClass

@@ -27,6 +27,13 @@ SeaweedFS is not an officially tested Barman target, so a hosted
 provision/WAL/base-backup/delete/restore/checksum compatibility gate is
 mandatory and has no silent fallback.
 
+The data graph is full-profile-only. Standard-profile tenant rendering omits
+the Database source and removes the sample Application's `databaseRef`, while
+the full profile retains Team/Database/Application waves. Cert-manager leader
+election is explicitly moved from its chart default in `kube-system` to the
+dedicated `cert-manager` Namespace so the platform AppProject does not gain an
+unrelated destination.
+
 `ObjectStore.spec.serverName` is absent. Each Database lifetime sends its
 UID-derived server name through Barman plugin parameters for writes. Recovery
 selects an earlier server through the external-cluster plugin parameter and
@@ -59,6 +66,12 @@ plugin status metrics; failure is fast, while stale-success age remains a
 - Application deletion never deletes its referenced Database.
 - Backup durability survives kind destruction but still trusts one host and
   named Docker volume.
+- The controller requires Secret write access to create deterministic
+  Database-owned credential copies. A path-specific, expiring scanner
+  exception records this trust rather than hiding it.
+- The checksum-pinned upstream local-path manifest retains its root helper and
+  writable filesystem. Path-specific, expiring exceptions apply only to that
+  isolated platform add-on; Team workloads receive no policy exemption.
 - Recovery is reviewable Git intent, never a patch to generated CNPG objects.
 - Hosted objectives are RTO at most 30 minutes and a confirmed archive RPO
   boundary at most five minutes.

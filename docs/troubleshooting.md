@@ -382,6 +382,12 @@ container is healthy, and the kind nodes are attached to
 at Database creation; do not patch the generated Cluster or set
 `ObjectStore.spec.serverName`.
 
+The Database sample is full-profile-only. A standard-profile root intentionally
+renders Team and Application intent without `Database` or `databaseRef`. If a
+standard regression unexpectedly shows `DatabaseUnavailable`, render the root
+chart and verify `enableDataFoundation=false`; do not install the data stack
+just to make an earlier-phase test green.
+
 ## SeaweedFS is running but Docker reports unhealthy
 
 ```powershell

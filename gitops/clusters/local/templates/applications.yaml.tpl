@@ -450,6 +450,7 @@ spec:
         commonAnnotations:
           steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
         commonAnnotationsEnvsubst: true
+{{- if .Values.enableDataFoundation }}
     - repoURL: {{ .Values.repoURL | quote }}
       targetRevision: {{ .Values.gitRevision | quote }}
       path: gitops/databases/orders
@@ -457,6 +458,7 @@ spec:
         commonAnnotations:
           steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
         commonAnnotationsEnvsubst: true
+{{- end }}
     - repoURL: {{ .Values.repoURL | quote }}
       targetRevision: {{ .Values.gitRevision | quote }}
       path: gitops/applications/demo
@@ -464,6 +466,17 @@ spec:
         commonAnnotations:
           steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
         commonAnnotationsEnvsubst: true
+{{- if not .Values.enableDataFoundation }}
+        patches:
+          - target:
+              group: platform.steadystate.dev
+              version: v1alpha1
+              kind: Application
+              name: demo
+            patch: |-
+              - op: remove
+                path: /spec/databaseRef
+{{- end }}
   destination:
     server: https://kubernetes.default.svc
     namespace: team-payments

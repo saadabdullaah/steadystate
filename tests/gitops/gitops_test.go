@@ -160,10 +160,10 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	payments := findObject(t, objects, "Application", "payments")
 	assertAutomated(t, payments, false)
 	sources := nestedSlice(t, payments, "spec", "sources")
-	if len(sources) != 3 {
-		t.Fatalf("payments has %d sources, want 3", len(sources))
+	if len(sources) != 2 {
+		t.Fatalf("standard-profile payments has %d sources, want Team and Application only", len(sources))
 	}
-	expectedPaths := []string{"gitops/teams/payments", "gitops/databases/orders", "gitops/applications/demo"}
+	expectedPaths := []string{"gitops/teams/payments", "gitops/applications/demo"}
 	for index, rawSource := range sources {
 		source, ok := rawSource.(map[string]any)
 		if !ok {
@@ -180,6 +180,12 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		if err != nil || !found || annotations["steadystate.dev/source-revision"] != "$ARGOCD_APP_REVISION" {
 			t.Fatalf("source %s has invalid revision annotations: %#v", expectedPaths[index], annotations)
 		}
+	}
+	applicationSource := sources[1].(map[string]any)
+	standardPatches := nestedSlice(t, applicationSource, "kustomize", "patches")
+	if len(standardPatches) != 1 ||
+		!strings.Contains(standardPatches[0].(map[string]any)["patch"].(string), "path: /spec/databaseRef") {
+		t.Fatalf("standard profile must remove the full-profile database binding: %#v", standardPatches)
 	}
 	options, found, err := unstructured.NestedStringSlice(payments, "spec", "syncPolicy", "syncOptions")
 	if err != nil || !found || !contains(options, "RespectIgnoreDifferences=true") {
@@ -709,15 +715,65 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 	assertExternalChartApplication(t, objects, "cert-manager", "https://charts.jetstack.io", "cert-manager", "v1.21.0", "gitops/platform/cert-manager/values.yaml", "cert-manager")
 	assertExternalChartApplication(t, objects, "cloudnative-pg", "https://cloudnative-pg.github.io/charts", "cloudnative-pg", "0.29.0", "gitops/platform/cloudnative-pg/values.yaml", "cnpg-system")
 	assertExternalChartApplication(t, objects, "barman-cloud", "https://cloudnative-pg.github.io/charts", "plugin-barman-cloud", "0.7.0", "gitops/platform/barman-cloud/values.yaml", "cnpg-system")
+	payments := findObject(t, objects, "Application", "payments")
+	sources := nestedSlice(t, payments, "spec", "sources")
+	if len(sources) != 3 {
+		t.Fatalf("full-profile payments has %d sources, want Team, Database, and Application", len(sources))
+	}
+	if objectString(sources[1].(map[string]any), "path") != "gitops/databases/orders" {
+		t.Fatalf("full profile is missing the Database source: %#v", sources[1])
+	}
+	if _, found, err := unstructured.NestedSlice(sources[2].(map[string]any), "kustomize", "patches"); err != nil || found {
+		t.Fatalf("full profile must retain databaseRef without a removal patch: found=%v err=%v", found, err)
+	}
 
 	manifest := readFile(t, filepath.Join(root, "gitops", "platform", "local-path", "local-path-storage.yaml"))
 	sum := sha256.Sum256(manifest)
 	if actual := hex.EncodeToString(sum[:]); actual != "a5b4b057e4e400a2ca7188b03dc11303f874bfe600fc837d5446d86b3d13e26c" {
 		t.Fatalf("vendored local-path manifest checksum = %s", actual)
 	}
-	localPath := string(run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "platform", "local-path")))
+	localPathRendered := run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "platform", "local-path"))
+	localPath := string(localPathRendered)
 	if !strings.Contains(localPath, `storageclass.kubernetes.io/is-default-class: "true"`) {
 		t.Fatal("local-path StorageClass is not rendered as the local default")
+	}
+	for _, object := range decodeManifests(t, localPathRendered) {
+		if objectString(object, "kind") == "Namespace" {
+			t.Fatal("local-path leaf must not compete with data-namespaces for Namespace ownership")
+		}
+	}
+	certManagerValues := string(readFile(t, filepath.Join(root, "gitops", "platform", "cert-manager", "values.yaml")))
+	if !strings.Contains(certManagerValues, "leaderElection:") || !strings.Contains(certManagerValues, "namespace: cert-manager") {
+		t.Fatal("cert-manager leader election must remain inside the permitted cert-manager namespace")
+	}
+}
+
+func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) {
+	root := repositoryRoot(t)
+	phase4 := string(readFile(t, filepath.Join(root, "scripts", "phase4-acceptance.ps1")))
+	if !strings.Contains(phase4, "Acceptance failed before immutable registry metadata was resolved.") {
+		t.Fatal("Phase 4 failure evidence must cover pre-registry preparation failures")
+	}
+	phase5 := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase5.yml")))
+	for _, contract := range []string{
+		"id: deploy",
+		"steps.deploy.outcome != 'skipped' && steps.finalize.outcome != 'success'",
+		"always() && steps.deploy.outcome != 'skipped'",
+	} {
+		if !strings.Contains(phase5, contract) {
+			t.Fatalf("Phase 5 deployment-failure evidence is missing %q", contract)
+		}
+	}
+	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
+	for _, contract := range []string{
+		"id: KSV-0041\n    paths:\n      - config/rbac/role.yaml",
+		"id: KSV-0014\n    paths:\n      - gitops/platform/local-path/local-path-storage.yaml",
+		"id: KSV-0118\n    paths:\n      - gitops/platform/local-path/local-path-storage.yaml",
+		"expired_at: 2027-07-26",
+	} {
+		if !strings.Contains(ignores, contract) {
+			t.Fatalf("time-bounded Phase 7 scanner exception is missing %q", contract)
+		}
 	}
 }
 

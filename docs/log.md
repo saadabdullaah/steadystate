@@ -272,3 +272,28 @@
   passed unchanged.
 - Corrected run, artifact, and final commit identifiers remain pending; this
   section will be completed rather than replaced after hosted validation.
+- Corrected head `70dbb3b` passed quality, Windows, envtest, kind-smoke, and
+  Phase 6 compatibility in runs
+  [30208021265](https://github.com/saadabdullaah/steadystate/actions/runs/30208021265)
+  and
+  [30208021240](https://github.com/saadabdullaah/steadystate/actions/runs/30208021240).
+  The operator render and SeaweedFS readiness corrections both worked.
+- Phase 4 run
+  [30208021246](https://github.com/saadabdullaah/steadystate/actions/runs/30208021246)
+  and Phase 5 run
+  [30208021340](https://github.com/saadabdullaah/steadystate/actions/runs/30208021340)
+  then exposed a profile-boundary error: standard-profile tenant rendering
+  included the Phase 7 Database and `databaseRef`, correctly degrading without
+  the full data stack. Standard rendering now contains only Team/Application
+  intent and removes the binding; the full profile retains all three sources.
+- Phase 7 foundation run
+  [30208021244](https://github.com/saadabdullaah/steadystate/actions/runs/30208021244)
+  reached the healthy external store and full GitOps graph, then cert-manager's
+  default `kube-system` leader-election resources were rejected by the
+  restricted platform project. Exact chart values now keep leader election in
+  `cert-manager`; duplicate local-path Namespace ownership is also removed.
+- CI security retained report artifact `8633670383`. Trivy identified the
+  Database controller's required Secret-copy permission and two findings in
+  the byte-exact upstream local-path manifest. Time-bounded, path-specific
+  exceptions document those required trust boundaries without weakening
+  application policy or changing the checksum-pinned manifest.
