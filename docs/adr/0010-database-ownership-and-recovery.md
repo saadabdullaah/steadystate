@@ -102,3 +102,7 @@ plugin status metrics; failure is fast, while stale-success age remains a
   the admitted bytes immutable.
 - Hosted objectives are RTO at most 30 minutes and a confirmed archive RPO
   boundary at most five minutes.
+- The payments GitOps sample uses a 4 GiB Team memory quota so the normal
+  database and the temporary hosted compatibility database can coexist during
+  the foundation proof. ResourceQuota is an admission ceiling rather than a
+  reservation, so this capacity does not raise the measured working set.

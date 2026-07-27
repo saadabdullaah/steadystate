@@ -13,7 +13,7 @@ Set WaitTimeout 16m
 Set Framerate 2
 Set PlaybackSpeed 8.0
 
-Type "if timeout --signal=TERM --kill-after=10s 15m pwsh -NoProfile -File scripts/phase4-acceptance.ps1 -Stage Rollback -Profile standard -EvidencePath .artifacts/phase4/acceptance/evidence.json; then clear; echo PHASE4_ROLLBACK_RESULT_PASSED; else clear; echo PHASE4_ROLLBACK_RESULT_FAILED; fi"
+Type "result=FAILED; if timeout --signal=TERM --kill-after=10s 15m pwsh -NoProfile -File scripts/phase4-acceptance.ps1 -Stage Rollback -Profile standard -EvidencePath .artifacts/phase4/acceptance/evidence.json; then result=PASSED; fi; clear; echo PHASE4_ROLLBACK_RESULT_$result"
 Enter
 Wait+Screen /PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)/
 Sleep 3s

@@ -433,3 +433,20 @@
   14-minute outer bound. The tape now clears to an explicit result marker and
   uses VHS whole-screen matching, which ends recording when the real command
   exits while retaining independent inner, VHS, and job timeouts.
+- Head `c18a9ce` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 4 run
+  [30285247205](https://github.com/saadabdullaah/steadystate/actions/runs/30285247205)
+  and artifact `8660789470` proved the whole-screen wait matched the literal
+  terminal markers while VHS was still typing its command, before the
+  acceptance stage ran. The tapes now construct one result marker from a
+  shell variable only after the bounded stage exits, and a render-contract
+  test rejects terminal marker literals in every `Type` line.
+- Phase 7 run
+  [30285247223](https://github.com/saadabdullaah/steadystate/actions/runs/30285247223)
+  and artifact `8661331384` proved the corrected API egress path: the GitOps
+  `orders` Cluster completed initdb, became Ready, archived WAL, and completed
+  its scheduled backup. The temporary `compat` initdb Pod alone was rejected
+  because the 2 GiB Team quota had only 720 MiB of limit headroom remaining
+  and CNPG requested 1 GiB. The sample ceiling is now 4 GiB, with a
+  deterministic rendered-value regression; this is quota capacity, not
+  allocated memory.

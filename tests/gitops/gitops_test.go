@@ -311,6 +311,7 @@ func TestTenantLeavesContainOnlyOwnedCustomResources(t *testing.T) {
 		t.Fatalf("Team leaf rendered unexpected objects: %#v", objectIdentities(teamObjects))
 	}
 	assertAnnotation(t, teamObjects[0], "argocd.argoproj.io/sync-wave", "-1")
+	assertString(t, teamObjects[0], "4Gi", "spec", "quota", "memory")
 
 	databaseObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "databases", "orders")))
 	if len(databaseObjects) != 1 || objectString(databaseObjects[0], "kind") != "Database" ||
@@ -1440,16 +1441,32 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, tape := range []struct {
 		content string
 		result  string
+		prefix  string
 		timeout string
 		inner   string
 		output  string
 	}{
-		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 13m", "timeout --signal=TERM --kill-after=10s 12m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
-		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 16m", "timeout --signal=TERM --kill-after=10s 15m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
+		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "PHASE4_PROMOTION_RESULT", "Set WaitTimeout 13m", "timeout --signal=TERM --kill-after=10s 12m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
+		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "PHASE4_ROLLBACK_RESULT", "Set WaitTimeout 16m", "timeout --signal=TERM --kill-after=10s 15m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
 	} {
-		for _, token := range []string{tape.output, tape.timeout, tape.inner, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-acceptance.ps1", "Wait+Screen /", tape.result, "then clear; echo ", "else clear; echo "} {
+		for _, token := range []string{tape.output, tape.timeout, tape.inner, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-acceptance.ps1", "Wait+Screen /", tape.result, "result=FAILED; if ", "then result=PASSED; fi; clear; echo ", tape.prefix + "_$result"} {
 			if !strings.Contains(tape.content, token) {
 				t.Errorf("Phase 4 VHS tape is missing %q", token)
+			}
+		}
+		typeLine := ""
+		for _, line := range strings.Split(tape.content, "\n") {
+			if strings.HasPrefix(line, "Type ") {
+				typeLine = line
+				break
+			}
+		}
+		if typeLine == "" {
+			t.Error("Phase 4 VHS tape is missing its acceptance command")
+		}
+		for _, terminalMarker := range []string{tape.prefix + "_PASSED", tape.prefix + "_FAILED"} {
+			if strings.Contains(typeLine, terminalMarker) {
+				t.Errorf("Phase 4 VHS command contains terminal marker %q and can satisfy its own screen wait", terminalMarker)
 			}
 		}
 		if strings.Contains(tape.content, "\nWait /") || strings.Contains(tape.content, "Wait+Line") {
