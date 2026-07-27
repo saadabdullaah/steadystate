@@ -105,7 +105,7 @@ func TestApplicationDatabaseReadinessGate(t *testing.T) {
 	database := databaseStatusFixture()
 	database.Status.ObservedGeneration = database.Generation - 1
 	database.Status.Conditions = []metav1.Condition{{
-		Type: conditionDatabaseReady, Status: metav1.ConditionTrue,
+		Type: conditionManagedDatabaseReady, Status: metav1.ConditionTrue,
 		ObservedGeneration: database.Generation - 1, Reason: "DatabaseReady",
 	}}
 	reconciler.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(database).Build()

@@ -20,14 +20,21 @@ import (
 
 func TestDatabaseStatusRequiresRealBackupEvidence(t *testing.T) {
 	database := databaseStatusFixture()
+	database.Status.Conditions = []metav1.Condition{{
+		Type: conditionApplicationDatabaseReady, Status: metav1.ConditionTrue,
+		ObservedGeneration: database.Generation, Reason: "LegacyDatabaseReady",
+	}}
 	cluster := readyDatabaseCluster()
 
 	status := databaseStatusFromCluster(database, cluster, databaseBackupState{})
 	if status.Phase != platformv1alpha1.DatabasePhaseBackingUp {
 		t.Fatalf("phase = %s, want BackingUp before first successful backup", status.Phase)
 	}
-	if condition := conditionByType(status.Conditions, conditionDatabaseReady); condition == nil || condition.Status != metav1.ConditionFalse {
+	if condition := conditionByType(status.Conditions, conditionManagedDatabaseReady); condition == nil || condition.Status != metav1.ConditionFalse {
 		t.Fatalf("Ready condition = %#v, want False before first backup", condition)
+	}
+	if condition := conditionByType(status.Conditions, conditionApplicationDatabaseReady); condition != nil {
+		t.Fatalf("Database retained obsolete Application-only DatabaseReady condition: %#v", condition)
 	}
 
 	completedAt := metav1.NewTime(time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC))
@@ -38,7 +45,7 @@ func TestDatabaseStatusRequiresRealBackupEvidence(t *testing.T) {
 	if status.LastSuccessfulBackup == nil || !status.LastSuccessfulBackup.Equal(&completedAt) {
 		t.Fatalf("lastSuccessfulBackup = %#v, want %s", status.LastSuccessfulBackup, completedAt)
 	}
-	if condition := conditionByType(status.Conditions, conditionDatabaseReady); condition == nil || condition.Status != metav1.ConditionTrue {
+	if condition := conditionByType(status.Conditions, conditionManagedDatabaseReady); condition == nil || condition.Status != metav1.ConditionTrue {
 		t.Fatalf("Ready condition = %#v, want True after successful backup", condition)
 	}
 }

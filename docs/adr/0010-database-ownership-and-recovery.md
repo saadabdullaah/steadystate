@@ -63,6 +63,13 @@ explicit SecretKeyRefs are injected. Values never enter status, ConfigMaps,
 Events, logs, or evidence. The Database controller copies only the two
 required S3 keys from the SOPS-bootstrapped platform Secret.
 
+Database health follows the public Kubernetes condition contract:
+`ConfigurationReady`, `ClusterReady`, `BackupHealthy`, and `Ready`.
+`DatabaseReady` is reserved for the Application condition that reports the
+state of its referenced Database. The controller removes that obsolete
+condition from Database status if it encounters state written by an earlier
+pre-release build.
+
 Deletion creates and waits for one deterministic final Backup before removing
 the data plane; external objects remain. The final Backup deliberately has no
 owner reference to the already-terminating Database and is deleted explicitly

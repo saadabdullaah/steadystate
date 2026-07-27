@@ -460,3 +460,13 @@
   to the instance-manager Pod on TCP 8000. Each Database now admits that port
   only from the `cloudnative-pg` Pod in `cnpg-system`, with a least-privilege
   builder regression.
+- Head `ef811de` again passed all five CI jobs plus Phase 4, Phase 5, and
+  Phase 6. Phase 7 run
+  [30299878348](https://github.com/saadabdullaah/steadystate/actions/runs/30299878348)
+  and artifact `8666864746` confirmed the operator NetworkPolicy: both
+  Databases became `Healthy`, both CNPG Clusters reported Ready, and both
+  archives had successful backups. The foundation verifier still timed out
+  because the controller emitted Application-only `DatabaseReady=True`
+  instead of the Database API's declared `Ready=True`. Database status now
+  uses the public Ready condition, removes the obsolete pre-release condition,
+  and Application binding reads that same current-generation contract.

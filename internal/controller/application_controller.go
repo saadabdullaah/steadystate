@@ -35,12 +35,12 @@ import (
 const ApplicationFinalizer = "steadystate.dev/finalizer"
 
 const (
-	conditionConfigurationReady  = "ConfigurationReady"
-	conditionSecurityPolicyReady = "SecurityPolicyReady"
-	conditionServiceHealth       = "ServiceHealth"
-	conditionDatabaseReady       = "DatabaseReady"
-	conditionRolloutHealthy      = "RolloutHealthy"
-	conditionReady               = "Ready"
+	conditionConfigurationReady       = "ConfigurationReady"
+	conditionSecurityPolicyReady      = "SecurityPolicyReady"
+	conditionServiceHealth            = "ServiceHealth"
+	conditionApplicationDatabaseReady = "DatabaseReady"
+	conditionRolloutHealthy           = "RolloutHealthy"
+	conditionReady                    = "Ready"
 )
 
 // ApplicationReconciler reconciles an Application object.
@@ -207,7 +207,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	default:
 		desiredStatus, routeRejected = workloadStatus(app, runtimeState.deployment, runtimeState.route, digestResolution, sourceRevision)
 	}
-	setCondition(&desiredStatus, app.Generation, conditionDatabaseReady, metav1.ConditionTrue, "DatabaseReady", databaseReadyMessage(app))
+	setCondition(&desiredStatus, app.Generation, conditionApplicationDatabaseReady, metav1.ConditionTrue, "DatabaseReady", databaseReadyMessage(app))
 	statusChanged, err := r.patchStatus(ctx, app, desiredStatus)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -231,7 +231,7 @@ func (r *ApplicationReconciler) applicationDatabaseReady(ctx context.Context, ap
 	} else if err != nil {
 		return false, "", err
 	}
-	ready := meta.FindStatusCondition(database.Status.Conditions, conditionDatabaseReady)
+	ready := meta.FindStatusCondition(database.Status.Conditions, conditionManagedDatabaseReady)
 	if database.Status.ObservedGeneration != database.Generation || ready == nil || ready.ObservedGeneration != database.Generation || ready.Status != metav1.ConditionTrue {
 		return false, fmt.Sprintf("Database %s is not current-generation Ready", key), nil
 	}
@@ -440,9 +440,9 @@ func degradedStatus(app *platformv1alpha1.Application, reason, message string) p
 	setCondition(&status, app.Generation, conditionSecurityPolicyReady, securityStatus, reason, message)
 	setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionUnknown, reason, "No child resources were mutated")
 	if app.Spec.DatabaseRef == nil {
-		setCondition(&status, app.Generation, conditionDatabaseReady, metav1.ConditionTrue, "DatabaseNotRequested", "No database binding was requested")
+		setCondition(&status, app.Generation, conditionApplicationDatabaseReady, metav1.ConditionTrue, "DatabaseNotRequested", "No database binding was requested")
 	} else {
-		setCondition(&status, app.Generation, conditionDatabaseReady, metav1.ConditionUnknown, reason, "Database readiness was not evaluated")
+		setCondition(&status, app.Generation, conditionApplicationDatabaseReady, metav1.ConditionUnknown, reason, "Database readiness was not evaluated")
 	}
 	setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, reason, message)
 	return status
@@ -457,7 +457,7 @@ func databaseBlockedStatus(app *platformv1alpha1.Application, message string) pl
 	}
 	status.CandidateVersion = ""
 	setCondition(&status, app.Generation, conditionConfigurationReady, metav1.ConditionFalse, "DatabaseUnavailable", "No generated children were mutated")
-	setCondition(&status, app.Generation, conditionDatabaseReady, metav1.ConditionFalse, "DatabaseUnavailable", message)
+	setCondition(&status, app.Generation, conditionApplicationDatabaseReady, metav1.ConditionFalse, "DatabaseUnavailable", message)
 	setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionUnknown, "DatabaseUnavailable", "Last healthy workload state is preserved")
 	setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, "DatabaseUnavailable", message)
 	return status

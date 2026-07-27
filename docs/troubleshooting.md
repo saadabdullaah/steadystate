@@ -470,6 +470,20 @@ children while a new reference is missing or unready. Fix the Database in Git
 and wait for current-generation `Ready=True`; never copy connection values to
 a ConfigMap or patch status.
 
+## Database is Healthy but readiness consumers keep waiting
+
+```powershell
+kubectl get database orders -n team-payments -o yaml
+kubectl get application -n argocd payments -o yaml
+```
+
+A Healthy Database must expose current-generation `Ready=True`;
+`DatabaseReady` belongs to the bound Application. If the Database is Healthy
+but has only `DatabaseReady=True`, deploy the corrected operator so it removes
+the obsolete pre-release condition and publishes the declared Database API
+contract. Do not weaken Argo health or acceptance checks to accept the wrong
+condition type.
+
 ## Database deletion is blocked
 
 ```powershell

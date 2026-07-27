@@ -36,6 +36,7 @@ const (
 	conditionDatabaseConfigurationReady = "ConfigurationReady"
 	conditionDatabaseClusterReady       = "ClusterReady"
 	conditionDatabaseBackupHealthy      = "BackupHealthy"
+	conditionManagedDatabaseReady       = "Ready"
 )
 
 var (
@@ -449,23 +450,23 @@ func databaseStatusFromCluster(database *platformv1alpha1.Database, cluster *uns
 		case !database.Spec.Backups.Enabled:
 			status.Phase = platformv1alpha1.DatabasePhaseHealthy
 			setDatabaseCondition(&status, database.Generation, conditionDatabaseBackupHealthy, metav1.ConditionTrue, "BackupsDisabled", "Backups are explicitly disabled")
-			setDatabaseCondition(&status, database.Generation, conditionDatabaseReady, metav1.ConditionTrue, "DatabaseReady", "PostgreSQL is ready")
+			setDatabaseCondition(&status, database.Generation, conditionManagedDatabaseReady, metav1.ConditionTrue, "DatabaseReady", "PostgreSQL is ready")
 		case backupState.latestPhase == "failed":
 			status.Phase = platformv1alpha1.DatabasePhaseDegraded
 			setDatabaseCondition(&status, database.Generation, conditionDatabaseBackupHealthy, metav1.ConditionFalse, "BackupFailed", "The latest Barman backup failed")
-			setDatabaseCondition(&status, database.Generation, conditionDatabaseReady, metav1.ConditionFalse, "BackupFailed", "PostgreSQL is available but backup health is degraded")
+			setDatabaseCondition(&status, database.Generation, conditionManagedDatabaseReady, metav1.ConditionFalse, "BackupFailed", "PostgreSQL is available but backup health is degraded")
 		case backupState.lastSuccessful == nil:
 			status.Phase = platformv1alpha1.DatabasePhaseBackingUp
 			setDatabaseCondition(&status, database.Generation, conditionDatabaseBackupHealthy, metav1.ConditionUnknown, "AwaitingFirstBackup", "Waiting for the first successful Barman backup")
-			setDatabaseCondition(&status, database.Generation, conditionDatabaseReady, metav1.ConditionFalse, "AwaitingFirstBackup", "Database readiness requires a successful backup")
+			setDatabaseCondition(&status, database.Generation, conditionManagedDatabaseReady, metav1.ConditionFalse, "AwaitingFirstBackup", "Database readiness requires a successful backup")
 		case backupState.latestPhase == "pending" || backupState.latestPhase == "running":
 			status.Phase = platformv1alpha1.DatabasePhaseBackingUp
 			setDatabaseCondition(&status, database.Generation, conditionDatabaseBackupHealthy, metav1.ConditionTrue, "BackupInProgress", "A new backup is running after a successful backup")
-			setDatabaseCondition(&status, database.Generation, conditionDatabaseReady, metav1.ConditionTrue, "DatabaseReady", "PostgreSQL is ready and has a successful backup")
+			setDatabaseCondition(&status, database.Generation, conditionManagedDatabaseReady, metav1.ConditionTrue, "DatabaseReady", "PostgreSQL is ready and has a successful backup")
 		default:
 			status.Phase = platformv1alpha1.DatabasePhaseHealthy
 			setDatabaseCondition(&status, database.Generation, conditionDatabaseBackupHealthy, metav1.ConditionTrue, "BackupSucceeded", "A successful Barman backup is available")
-			setDatabaseCondition(&status, database.Generation, conditionDatabaseReady, metav1.ConditionTrue, "DatabaseReady", "PostgreSQL and backup health are ready")
+			setDatabaseCondition(&status, database.Generation, conditionManagedDatabaseReady, metav1.ConditionTrue, "DatabaseReady", "PostgreSQL and backup health are ready")
 		}
 	} else {
 		if database.Spec.Recovery != nil {
@@ -475,7 +476,7 @@ func databaseStatusFromCluster(database *platformv1alpha1.Database, cluster *uns
 		}
 		setDatabaseCondition(&status, database.Generation, conditionDatabaseClusterReady, metav1.ConditionFalse, "ClusterProgressing", "Waiting for CloudNativePG readiness")
 		setDatabaseCondition(&status, database.Generation, conditionDatabaseBackupHealthy, metav1.ConditionUnknown, "ClusterProgressing", "Backup health awaits PostgreSQL readiness")
-		setDatabaseCondition(&status, database.Generation, conditionDatabaseReady, metav1.ConditionFalse, "ClusterProgressing", "Database is progressing")
+		setDatabaseCondition(&status, database.Generation, conditionManagedDatabaseReady, metav1.ConditionFalse, "ClusterProgressing", "Database is progressing")
 	}
 	setDatabaseCondition(&status, database.Generation, conditionDatabaseConfigurationReady, metav1.ConditionTrue, "ResourcesReconciled", "Database configuration and generated resources are valid")
 	return status
@@ -483,6 +484,7 @@ func databaseStatusFromCluster(database *platformv1alpha1.Database, cluster *uns
 
 func databaseBaseStatus(database *platformv1alpha1.Database) platformv1alpha1.DatabaseStatus {
 	status := *database.Status.DeepCopy()
+	meta.RemoveStatusCondition(&status.Conditions, conditionApplicationDatabaseReady)
 	status.ObservedGeneration = database.Generation
 	status.ConnectionSecretName = resources.DatabaseConnectionSecretName(database)
 	status.BackupServerName = resources.DatabaseBackupServerName(database)
@@ -498,7 +500,7 @@ func databaseBaseStatus(database *platformv1alpha1.Database) platformv1alpha1.Da
 func databaseFailureStatus(database *platformv1alpha1.Database, reason, message string) platformv1alpha1.DatabaseStatus {
 	status := databaseBaseStatus(database)
 	status.Phase = platformv1alpha1.DatabasePhaseDegraded
-	for _, conditionType := range []string{conditionDatabaseConfigurationReady, conditionDatabaseClusterReady, conditionDatabaseBackupHealthy, conditionDatabaseReady} {
+	for _, conditionType := range []string{conditionDatabaseConfigurationReady, conditionDatabaseClusterReady, conditionDatabaseBackupHealthy, conditionManagedDatabaseReady} {
 		setDatabaseCondition(&status, database.Generation, conditionType, metav1.ConditionFalse, reason, message)
 	}
 	return status
@@ -512,7 +514,7 @@ func databaseDeletingStatus(database *platformv1alpha1.Database, backupReady boo
 		backupStatus = metav1.ConditionTrue
 	}
 	setDatabaseCondition(&status, database.Generation, conditionDatabaseBackupHealthy, backupStatus, "FinalBackup", message)
-	setDatabaseCondition(&status, database.Generation, conditionDatabaseReady, metav1.ConditionFalse, "Deleting", message)
+	setDatabaseCondition(&status, database.Generation, conditionManagedDatabaseReady, metav1.ConditionFalse, "Deleting", message)
 	return status
 }
 
