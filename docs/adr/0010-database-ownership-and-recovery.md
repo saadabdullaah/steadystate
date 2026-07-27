@@ -36,11 +36,13 @@ Kubernetes API becomes unavailable.
 
 Team default-deny applies to CNPG. Database networking adds only application
 and Prometheus ingress plus four egress paths: SeaweedFS S3, the Kubernetes
-API service and kube-apiserver endpoint required by CNPG's in-Pod manager, and
-same-Cluster PostgreSQL/manager ports for multi-instance operation. CoreDNS is
-provided by the Team-wide DNS policy. Omitting the API path causes initdb Jobs
-to time out and be recreated indefinitely even though admission and image
-pulls succeed.
+API Service, private RFC1918 endpoints on the kube-apiserver port required by
+CNPG's in-Pod manager, and same-Cluster PostgreSQL/manager ports for
+multi-instance operation. Calico evaluates the kind API path after Service
+DNAT, so a kube-system Pod selector cannot match the host-network endpoint.
+CoreDNS is provided by the Team-wide DNS policy. Omitting either API form
+causes initdb Jobs to time out and be recreated indefinitely even though
+admission and image pulls succeed.
 
 The data graph is full-profile-only. The reusable Application leaf omits
 `databaseRef`; standard-profile tenant rendering uses that leaf unchanged,

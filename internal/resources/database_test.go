@@ -92,11 +92,14 @@ func TestDatabaseBackupEgressIsLeastPrivilegeAndOperational(t *testing.T) {
 	}
 	assertEgressIPPort(t, policy.Spec.Egress[0], "172.30.240.10/32", 8333)
 	assertEgressIPPort(t, policy.Spec.Egress[1], KubernetesAPIServiceCIDR, 443)
-	apiPeer := policy.Spec.Egress[2].To[0]
-	if apiPeer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "kube-system" ||
-		apiPeer.PodSelector.MatchLabels["component"] != "kube-apiserver" ||
-		policy.Spec.Egress[2].Ports[0].Port.IntVal != 6443 {
-		t.Fatalf("API endpoint egress is not restricted to the kube-apiserver: %#v", policy.Spec.Egress[2])
+	apiRule := policy.Spec.Egress[2]
+	if len(apiRule.To) != len(KubernetesAPIEndpointCIDRs) || len(apiRule.Ports) != 1 || apiRule.Ports[0].Port.IntVal != 6443 {
+		t.Fatalf("API endpoint egress is not restricted to private control-plane port 6443: %#v", apiRule)
+	}
+	for index, cidr := range KubernetesAPIEndpointCIDRs {
+		if apiRule.To[index].IPBlock == nil || apiRule.To[index].IPBlock.CIDR != cidr {
+			t.Fatalf("API endpoint peer %d does not match %s: %#v", index, cidr, apiRule.To[index])
+		}
 	}
 	peer := policy.Spec.Egress[3]
 	if peer.To[0].PodSelector.MatchLabels["cnpg.io/cluster"] != DatabaseClusterName(database) ||

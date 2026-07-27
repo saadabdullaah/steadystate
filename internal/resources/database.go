@@ -27,10 +27,11 @@ const (
 )
 
 var (
-	CNPGClusterGVK       = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Cluster"}
-	CNPGBackupGVK        = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Backup"}
-	CNPGScheduledGVK     = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "ScheduledBackup"}
-	BarmanObjectStoreGVK = schema.GroupVersionKind{Group: "barmancloud.cnpg.io", Version: "v1", Kind: "ObjectStore"}
+	CNPGClusterGVK             = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Cluster"}
+	CNPGBackupGVK              = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Backup"}
+	CNPGScheduledGVK           = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "ScheduledBackup"}
+	BarmanObjectStoreGVK       = schema.GroupVersionKind{Group: "barmancloud.cnpg.io", Version: "v1", Kind: "ObjectStore"}
+	KubernetesAPIEndpointCIDRs = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
 )
 
 // DatabaseLabels returns stable labels for every Database-owned child.
@@ -263,6 +264,10 @@ func DatabaseNetworkPolicies(database *platformv1alpha1.Database, endpointCIDR s
 func DatabaseBackupNetworkPolicy(database *platformv1alpha1.Database, endpointCIDR string) *networkingv1.NetworkPolicy {
 	tcp := corev1.ProtocolTCP
 	clusterSelector := metav1.LabelSelector{MatchLabels: map[string]string{"cnpg.io/cluster": DatabaseClusterName(database)}}
+	apiEndpointPeers := make([]networkingv1.NetworkPolicyPeer, 0, len(KubernetesAPIEndpointCIDRs))
+	for _, cidr := range KubernetesAPIEndpointCIDRs {
+		apiEndpointPeers = append(apiEndpointPeers, networkingv1.NetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: cidr}})
+	}
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: suffixedName(database.Name, "-allow-backup"), Namespace: database.Namespace, Labels: DatabaseLabels(database), Annotations: DatabaseAnnotations(database)},
 		Spec: networkingv1.NetworkPolicySpec{
@@ -278,10 +283,10 @@ func DatabaseBackupNetworkPolicy(database *platformv1alpha1.Database, endpointCI
 					Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(443))}},
 				},
 				{
-					To: []networkingv1.NetworkPolicyPeer{{
-						NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"component": "kube-apiserver"}},
-					}},
+					// Calico enforces this after Service DNAT, where a kind
+					// API server is a private node endpoint rather than a
+					// selectable kube-apiserver Pod.
+					To:    apiEndpointPeers,
 					Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(6443))}},
 				},
 				{

@@ -417,3 +417,19 @@
   CNPG's in-Pod manager. The corrected policy adds only API-service,
   kube-apiserver, and same-Cluster PostgreSQL/manager paths; failure evidence
   now retains every CNPG job Pod object and container log.
+- Head `d9835c6` again passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 7 run
+  [30273988013](https://github.com/saadabdullaah/steadystate/actions/runs/30273988013)
+  and artifact `8657101498` supplied the definitive initdb log:
+  `dial tcp 10.96.0.1:443: i/o timeout`. Calico evaluates the kind Service
+  path after DNAT, where the endpoint is a private node address on 6443 and
+  cannot be selected as a namespaced kube-apiserver Pod. The policy now
+  permits only RFC1918 destinations on 6443 in addition to the exact Service
+  IP, and failure capture applies ten-second API request bounds.
+- Phase 4 run
+  [30273987989](https://github.com/saadabdullaah/steadystate/actions/runs/30273987989)
+  reached GIF encoding after the fixed 13-minute recording; artifact
+  `8656731427` retained its failure evidence. The process was killed by its
+  14-minute outer bound. The tape now clears to an explicit result marker and
+  uses VHS whole-screen matching, which ends recording when the real command
+  exits while retaining independent inner, VHS, and job timeouts.

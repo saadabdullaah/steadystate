@@ -422,10 +422,13 @@ which runs too late in Kyverno's image-verification admission path.
 If CNPG initdb Pods are admitted and pull both frozen images but repeatedly
 finish `Error`, inspect the captured `*-cnpg-job-pods.log` before changing
 storage or image pins. The Database backup egress policy must allow the exact
-SeaweedFS endpoint, Kubernetes API service on 443, kube-apiserver endpoint on
-6443, and same-Cluster ports 5432/8000. Team DNS remains a separate additive
-policy. A SeaweedFS-only egress rule blocks CNPG's in-Pod instance manager and
-causes the operator to recreate initdb indefinitely.
+SeaweedFS endpoint, Kubernetes API Service on 443, private RFC1918
+control-plane endpoints on 6443, and same-Cluster ports 5432/8000. Calico sees
+the kind API destination after Service DNAT, and the host-network
+kube-apiserver cannot be selected by a namespaced Pod selector. Team DNS
+remains a separate additive policy. An incomplete API rule blocks CNPG's
+in-Pod instance manager and causes the operator to recreate initdb
+indefinitely.
 
 ## SeaweedFS is running but Docker reports unhealthy
 
