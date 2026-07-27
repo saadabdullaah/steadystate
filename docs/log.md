@@ -371,3 +371,20 @@
   marker and reached its tape timeout. Both Phase 4 tapes now wait on a plain
   last-line marker that remains visible for ten seconds using syntax supported
   by the pinned VHS `0.11.0`.
+- Head `20c49e2` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 4 run
+  [30231244539](https://github.com/saadabdullaah/steadystate/actions/runs/30231244539)
+  again passed the complete promotion proof; its artifact `8640504482`
+  confirmed the child marker was present only in redirected output while the
+  VHS terminal remained at a prompt. The tapes now emit the authoritative
+  pass/fail marker from their own shell after the wrapper exits.
+- Phase 7 run
+  [30231244531](https://github.com/saadabdullaah/steadystate/actions/runs/30231244531)
+  and artifact `8640491291` proved the tagged immutable PostgreSQL operand was
+  admitted and CNPG initialized both real Cluster resources. Kyverno then
+  denied their Job-owned initdb Pods because the Phase 6 image exception only
+  recognized direct Cluster ownership. The corrected boundary admits only the
+  exact CNPG `1.30.0` bootstrap/recovery roles, labels, Cluster ServiceAccount,
+  owner naming, and frozen PostgreSQL, bootstrap-controller, and Barman
+  images; universal Team safety and the forged-label regression remain
+  enforced.

@@ -40,17 +40,24 @@ reports `SignatureVerificationNotRequested`; it never claims verification.
 
 ## CloudNativePG boundary
 
-No Phase 7 exception exists in the foundation. Universal Team safety remains
-applicable to CloudNativePG and Barman workloads.
+Phase 7 excludes only exact CloudNativePG PostgreSQL operands from the
+SteadyState demo-image signature identity. The exception requires all of:
 
-If exact pinned CloudNativePG behavior later requires an exception, it must:
+1. the CloudNativePG-managed PostgreSQL/database label set, with instance and
+   cluster labels equal;
+2. the operator-generated ServiceAccount whose name equals the Cluster;
+3. either a direct controller reference to that Cluster or a controller
+   reference to a cluster-prefixed Job with one of CloudNativePG `1.30.0`'s
+   exact roles (`import`, `initdb`, `pgbasebackup`, `full-recovery`, `join`, or
+   `snapshot-recovery`);
+4. only the frozen PostgreSQL operand, CNPG bootstrap controller, and Barman
+   sidecar image references, across both normal and init containers.
 
-1. name only the affected policy and validation;
-2. select the exact operator-managed ServiceAccount and workload labels;
-3. restrict the namespace to the owning Team;
-4. restrict images to the Phase 7 pinned repositories and digests;
-5. preserve the universal privileged, host namespace, hostPath, latest-tag,
-   and resource-requirement controls.
+This is an identity-and-image match condition inside the image policy, not a
+`PolicyException`. Universal Team safety remains applicable to CloudNativePG
+and Barman workloads, including the privileged, host namespace, hostPath,
+latest-tag, and resource-requirement controls. A positive fixture proves the
+real initdb shape is admitted; a forged-label fixture remains denied.
 
 Wildcard policies, namespace-wide exemptions, `team-*` exemptions, and
 user-supplied bypass labels are forbidden.

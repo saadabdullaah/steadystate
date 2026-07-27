@@ -577,6 +577,13 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 		"https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main",
 		"https://token.actions.githubusercontent.com",
 		"https://rekor.sigstore.dev",
+		"app.kubernetes.io/managed-by",
+		"cloudnative-pg",
+		"object.spec.serviceAccountName == object.metadata.labels['cnpg.io/cluster']",
+		"['import', 'initdb', 'pgbasebackup', 'full-recovery', 'join', 'snapshot-recovery']",
+		"owner.apiVersion == 'batch/v1'",
+		"object.spec.?initContainers.orValue([])",
+		"ghcr.io/cloudnative-pg/cloudnative-pg@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb",
 	} {
 		if !strings.Contains(imagePolicyText, identity) {
 			t.Errorf("ImageValidatingPolicy is missing trust contract %q", identity)
@@ -592,9 +599,10 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 	}
 	boundaries := string(readFile(t, filepath.Join(root, "docs", "security", "kyverno-policy-boundaries.md")))
 	for _, token := range []string{
-		"No Phase 7 exception exists in the foundation",
-		"exact operator-managed ServiceAccount",
-		"pinned repositories and digests",
+		"exact CloudNativePG PostgreSQL operands",
+		"operator-generated ServiceAccount",
+		"`snapshot-recovery`",
+		"positive fixture",
 		"namespace-wide exemptions",
 		"user-supplied bypass labels",
 	} {
@@ -1422,6 +1430,11 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		}
 		if strings.Contains(tape.content, "Output docs/demonstrations/") {
 			t.Error("Phase 4 VHS output must not modify tracked demonstration files during Git delivery")
+		}
+		for _, token := range []string{"&& echo ", " || echo ", "; sleep 10"} {
+			if !strings.Contains(tape.content, token) {
+				t.Errorf("Phase 4 VHS tape must emit its observable result in the tape shell; missing %q", token)
+			}
 		}
 	}
 }

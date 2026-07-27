@@ -51,8 +51,12 @@ children remain available when a candidate is rejected. External verification
 failure fails closed.
 
 Phase 7 may add only exact CNPG/Barman identities and immutable digests.
-Universal safety still applies, and regression fixtures prove a forged CNPG
-label cannot bypass Application policy.
+The activated boundary requires CloudNativePG's exact PostgreSQL labels,
+cluster ServiceAccount, controller ownership (including its six pinned
+bootstrap/recovery Job roles), and frozen PostgreSQL, bootstrap-controller,
+and Barman images. Universal safety still applies, and paired fixtures prove
+the legitimate initdb shape succeeds while forged CNPG labels cannot bypass
+Application policy.
 
 Runtime threat detection, external secret management, operator image signing,
 and multi-cluster trust remain outside this decision.

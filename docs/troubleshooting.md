@@ -402,6 +402,15 @@ the frozen `18.4-system-trixie` tag and its `sha256` digest. A digest alone is
 immutable but does not give CNPG the version information it needs for upgrade
 detection. Do not remove the digest or bypass the CNPG admission webhook.
 
+If a CNPG `*-initdb`, `*-join`, or recovery Job repeatedly reports
+`steadystate-verify-team-images`, inspect its Pod template before changing
+Kyverno. It must carry the CloudNativePG PostgreSQL/database label set, use the
+Cluster-named ServiceAccount, have the expected Job owner/name/role, and use
+only the frozen PostgreSQL, CNPG bootstrap-controller, and Barman images. The
+Phase 7 rule recognizes both direct Cluster-owned instance Pods and these
+exact Job-owned Pods. Never add a Team-namespace exception or treat
+user-supplied `cnpg.io/*` labels as trust.
+
 ## SeaweedFS is running but Docker reports unhealthy
 
 ```powershell

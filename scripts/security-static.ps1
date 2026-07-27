@@ -29,8 +29,23 @@ function Invoke-PolicyFixture {
     }
 }
 
+function Invoke-CnpgImageBoundaryFixture {
+    $policy = Join-Path $Policies 'verify-team-images.yaml'
+    $resource = Join-Path $Root 'tests/security/cnpg-initdb-pod.yaml'
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $output = @(& kyverno apply $policy --resource $resource --values-file $Values --detailed-results 2>&1)
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previous
+    $summary = $output -join [Environment]::NewLine
+    if ($exitCode -ne 0 -or $summary -match 'fail:\s*[1-9]' -or $summary -match 'error:\s*[1-9]') {
+        throw 'Expected the exact CNPG initdb fixture to be excluded only from demo-image verification.'
+    }
+}
+
 Invoke-PolicyFixture -Name 'compliant-managed-pod.yaml' -ShouldPass $true
+Invoke-CnpgImageBoundaryFixture
 Invoke-PolicyFixture -Name 'vulnerable-pod.yaml' -ShouldPass $false
 Invoke-PolicyFixture -Name 'cnpg-label-bypass.yaml' -ShouldPass $false
-Write-Host 'Kyverno static policy fixtures passed, including the CNPG label bypass regression.'
+Write-Host 'Kyverno static policy fixtures passed, including the exact CNPG initdb boundary and label bypass regression.'
 exit 0
