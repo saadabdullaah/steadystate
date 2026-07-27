@@ -230,6 +230,8 @@ func DatabaseNetworkPolicies(database *platformv1alpha1.Database, endpointCIDR s
 	appSelector := metav1.LabelSelector{MatchLabels: map[string]string{DatabaseLabelKey: database.Name}}
 	monitoringNamespace := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "monitoring"}}
 	prometheusSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "prometheus"}}
+	cnpgNamespace := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "cnpg-system"}}
+	cnpgOperatorSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "cloudnative-pg"}}
 	tcp := corev1.ProtocolTCP
 	policies := []*networkingv1.NetworkPolicy{
 		{
@@ -251,6 +253,17 @@ func DatabaseNetworkPolicies(database *platformv1alpha1.Database, endpointCIDR s
 				Ingress: []networkingv1.NetworkPolicyIngressRule{{
 					From:  []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &monitoringNamespace, PodSelector: &prometheusSelector}},
 					Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(9187))}},
+				}},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: suffixedName(database.Name, "-allow-operator"), Namespace: database.Namespace, Labels: labels, Annotations: DatabaseAnnotations(database)},
+			Spec: networkingv1.NetworkPolicySpec{
+				PodSelector: clusterSelector,
+				PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+				Ingress: []networkingv1.NetworkPolicyIngressRule{{
+					From:  []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &cnpgNamespace, PodSelector: &cnpgOperatorSelector}},
+					Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(8000))}},
 				}},
 			},
 		},

@@ -450,3 +450,13 @@
   and CNPG requested 1 GiB. The sample ceiling is now 4 GiB, with a
   deterministic rendered-value regression; this is quota capacity, not
   allocated memory.
+- Head `114722f` passed all five CI jobs plus Phase 4, Phase 5, and Phase 6.
+  Phase 7 run
+  [30288745403](https://github.com/saadabdullaah/steadystate/actions/runs/30288745403)
+  and artifact `8662750840` proved both CNPG initdb jobs completed, both
+  PostgreSQL Pods were Running, and both archives recorded successful backups.
+  CloudNativePG nevertheless kept each Cluster in `Instance Status Extraction
+  Error` because Team default-deny blocked the operator's HTTPS status request
+  to the instance-manager Pod on TCP 8000. Each Database now admits that port
+  only from the `cloudnative-pg` Pod in `cnpg-system`, with a least-privilege
+  builder regression.

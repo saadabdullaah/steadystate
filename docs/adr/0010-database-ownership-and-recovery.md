@@ -106,3 +106,8 @@ plugin status metrics; failure is fast, while stale-success age remains a
   database and the temporary hosted compatibility database can coexist during
   the foundation proof. ResourceQuota is an admission ceiling rather than a
   reservation, so this capacity does not raise the measured working set.
+- Team default-deny requires an explicit CloudNativePG control path. Each
+  Database admits only the `cloudnative-pg` operator Pod from `cnpg-system` to
+  its selected instance Pods on manager TCP 8000, allowing authoritative
+  status extraction without exposing PostgreSQL or the manager to other
+  platform workloads.

@@ -74,13 +74,40 @@ func TestBackupsDisabledRemovesArchiveConfiguration(t *testing.T) {
 		t.Fatal("backups-disabled Cluster still contains a Barman WAL plugin")
 	}
 	policies := DatabaseNetworkPolicies(database, "172.30.240.10/32")
-	if len(policies) != 2 {
-		t.Fatalf("backups-disabled Database generated %d NetworkPolicies, want app and monitoring only", len(policies))
+	if len(policies) != 3 {
+		t.Fatalf("backups-disabled Database generated %d NetworkPolicies, want app, monitoring, and operator only", len(policies))
 	}
 	for _, policy := range policies {
 		if strings.Contains(policy.Name, "backup") {
 			t.Fatalf("backups-disabled Database retained backup egress: %s", policy.Name)
 		}
+	}
+}
+
+func TestDatabaseOperatorIngressIsLeastPrivilegeAndOperational(t *testing.T) {
+	database := testDatabase("orders")
+	policies := DatabaseNetworkPolicies(database, "172.30.240.10/32")
+	var policy *networkingv1.NetworkPolicy
+	for _, candidate := range policies {
+		if strings.HasSuffix(candidate.Name, "-allow-operator") {
+			policy = candidate
+			break
+		}
+	}
+	if policy == nil {
+		t.Fatal("Database did not generate CNPG operator ingress")
+	}
+	if len(policy.Spec.PolicyTypes) != 1 || policy.Spec.PolicyTypes[0] != networkingv1.PolicyTypeIngress ||
+		policy.Spec.PodSelector.MatchLabels["cnpg.io/cluster"] != DatabaseClusterName(database) ||
+		len(policy.Spec.Ingress) != 1 {
+		t.Fatalf("CNPG operator policy has an unexpected boundary: %#v", policy.Spec)
+	}
+	rule := policy.Spec.Ingress[0]
+	if len(rule.From) != 1 || rule.From[0].NamespaceSelector == nil || rule.From[0].PodSelector == nil ||
+		rule.From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "cnpg-system" ||
+		rule.From[0].PodSelector.MatchLabels["app.kubernetes.io/name"] != "cloudnative-pg" ||
+		len(rule.Ports) != 1 || rule.Ports[0].Port == nil || rule.Ports[0].Port.IntVal != 8000 {
+		t.Fatalf("CNPG operator ingress is not restricted to its exact namespace, Pod identity, and manager port: %#v", rule)
 	}
 }
 
@@ -129,6 +156,11 @@ func TestDatabaseNamesAreSuffixSafe(t *testing.T) {
 	}
 	if got, want := DatabaseConnectionSecretName(database), DatabaseClusterName(database)+"-app"; got != want {
 		t.Fatalf("connection Secret name = %q, want CNPG contract %q", got, want)
+	}
+	for _, policy := range DatabaseNetworkPolicies(database, "172.30.240.10/32") {
+		if len(policy.Name) > 63 {
+			t.Errorf("NetworkPolicy name has %d characters: %s", len(policy.Name), policy.Name)
+		}
 	}
 }
 
