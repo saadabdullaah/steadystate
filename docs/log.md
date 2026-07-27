@@ -402,3 +402,18 @@
   reached only the VHS wait timeout. The tapes now run the real acceptance
   stage directly under a bounded Unix timeout and emit their result from the
   controlling shell, eliminating the nested redirected-process boundary.
+- Head `b34e0bf` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 4 run
+  [30261883299](https://github.com/saadabdullaah/steadystate/actions/runs/30261883299)
+  proved the complete promotion path in 8.5 minutes, including exact
+  10/25/50/100 traffic shares and provenance. Pinned VHS still ignored the
+  terminal marker, so recordings now use bounded empirical sleeps while the
+  immediately following state gate remains authoritative.
+- Phase 7 run
+  [30261883285](https://github.com/saadabdullaah/steadystate/actions/runs/30261883285)
+  and artifact `8651903691` proved admission, immutable image pulls, and CNPG
+  initdb execution. The init Pods then repeatedly errored because their egress
+  policy permitted only SeaweedFS and blocked the Kubernetes API required by
+  CNPG's in-Pod manager. The corrected policy adds only API-service,
+  kube-apiserver, and same-Cluster PostgreSQL/manager paths; failure evidence
+  now retains every CNPG job Pod object and container log.

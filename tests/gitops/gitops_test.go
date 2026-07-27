@@ -814,6 +814,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"label=io.x-k8s.kind.cluster=steadystate",
 		"oomKilled={{.State.OOMKilled}}",
 		"docker system df",
+		"$Prefix-cnpg-job-pods.yaml",
+		"$Prefix-cnpg-job-pods.log",
 	} {
 		if !strings.Contains(phase7Foundation, contract) {
 			t.Fatalf("Phase 7 failure diagnostics are missing %q", contract)
@@ -823,6 +825,11 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline") ||
 		strings.Contains(phase7Workflow, "-DisableSecurity") {
 		t.Fatal("Phase 7 compatibility must isolate the data stack while retaining monitoring and Kyverno")
+	}
+	for _, contract := range []string{"success-cnpg-job-pods.yaml", "success-cnpg-job-pods.log"} {
+		if !strings.Contains(phase7Workflow, contract) {
+			t.Fatalf("Phase 7 success evidence must require %q", contract)
+		}
 	}
 	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
 	for _, contract := range []string{
@@ -1311,8 +1318,8 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, token := range []string{
 		"name: Phase 4 acceptance",
 		"timeout-minutes: 60",
-		"timeout --signal=TERM --kill-after=30s 21m vhs docs/demonstrations/phase4-canary-promotion.tape",
-		"timeout --signal=TERM --kill-after=30s 29m vhs docs/demonstrations/phase4-automatic-rollback.tape",
+		"timeout --signal=TERM --kill-after=30s 14m vhs docs/demonstrations/phase4-canary-promotion.tape",
+		"timeout --signal=TERM --kill-after=30s 17m vhs docs/demonstrations/phase4-automatic-rollback.tape",
 		"cancel-in-progress: false",
 		"phase4-acceptance-${{ github.sha }}",
 		"if-no-files-found: error",
@@ -1432,24 +1439,22 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, tape := range []struct {
 		content string
 		result  string
-		timeout string
+		sleep   string
 		output  string
 	}{
-		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
-		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 28m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
+		{promotionTape, "PHASE4_PROMOTION_RESULT_PASSED", "Sleep 13m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
+		{rollbackTape, "PHASE4_ROLLBACK_RESULT_PASSED", "Sleep 16m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
 	} {
-		for _, token := range []string{tape.output, tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-acceptance.ps1", "Wait /", tape.result, "timeout --signal=TERM --kill-after=10s"} {
+		for _, token := range []string{tape.output, tape.sleep, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-acceptance.ps1"} {
 			if !strings.Contains(tape.content, token) {
 				t.Errorf("Phase 4 VHS tape is missing %q", token)
 			}
 		}
+		if strings.Contains(tape.content, "Wait /") || strings.Contains(tape.content, "Wait+Line") {
+			t.Error("Phase 4 VHS must not use the pinned release's unreliable terminal wait primitive")
+		}
 		if strings.Contains(tape.content, "Output docs/demonstrations/") {
 			t.Error("Phase 4 VHS output must not modify tracked demonstration files during Git delivery")
-		}
-		for _, token := range []string{"then echo ", "else echo ", "fi; sleep 10"} {
-			if !strings.Contains(tape.content, token) {
-				t.Errorf("Phase 4 VHS tape must emit its observable result in the tape shell; missing %q", token)
-			}
 		}
 	}
 }

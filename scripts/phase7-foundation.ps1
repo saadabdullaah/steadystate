@@ -158,6 +158,17 @@ function Capture-Snapshots([string]$Prefix) {
         & docker system df *> (Join-Path $ArtifactDirectory "$Prefix-docker-disk.txt")
         & kubectl get database,cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactDirectory "$Prefix-data-resources.yaml")
         & kubectl get pod,pvc,service,networkpolicy -n $Namespace -o wide *> (Join-Path $ArtifactDirectory "$Prefix-workloads.txt")
+        & kubectl get pod -n $Namespace -l 'cnpg.io/jobRole' -o yaml *> (Join-Path $ArtifactDirectory "$Prefix-cnpg-job-pods.yaml")
+        $jobPodLogs = [System.Collections.Generic.List[string]]::new()
+        $jobPods = @(& kubectl get pod -n $Namespace -l 'cnpg.io/jobRole' -o name)
+        foreach ($jobPod in $jobPods) {
+            $jobPodLogs.Add("===== $jobPod =====")
+            foreach ($line in @(& kubectl logs -n $Namespace $jobPod --all-containers --prefix=true 2>&1)) {
+                $jobPodLogs.Add([string]$line)
+            }
+        }
+        if ($jobPodLogs.Count -eq 0) { $jobPodLogs.Add('No CNPG job Pod logs were available.') }
+        [IO.File]::WriteAllLines((Join-Path $ArtifactDirectory "$Prefix-cnpg-job-pods.log"), $jobPodLogs, [Text.UTF8Encoding]::new($false))
         & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-operator.log")
         & kubectl logs -n cnpg-system deployment/cloudnative-pg --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-cnpg.log")
         & kubectl logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-barman.log")

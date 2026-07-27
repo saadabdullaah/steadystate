@@ -9,11 +9,9 @@ Set Margin 24
 Set MarginFill "#111827"
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 5ms
-Set WaitTimeout 20m
 Set Framerate 2
 Set PlaybackSpeed 8.0
 
-Type "if timeout --signal=TERM --kill-after=10s 19m pwsh -NoProfile -File scripts/phase4-acceptance.ps1 -Stage Promote -Profile standard; then echo PHASE4_PROMOTION_RESULT_PASSED; else echo PHASE4_PROMOTION_RESULT_FAILED; fi; sleep 10"
+Type "pwsh -NoProfile -File scripts/phase4-acceptance.ps1 -Stage Promote -Profile standard"
 Enter
-Wait /PHASE4_PROMOTION_RESULT_(PASSED|FAILED)/
-Sleep 3s
+Sleep 13m

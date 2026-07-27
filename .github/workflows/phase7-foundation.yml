@@ -102,6 +102,8 @@ jobs:
             '.artifacts/phase7/foundation/evidence.json',
             '.artifacts/phase7/foundation/object-inventory.txt',
             '.artifacts/phase7/foundation/success-data-resources.yaml',
+            '.artifacts/phase7/foundation/success-cnpg-job-pods.yaml',
+            '.artifacts/phase7/foundation/success-cnpg-job-pods.log',
             '.artifacts/phase7/foundation/success-operator.log',
             '.artifacts/phase7/foundation/success-cnpg.log',
             '.artifacts/phase7/foundation/success-barman.log',

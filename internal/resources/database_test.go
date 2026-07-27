@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -80,6 +81,35 @@ func TestBackupsDisabledRemovesArchiveConfiguration(t *testing.T) {
 		if strings.Contains(policy.Name, "backup") {
 			t.Fatalf("backups-disabled Database retained backup egress: %s", policy.Name)
 		}
+	}
+}
+
+func TestDatabaseBackupEgressIsLeastPrivilegeAndOperational(t *testing.T) {
+	database := testDatabase("orders")
+	policy := DatabaseBackupNetworkPolicy(database, "172.30.240.10/32")
+	if len(policy.Spec.Egress) != 4 {
+		t.Fatalf("backup egress has %d rules, want S3, API service, API endpoint, and cluster peers", len(policy.Spec.Egress))
+	}
+	assertEgressIPPort(t, policy.Spec.Egress[0], "172.30.240.10/32", 8333)
+	assertEgressIPPort(t, policy.Spec.Egress[1], KubernetesAPIServiceCIDR, 443)
+	apiPeer := policy.Spec.Egress[2].To[0]
+	if apiPeer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "kube-system" ||
+		apiPeer.PodSelector.MatchLabels["component"] != "kube-apiserver" ||
+		policy.Spec.Egress[2].Ports[0].Port.IntVal != 6443 {
+		t.Fatalf("API endpoint egress is not restricted to the kube-apiserver: %#v", policy.Spec.Egress[2])
+	}
+	peer := policy.Spec.Egress[3]
+	if peer.To[0].PodSelector.MatchLabels["cnpg.io/cluster"] != DatabaseClusterName(database) ||
+		len(peer.Ports) != 2 || peer.Ports[0].Port.IntVal != 5432 || peer.Ports[1].Port.IntVal != 8000 {
+		t.Fatalf("CNPG peer egress is not restricted to database and manager ports: %#v", peer)
+	}
+}
+
+func assertEgressIPPort(t *testing.T, rule networkingv1.NetworkPolicyEgressRule, cidr string, port int32) {
+	t.Helper()
+	if len(rule.To) != 1 || rule.To[0].IPBlock == nil || rule.To[0].IPBlock.CIDR != cidr ||
+		len(rule.Ports) != 1 || rule.Ports[0].Port == nil || rule.Ports[0].Port.IntVal != port {
+		t.Fatalf("egress rule does not match %s:%d: %#v", cidr, port, rule)
 	}
 }
 

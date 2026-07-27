@@ -23,6 +23,7 @@ const (
 	BackupStoreBucket           = "steadystate-backups"
 	BarmanPluginName            = "barman-cloud.cloudnative-pg.io"
 	PostgreSQLImage             = "ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9"
+	KubernetesAPIServiceCIDR    = "10.96.0.1/32"
 )
 
 var (
@@ -261,15 +262,36 @@ func DatabaseNetworkPolicies(database *platformv1alpha1.Database, endpointCIDR s
 
 func DatabaseBackupNetworkPolicy(database *platformv1alpha1.Database, endpointCIDR string) *networkingv1.NetworkPolicy {
 	tcp := corev1.ProtocolTCP
+	clusterSelector := metav1.LabelSelector{MatchLabels: map[string]string{"cnpg.io/cluster": DatabaseClusterName(database)}}
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: suffixedName(database.Name, "-allow-backup"), Namespace: database.Namespace, Labels: DatabaseLabels(database), Annotations: DatabaseAnnotations(database)},
 		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"cnpg.io/cluster": DatabaseClusterName(database)}},
+			PodSelector: clusterSelector,
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
-			Egress: []networkingv1.NetworkPolicyEgressRule{{
-				To:    []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: endpointCIDR}}},
-				Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(8333))}},
-			}},
+			Egress: []networkingv1.NetworkPolicyEgressRule{
+				{
+					To:    []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: endpointCIDR}}},
+					Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(8333))}},
+				},
+				{
+					To:    []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: KubernetesAPIServiceCIDR}}},
+					Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(443))}},
+				},
+				{
+					To: []networkingv1.NetworkPolicyPeer{{
+						NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}},
+						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"component": "kube-apiserver"}},
+					}},
+					Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(6443))}},
+				},
+				{
+					To: []networkingv1.NetworkPolicyPeer{{PodSelector: &clusterSelector}},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(5432))},
+						{Protocol: &tcp, Port: ptrIntOrString(intstr.FromInt32(8000))},
+					},
+				},
+			},
 		},
 	}
 }
