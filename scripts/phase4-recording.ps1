@@ -70,8 +70,10 @@ try {
         foreach ($check in @($state.checks | Select-Object -Last 8)) {
             Write-Host "[PASS] $($check.name)" -ForegroundColor Green
         }
-        Write-Host "${MarkerPrefix}_PASSED" -ForegroundColor Cyan
-        Start-Sleep -Seconds 2
+        # Keep a plain final-line marker visible long enough for pinned VHS to
+        # observe it without depending on ANSI rendering or a screen snapshot.
+        Write-Output "${MarkerPrefix}_PASSED"
+        Start-Sleep -Seconds 10
         exit 0
     }
 
@@ -81,8 +83,8 @@ try {
     if (Test-Path -LiteralPath $stderr -PathType Leaf) { Get-Content -LiteralPath $stderr -Tail 20 | Out-Host }
     $failure = if ($state -and $state.failure) { [string]$state.failure } else { "Recording wrapper timed out or exited before $ResultProperty became passed." }
     Write-Host "[FAIL] $failure" -ForegroundColor Red
-    Write-Host "${MarkerPrefix}_FAILED" -ForegroundColor Red
-    Start-Sleep -Seconds 2
+    Write-Output "${MarkerPrefix}_FAILED"
+    Start-Sleep -Seconds 10
     exit 1
 } finally {
     Pop-Location

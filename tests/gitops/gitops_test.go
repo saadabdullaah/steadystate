@@ -1415,7 +1415,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
 		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 28m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
 	} {
-		for _, token := range []string{tape.output, tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-recording.ps1", "Wait+Screen", tape.result} {
+		for _, token := range []string{tape.output, tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-recording.ps1", "Wait+Line", tape.result} {
 			if !strings.Contains(tape.content, token) {
 				t.Errorf("Phase 4 VHS tape is missing %q", token)
 			}

@@ -185,7 +185,7 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 		"BARMAN_CLOUD_CHART_VERSION=0.7.0",
 		"BARMAN_CLOUD_SIDECAR_DIGEST=sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288",
 		"SEAWEEDFS_VERSION=4.39",
-		"POSTGRESQL_OPERAND_IMAGE=ghcr.io/cloudnative-pg/postgresql@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9",
+		"POSTGRESQL_OPERAND_IMAGE=ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9",
 		"SEAWEEDFS_IMAGE=chrislusf/seaweedfs@sha256:c7d6c721b30ae711db766bbbfd40192776e263d4e51e22f57baef7bef93c12c6",
 	} {
 		if !strings.Contains(text, expected) {

@@ -44,7 +44,7 @@ spec:
             owner.controller) &&
           object.spec.containers.all(container,
             container.image ==
-              'ghcr.io/cloudnative-pg/postgresql@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' ||
+              'ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' ||
             container.image ==
               'ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0' ||
             container.image ==

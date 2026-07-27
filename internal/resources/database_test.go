@@ -23,6 +23,10 @@ func TestDatabaseResourcesPreserveArchiveBoundary(t *testing.T) {
 		t.Fatalf("destinationPath = %q", destination)
 	}
 	cluster := DatabaseCluster(database)
+	image, _, _ := unstructuredString(cluster.Object, "spec", "imageName")
+	if image != "ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9" {
+		t.Fatalf("PostgreSQL image is not the frozen tag-and-digest reference: %q", image)
+	}
 	serverName, _, _ := unstructuredString(cluster.Object, "spec", "plugins", "0", "parameters", "serverName")
 	if serverName != DatabaseBackupServerName(database) {
 		t.Fatalf("write serverName = %q, want %q", serverName, DatabaseBackupServerName(database))

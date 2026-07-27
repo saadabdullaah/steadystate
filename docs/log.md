@@ -354,3 +354,20 @@
   identity, keeps unstructured metadata JSON-compatible, and adds a direct
   absent-child regression test. A corrected compatibility artifact remains
   required before Phase 7 can close.
+- Head `3b69183` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 7 run
+  [30220026714](https://github.com/saadabdullaah/steadystate/actions/runs/30220026714)
+  and artifact `8637197321` proved the identity correction and reached CNPG
+  admission. CNPG then correctly rejected the digest-only PostgreSQL operand
+  because it could not detect image upgrades. The frozen tag and digest are
+  now combined as `18.4-system-trixie@sha256:...` everywhere: generated
+  Cluster, version contract, Kyverno allowlist, acceptance assertion, and
+  tests.
+- Phase 4 run
+  [30220026723](https://github.com/saadabdullaah/steadystate/actions/runs/30220026723)
+  and artifact `8637268709` passed the complete product proof through automatic
+  promotion, exact 10/25/50/100 traffic measurements, provenance, and
+  zero-outage assertions. Only VHS missed the two-second colored completion
+  marker and reached its tape timeout. Both Phase 4 tapes now wait on a plain
+  last-line marker that remains visible for ten seconds using syntax supported
+  by the pinned VHS `0.11.0`.

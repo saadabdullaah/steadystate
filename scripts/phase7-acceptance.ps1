@@ -264,7 +264,7 @@ switch ($Stage) {
         }
         $postgresPod = Get-KubeObject @('get','pod','-n',$Namespace,'-l',"cnpg.io/cluster=$(([string]$database.status.connectionSecretName) -replace '-app$','')")
         $postgresImages = @($postgresPod.items[0].spec.containers | ForEach-Object { [string]$_.image })
-        if ($postgresImages -notcontains 'ghcr.io/cloudnative-pg/postgresql@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' -or
+        if ($postgresImages -notcontains 'ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' -or
             $postgresImages -notcontains 'ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar@sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288') {
             throw 'CNPG or Barman operand images are not the exact admission-pinned Phase 7 digests.'
         }

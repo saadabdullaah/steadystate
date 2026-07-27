@@ -396,6 +396,12 @@ create an external child without preserving its desired identity. Upgrade to
 a build containing the create-on-not-found regression fix; do not work around
 it by manually creating the generated ObjectStore, Cluster, or Backup.
 
+If CNPG rejects `spec.imageName` with `Can't use just the image sha`, render
+the generated Cluster and verify that the PostgreSQL operand contains both
+the frozen `18.4-system-trixie` tag and its `sha256` digest. A digest alone is
+immutable but does not give CNPG the version information it needs for upgrade
+detection. Do not remove the digest or bypass the CNPG admission webhook.
+
 ## SeaweedFS is running but Docker reports unhealthy
 
 ```powershell

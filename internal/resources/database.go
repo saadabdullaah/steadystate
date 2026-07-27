@@ -22,7 +22,7 @@ const (
 	BackupStoreSourceNamespace  = "cnpg-system"
 	BackupStoreBucket           = "steadystate-backups"
 	BarmanPluginName            = "barman-cloud.cloudnative-pg.io"
-	PostgreSQLImage             = "ghcr.io/cloudnative-pg/postgresql@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9"
+	PostgreSQLImage             = "ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9"
 )
 
 var (

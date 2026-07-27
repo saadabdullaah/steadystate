@@ -87,5 +87,8 @@ plugin status metrics; failure is fast, while stale-success age remains a
   before `CreateOrUpdate`, and its metadata uses JSON-compatible maps. This is
   a controller contract covered by an absent-child regression test, not an
   assumption delegated to the dynamic client.
+- The PostgreSQL operand uses the frozen semantic tag and digest together.
+  CloudNativePG needs the tag to reason about upgrades, while the digest keeps
+  the admitted bytes immutable.
 - Hosted objectives are RTO at most 30 minutes and a confirmed archive RPO
   boundary at most five minutes.
