@@ -23,6 +23,11 @@ spec:
         resources:
           - pods
   matchConditions:
+    - name: exclude-cloudnative-pg
+      expression: >-
+        !has(object.metadata.labels) ||
+        !('app.kubernetes.io/managed-by' in object.metadata.labels) ||
+        object.metadata.labels['app.kubernetes.io/managed-by'] != 'cloudnative-pg'
     - name: unmanaged-or-signature-requested
       expression: >-
         !has(object.metadata.labels) ||

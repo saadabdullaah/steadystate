@@ -1,4 +1,6 @@
 replicaCount: 1
+sidecarImage:
+  tag: "v0.13.0@sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288"
 crds:
   create: true
 resources:

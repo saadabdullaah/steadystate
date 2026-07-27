@@ -388,3 +388,17 @@
   owner naming, and frozen PostgreSQL, bootstrap-controller, and Barman
   images; universal Team safety and the forged-label regression remain
   enforced.
+- Head `c97e7a5` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 7 run
+  [30256491321](https://github.com/saadabdullaah/steadystate/actions/runs/30256491321)
+  and artifact `8649843581` showed CNPG accepted the exact identity and
+  bootstrapped both Clusters, but Kyverno's ImageValidatingPolicy required its
+  internal verification-outcomes annotation before applying the non-demo
+  exception. CNPG and Barman chart values now inject exact tag-plus-digest
+  images; their Pods bypass the demo-image mutator/verifier and are instead
+  admitted only by the exact CNPG clause in universal Team safety.
+- Phase 4 run
+  [30256491215](https://github.com/saadabdullaah/steadystate/actions/runs/30256491215)
+  reached only the VHS wait timeout. The tapes now run the real acceptance
+  stage directly under a bounded Unix timeout and emit their result from the
+  controlling shell, eliminating the nested redirected-process boundary.

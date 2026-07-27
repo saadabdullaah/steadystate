@@ -577,13 +577,7 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 		"https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main",
 		"https://token.actions.githubusercontent.com",
 		"https://rekor.sigstore.dev",
-		"app.kubernetes.io/managed-by",
-		"cloudnative-pg",
-		"object.spec.serviceAccountName == object.metadata.labels['cnpg.io/cluster']",
-		"['import', 'initdb', 'pgbasebackup', 'full-recovery', 'join', 'snapshot-recovery']",
-		"owner.apiVersion == 'batch/v1'",
-		"object.spec.?initContainers.orValue([])",
-		"ghcr.io/cloudnative-pg/cloudnative-pg@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb",
+		"exclude-cloudnative-pg",
 	} {
 		if !strings.Contains(imagePolicyText, identity) {
 			t.Errorf("ImageValidatingPolicy is missing trust contract %q", identity)
@@ -597,9 +591,30 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 	if !strings.Contains(staticScript, "exit 0") {
 		t.Fatal("the static policy script must clear expected native denial exit codes on success")
 	}
+	safetyPolicyText := string(readFile(t, filepath.Join(policyPath, "universal-team-safety.yaml")))
+	for _, token := range []string{
+		"CloudNativePG Pods must have exact operator ownership and frozen tag-plus-digest images.",
+		"object.spec.serviceAccountName == object.metadata.labels['cnpg.io/cluster']",
+		"['import', 'initdb', 'pgbasebackup', 'full-recovery', 'join', 'snapshot-recovery']",
+		"owner.apiVersion == 'batch/v1'",
+		"ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb",
+	} {
+		if !strings.Contains(safetyPolicyText, token) {
+			t.Errorf("Universal Team safety is missing CNPG contract %q", token)
+		}
+	}
+	for _, valuesPath := range []string{
+		filepath.Join(root, "gitops", "platform", "cloudnative-pg", "values.yaml"),
+		filepath.Join(root, "gitops", "platform", "barman-cloud", "values.yaml"),
+	} {
+		values := string(readFile(t, valuesPath))
+		if !strings.Contains(values, "@sha256:") {
+			t.Errorf("%s must pin its injected operand image by tag and digest", valuesPath)
+		}
+	}
 	boundaries := string(readFile(t, filepath.Join(root, "docs", "security", "kyverno-policy-boundaries.md")))
 	for _, token := range []string{
-		"exact CloudNativePG PostgreSQL operands",
+		"excludes CloudNativePG-managed Pods",
 		"operator-generated ServiceAccount",
 		"`snapshot-recovery`",
 		"positive fixture",
@@ -1423,7 +1438,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
 		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 28m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
 	} {
-		for _, token := range []string{tape.output, tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-recording.ps1", "Wait+Line", tape.result} {
+		for _, token := range []string{tape.output, tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-acceptance.ps1", "Wait /", tape.result, "timeout --signal=TERM --kill-after=10s"} {
 			if !strings.Contains(tape.content, token) {
 				t.Errorf("Phase 4 VHS tape is missing %q", token)
 			}
@@ -1431,7 +1446,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		if strings.Contains(tape.content, "Output docs/demonstrations/") {
 			t.Error("Phase 4 VHS output must not modify tracked demonstration files during Git delivery")
 		}
-		for _, token := range []string{"&& echo ", " || echo ", "; sleep 10"} {
+		for _, token := range []string{"then echo ", "else echo ", "fi; sleep 10"} {
 			if !strings.Contains(tape.content, token) {
 				t.Errorf("Phase 4 VHS tape must emit its observable result in the tape shell; missing %q", token)
 			}

@@ -40,8 +40,9 @@ reports `SignatureVerificationNotRequested`; it never claims verification.
 
 ## CloudNativePG boundary
 
-Phase 7 excludes only exact CloudNativePG PostgreSQL operands from the
-SteadyState demo-image signature identity. The exception requires all of:
+Phase 7 excludes CloudNativePG-managed Pods from the SteadyState demo-image
+mutator and signature identity. A dedicated expression in the universal Deny
+policy admits them only when all of these are true:
 
 1. the CloudNativePG-managed PostgreSQL/database label set, with instance and
    cluster labels equal;
@@ -53,11 +54,13 @@ SteadyState demo-image signature identity. The exception requires all of:
 4. only the frozen PostgreSQL operand, CNPG bootstrap controller, and Barman
    sidecar image references, across both normal and init containers.
 
-This is an identity-and-image match condition inside the image policy, not a
-`PolicyException`. Universal Team safety remains applicable to CloudNativePG
-and Barman workloads, including the privileged, host namespace, hostPath,
-latest-tag, and resource-requirement controls. A positive fixture proves the
-real initdb shape is admitted; a forged-label fixture remains denied.
+The CNPG and Barman charts inject tag-plus-digest references, so no admission
+mutation or internal Kyverno verification annotation is needed for these
+operands. This is not a `PolicyException`: universal Team safety remains
+applicable to CloudNativePG and Barman workloads, including the privileged,
+host namespace, hostPath, latest-tag, resource-requirement, and exact-identity
+controls. A positive fixture proves the real initdb shape is admitted; a
+forged-label fixture remains denied.
 
 Wildcard policies, namespace-wide exemptions, `team-*` exemptions, and
 user-supplied bypass labels are forbidden.

@@ -51,12 +51,14 @@ children remain available when a candidate is rejected. External verification
 failure fails closed.
 
 Phase 7 may add only exact CNPG/Barman identities and immutable digests.
-The activated boundary requires CloudNativePG's exact PostgreSQL labels,
-cluster ServiceAccount, controller ownership (including its six pinned
-bootstrap/recovery Job roles), and frozen PostgreSQL, bootstrap-controller,
-and Barman images. Universal safety still applies, and paired fixtures prove
-the legitimate initdb shape succeeds while forged CNPG labels cannot bypass
-Application policy.
+The activated boundary pins the CNPG bootstrap-controller and Barman sidecar
+at their charts, excludes CNPG-managed Pods from the demo-image
+mutator/verifier, and enforces their exact PostgreSQL labels, cluster
+ServiceAccount, controller ownership (including six pinned bootstrap/recovery
+Job roles), and tag-plus-digest images in the universal Deny policy. This
+avoids depending on Kyverno's internal image-verification annotation for a
+non-demo identity. Paired fixtures prove the legitimate initdb shape succeeds
+while forged CNPG labels cannot bypass policy.
 
 Runtime threat detection, external secret management, operator image signing,
 and multi-cluster trust remain outside this decision.

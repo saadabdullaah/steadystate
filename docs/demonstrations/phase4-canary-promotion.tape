@@ -13,7 +13,7 @@ Set WaitTimeout 20m
 Set Framerate 2
 Set PlaybackSpeed 8.0
 
-Type "pwsh -NoProfile -File scripts/phase4-recording.ps1 -Stage Promote -Profile standard && echo PHASE4_PROMOTION_RESULT_PASSED || echo PHASE4_PROMOTION_RESULT_FAILED; sleep 10"
+Type "if timeout --signal=TERM --kill-after=10s 19m pwsh -NoProfile -File scripts/phase4-acceptance.ps1 -Stage Promote -Profile standard; then echo PHASE4_PROMOTION_RESULT_PASSED; else echo PHASE4_PROMOTION_RESULT_FAILED; fi; sleep 10"
 Enter
-Wait+Line /PHASE4_PROMOTION_RESULT_(PASSED|FAILED)/
+Wait /PHASE4_PROMOTION_RESULT_(PASSED|FAILED)/
 Sleep 3s

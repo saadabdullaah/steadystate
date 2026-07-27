@@ -411,6 +411,14 @@ Phase 7 rule recognizes both direct Cluster-owned instance Pods and these
 exact Job-owned Pods. Never add a Team-namespace exception or treat
 user-supplied `cnpg.io/*` labels as trust.
 
+If admission instead reports
+`kyverno.io/image-verification-outcomes annotation not present`, confirm the
+CNPG and Barman chart values use their frozen tag-plus-digest images and that
+both the pinning and image-verification policies exclude
+`app.kubernetes.io/managed-by=cloudnative-pg`. Exact CNPG identity belongs in
+the universal Deny policy; do not restore the old image-policy exception,
+which runs too late in Kyverno's image-verification admission path.
+
 ## SeaweedFS is running but Docker reports unhealthy
 
 ```powershell

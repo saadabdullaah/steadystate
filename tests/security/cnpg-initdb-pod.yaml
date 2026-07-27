@@ -23,7 +23,7 @@ spec:
   restartPolicy: Never
   initContainers:
     - name: bootstrap-controller
-      image: ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0
+      image: ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb
       resources:
         requests:
           cpu: 100m
