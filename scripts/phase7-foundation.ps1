@@ -270,12 +270,9 @@ $evidence = [ordered]@{
 Write-JsonFile 'evidence.json' $evidence
 
 # Compatibility resources are disposable; external data remains in the named volume.
-$current = @(& kubectl get database $DatabaseName -n $Namespace -o json 2>$null)
-if ($LASTEXITCODE -eq 0 -and $current) {
-    $document = ($current -join [Environment]::NewLine) | ConvertFrom-Json
-    if (-not $document.metadata.annotations) { $document.metadata | Add-Member -NotePropertyName annotations -NotePropertyValue @{} }
-    $document.metadata.annotations.'steadystate.dev/force-delete' = 'true'
-    $document | ConvertTo-Json -Depth 30 | & kubectl replace -f - *> $null
+& kubectl get database $DatabaseName -n $Namespace *> $null
+if ($LASTEXITCODE -eq 0) {
+    Invoke-Kubectl annotate database $DatabaseName -n $Namespace 'steadystate.dev/force-delete=true' --overwrite
     Invoke-Kubectl delete database $DatabaseName -n $Namespace --wait=false
 }
 

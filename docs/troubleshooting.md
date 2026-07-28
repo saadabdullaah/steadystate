@@ -455,6 +455,13 @@ physical filenames do not contain S3 keys. Use the read-only
 `backup-store.ps1 -Action Inventory` contract, then verify base and WAL keys
 under the expected UID-derived backup-server prefix.
 
+For disposable compatibility cleanup, add the emergency annotation with
+`kubectl annotate database <name> -n <namespace>
+steadystate.dev/force-delete=true --overwrite`. Do not round-trip the live JSON
+through `ConvertFrom-Json` and assign a new dotted annotation property:
+PowerShell exposes existing annotation maps as fixed `PSCustomObject`
+properties and rejects that mutation.
+
 ## The operator Argo Application is Unknown or has a manifest-generation error
 
 ```powershell

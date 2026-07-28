@@ -509,3 +509,14 @@
   a recursive logical object inventory from mini's internal filer API, scopes
   base-backup and WAL assertions to the Database lifetime's UID-derived server
   name, and keeps credentials out of output.
+- Head `247c464` again passed all five CI jobs plus Phase 4, Phase 5, and
+  Phase 6. Phase 7 run
+  [30357626649](https://github.com/saadabdullaah/steadystate/actions/runs/30357626649)
+  produced passed evidence before disposable cleanup: 100 canonical rows,
+  12 source-lifetime objects including 8 WAL objects, distinct source/recovery
+  server names, and identical source/restored checksum
+  `1fd183f94ddcb9114f1282249bba2299479d16499e4113abb0168292f19c6070`.
+  The job failed only because PowerShell cannot add a new dotted property to
+  an existing annotations `PSCustomObject` through assignment. Cleanup now
+  uses explicit `kubectl annotate --overwrite`, leaving the successful path
+  and evidence contract unchanged.

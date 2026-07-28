@@ -830,6 +830,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"-Action Inventory",
 		"$serverInventory",
 		"$baseInventory",
+		"Invoke-Kubectl annotate database $DatabaseName -n $Namespace 'steadystate.dev/force-delete=true' --overwrite",
 	} {
 		if !strings.Contains(phase7Foundation, contract) {
 			t.Fatalf("Phase 7 PostgreSQL compatibility boundary is missing %q", contract)
@@ -840,6 +841,9 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	}
 	if strings.Contains(phase7Foundation, "find /data") {
 		t.Fatal("Phase 7 foundation must inspect logical object keys through the SeaweedFS filer, not physical volume files")
+	}
+	if strings.Contains(phase7Foundation, "$document.metadata.annotations.'steadystate.dev/force-delete'") {
+		t.Fatal("Phase 7 disposable cleanup must not add a missing PSCustomObject annotation through property assignment")
 	}
 	backupStore := string(readFile(t, filepath.Join(root, "scripts", "backup-store.ps1")))
 	for _, contract := range []string{
