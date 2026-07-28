@@ -470,3 +470,14 @@
   instead of the Database API's declared `Ready=True`. Database status now
   uses the public Ready condition, removes the obsolete pre-release condition,
   and Application binding reads that same current-generation contract.
+- Head `1302d47` again passed all five CI jobs plus Phase 4, Phase 5, and
+  Phase 6. Phase 7 run
+  [30308130782](https://github.com/saadabdullaah/steadystate/actions/runs/30308130782)
+  advanced through Healthy Database status and failed immediately at the
+  first real SQL command: Unix-socket peer authentication correctly rejected
+  database role `app` because the CNPG container runs as operating-system user
+  `postgres`. Compatibility automation now authenticates locally as
+  `postgres`, executes workload statements under `SET ROLE app`, and keeps the
+  privileged WAL switch in a separate administrative call without exposing a
+  password. The Phase 7 disaster-recovery workflow uses the same explicit
+  local administrative boundary.

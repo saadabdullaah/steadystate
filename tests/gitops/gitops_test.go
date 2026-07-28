@@ -823,6 +823,18 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 			t.Fatalf("Phase 7 failure diagnostics are missing %q", contract)
 		}
 	}
+	for _, contract := range []string{
+		"-U postgres -d app -qAtc \"SET ROLE app; $SQL\"",
+		"Invoke-AdminPsql $clusterName 'SELECT pg_switch_wal();'",
+		"PostgreSQL administrative compatibility command failed.",
+	} {
+		if !strings.Contains(phase7Foundation, contract) {
+			t.Fatalf("Phase 7 PostgreSQL compatibility boundary is missing %q", contract)
+		}
+	}
+	if strings.Contains(phase7Foundation, "-U app") {
+		t.Fatal("Phase 7 foundation must not use application-role peer authentication from the postgres container")
+	}
 	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
 	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline") ||
 		strings.Contains(phase7Workflow, "-DisableSecurity") {
@@ -832,6 +844,11 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		if !strings.Contains(phase7Workflow, contract) {
 			t.Fatalf("Phase 7 success evidence must require %q", contract)
 		}
+	}
+	phase7Acceptance := string(readFile(t, filepath.Join(root, "scripts", "phase7-acceptance.ps1")))
+	if !strings.Contains(phase7Acceptance, "-U postgres -d app -qAtc 'SELECT pg_switch_wal();'") ||
+		strings.Contains(phase7Acceptance, "-U app") {
+		t.Fatal("Phase 7 acceptance must perform the administrative WAL switch through local postgres peer authentication")
 	}
 	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
 	for _, contract := range []string{

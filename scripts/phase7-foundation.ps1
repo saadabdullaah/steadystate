@@ -126,8 +126,15 @@ function Get-PrimaryPod([string]$ClusterName, [int]$TimeoutSeconds = 600) {
 
 function Invoke-Psql([string]$ClusterName, [string]$SQL) {
     $pod = Get-PrimaryPod $ClusterName
-    $output = @(& kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U app -d app -Atc $SQL)
+    $output = @(& kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc "SET ROLE app; $SQL")
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL compatibility command failed.' }
+    return ($output -join "`n").Trim()
+}
+
+function Invoke-AdminPsql([string]$ClusterName, [string]$SQL) {
+    $pod = Get-PrimaryPod $ClusterName
+    $output = @(& kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc $SQL)
+    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL administrative compatibility command failed.' }
     return ($output -join "`n").Trim()
 }
 
@@ -206,7 +213,8 @@ $clusterName = $clusterName.Substring(0, $clusterName.Length - 4)
 Add-Check $checks 'database-provisioned' $started 'A one-instance PostgreSQL Database became current-generation Healthy.'
 
 $started = Get-Date
-$null = Invoke-Psql $clusterName 'CREATE TABLE IF NOT EXISTS phase7_orders (id integer PRIMARY KEY, item text NOT NULL, quantity integer NOT NULL); TRUNCATE phase7_orders; INSERT INTO phase7_orders SELECT value, ''order-'' || lpad(value::text, 3, ''0''), (value % 7) + 1 FROM generate_series(1, 100) AS value; SELECT pg_switch_wal();'
+$null = Invoke-Psql $clusterName 'CREATE TABLE IF NOT EXISTS phase7_orders (id integer PRIMARY KEY, item text NOT NULL, quantity integer NOT NULL); TRUNCATE phase7_orders; INSERT INTO phase7_orders SELECT value, ''order-'' || lpad(value::text, 3, ''0''), (value % 7) + 1 FROM generate_series(1, 100) AS value;'
+$null = Invoke-AdminPsql $clusterName 'SELECT pg_switch_wal();'
 $sourceChecksum = Get-DataChecksum $clusterName
 if ($sourceChecksum -notmatch '^[0-9a-f]{64}$') { throw 'The source checksum is not canonical SHA-256.' }
 Add-Check $checks 'data-seeded-and-wal-switched' $started 'One hundred canonical rows were committed and a WAL switch was requested.'

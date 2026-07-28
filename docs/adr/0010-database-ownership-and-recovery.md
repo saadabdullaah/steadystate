@@ -70,6 +70,12 @@ state of its referenced Database. The controller removes that obsolete
 condition from Database status if it encounters state written by an earlier
 pre-release build.
 
+Hosted backup/restore automation never places the application password on a
+process command line. Administrative Pod-local SQL uses the container's
+`postgres` operating-system identity and PostgreSQL peer authentication.
+Workload seed and checksum statements immediately `SET ROLE app`; the
+privileged WAL switch remains a separate explicit administrative operation.
+
 Deletion creates and waits for one deterministic final Backup before removing
 the data plane; external objects remain. The final Backup deliberately has no
 owner reference to the already-terminating Database and is deleted explicitly

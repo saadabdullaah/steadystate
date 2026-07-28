@@ -303,7 +303,7 @@ switch ($Stage) {
 
         $clusterName = ([string]$database.status.connectionSecretName) -replace '-app$',''
         $pod = Get-PrimaryPod $clusterName
-        & kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U app -d app -Atc 'SELECT pg_switch_wal();' *> $null
+        & kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc 'SELECT pg_switch_wal();' *> $null
         if ($LASTEXITCODE -ne 0) { throw 'WAL switch failed.' }
         $backupName = "phase7-dr-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         New-Backup $backupName $clusterName

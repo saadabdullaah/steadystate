@@ -484,6 +484,13 @@ the obsolete pre-release condition and publishes the declared Database API
 contract. Do not weaken Argo health or acceptance checks to accept the wrong
 condition type.
 
+If Pod-local `psql -U app` reports `Peer authentication failed`, do not print
+or pass the application password through workflow arguments. CNPG's postgres
+container runs as the `postgres` operating-system user. Administrative
+automation connects locally as database role `postgres`; workload SQL must
+then use `SET ROLE app`, while `pg_switch_wal()` remains a separate
+administrative statement.
+
 ## Database deletion is blocked
 
 ```powershell
