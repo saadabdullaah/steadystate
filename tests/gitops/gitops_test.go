@@ -1097,6 +1097,8 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 		"metrics/memory.json",
 		"Set-AcceptanceStage",
 		"currentStage",
+		"Invoke-GrafanaRequest",
+		"did not succeed within",
 		"--request-timeout=20s",
 		"Save-ClusterEvidence",
 		"kubectl patch applications.platform.steadystate.dev telemetry",
@@ -1320,7 +1322,7 @@ func TestPhase5ObservabilityFoundationContracts(t *testing.T) {
 		}
 	}
 	script := string(readFile(t, filepath.Join(root, "scripts", "gitops.ps1")))
-	for _, token := range []string{"Assert-ChartChecksum", "helm pull", "LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256"} {
+	for _, token := range []string{"Assert-ChartChecksum", "Invoke-WithRetry", "MaximumAttempts = 3", "helm pull", "LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256"} {
 		if !strings.Contains(script, token) {
 			t.Errorf("GitOps verification is missing %q", token)
 		}

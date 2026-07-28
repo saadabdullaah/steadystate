@@ -79,6 +79,26 @@ function Wait-Until {
     throw $Failure
 }
 
+function Invoke-GrafanaRequest {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [int]$TimeoutSeconds = 60
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastFailure = 'no response'
+    do {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort$Path" -Headers @{Host='grafana.localtest.me'} -TimeoutSec 15
+            if ($response.StatusCode -eq 200) { return $response }
+            $lastFailure = "HTTP $($response.StatusCode)"
+        } catch {
+            $lastFailure = $_.Exception.Message
+        }
+        if ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 3 }
+    } while ((Get-Date) -lt $deadline)
+    throw "Grafana request $Path did not succeed within $TimeoutSeconds seconds: $lastFailure"
+}
+
 function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 900) {
     return Wait-Until -TimeoutSeconds $TimeoutSeconds -Failure "Argo Application $Name did not become Healthy/Synced." -Condition {
         $app = Get-KubeJSON @('get','applications.argoproj.io',$Name,'-n','argocd') -AllowMissing
@@ -266,12 +286,10 @@ switch ($Stage) {
         try {
             Set-AcceptanceStage $state 'grafana-and-datasources'
             $started = Get-Date
-            $grafana = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/api/health" -Headers @{Host='grafana.localtest.me'} -TimeoutSec 10
-            if ($grafana.StatusCode -ne 200) { throw 'Grafana HTTPRoute is not healthy.' }
+            $grafana = Invoke-GrafanaRequest '/api/health'
             foreach ($uid in @('prometheus','loki','tempo')) {
-                $health = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/api/datasources/uid/$uid/health" -Headers @{Host='grafana.localtest.me'} -TimeoutSec 15
+                $health = Invoke-GrafanaRequest "/api/datasources/uid/$uid/health"
                 Write-Utf8 (Join-Path $ArtifactRoot "grafana/$uid-health.json") $health.Content
-                if ($health.StatusCode -ne 200) { throw "Grafana datasource $uid is not healthy." }
             }
             Add-Check $state 'grafana-route-and-datasources-healthy' $started 'Grafana route and explicit Prometheus, Loki, and Tempo datasource health endpoints returned 200.'
 
@@ -347,7 +365,7 @@ switch ($Stage) {
             $alertmanager = Get-ServiceRaw 'monitoring-kube-prometheus-alertmanager' 9093 '/api/v2/alerts'
             if ($alertmanager -notmatch 'SteadyStateAvailabilityFastBurn') { throw 'Fast-burn alert was absent from Alertmanager.' }
             Write-Utf8 (Join-Path $ArtifactRoot 'alerts/alertmanager.json') $alertmanager
-            $grafanaAlert = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/api/datasources/proxy/uid/prometheus/api/v1/query?query=$([uri]::EscapeDataString('ALERTS{alertname="SteadyStateAvailabilityFastBurn",alertstate="firing"}'))" -Headers @{Host='grafana.localtest.me'} -TimeoutSec 15
+            $grafanaAlert = Invoke-GrafanaRequest "/api/datasources/proxy/uid/prometheus/api/v1/query?query=$([uri]::EscapeDataString('ALERTS{alertname="SteadyStateAvailabilityFastBurn",alertstate="firing"}'))"
             if ($grafanaAlert.Content -notmatch 'SteadyStateAvailabilityFastBurn') { throw 'Fast-burn alert was not queryable through Grafana.' }
             Write-Utf8 (Join-Path $ArtifactRoot 'alerts/grafana-fast-burn.json') $grafanaAlert.Content
             $state.burnMeasurement = [ordered]@{errorRate=$measuredErrorRate;application='telemetry-burn';observedAt=(Get-Date).ToUniversalTime().ToString('o')}

@@ -344,6 +344,8 @@ func (r *DatabaseReconciler) reconcileDatabaseDeletion(ctx context.Context, data
 func (r *DatabaseReconciler) reconcileDatabaseFinalBackup(ctx context.Context, desired *unstructured.Unstructured) (bool, error) {
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(desired.GroupVersionKind())
+	current.SetName(desired.GetName())
+	current.SetNamespace(desired.GetNamespace())
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), current)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err

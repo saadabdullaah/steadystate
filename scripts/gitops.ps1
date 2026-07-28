@@ -40,6 +40,24 @@ function Invoke-External {
     }
 }
 
+function Invoke-WithRetry {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Operation,
+        [Parameter(Mandatory)][string]$Description,
+        [int]$MaximumAttempts = 3
+    )
+    for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
+        try {
+            & $Operation
+            return
+        } catch {
+            if ($attempt -eq $MaximumAttempts) { throw }
+            Write-Warning "$Description failed on attempt $attempt of $MaximumAttempts; retrying."
+            Start-Sleep -Seconds (5 * $attempt)
+        }
+    }
+}
+
 function Write-Utf8 {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Content)
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
@@ -64,7 +82,9 @@ function Get-ArgoManifest {
     }
     if (-not (Test-Path -LiteralPath $path)) {
         $uri = "https://raw.githubusercontent.com/argoproj/argo-cd/v$version/manifests/install.yaml"
-        Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile $path
+        Invoke-WithRetry -Description 'Argo CD manifest download' -Operation {
+            Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile $path
+        }
     }
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
     if ($actual -ne $expected) {
@@ -91,8 +111,17 @@ function Assert-ChartChecksum {
     $chartDirectory = Join-Path $ArtifactRoot 'charts'
     New-Item -ItemType Directory -Force -Path $chartDirectory | Out-Null
     $path = Join-Path $chartDirectory "$Chart-$Version.tgz"
+    if (Test-Path -LiteralPath $path) {
+        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+        if ($actual -ne $Expected) {
+            $quarantine = "$path.invalid-$(Get-Date -Format 'yyyyMMddHHmmss')"
+            Move-Item -LiteralPath $path -Destination $quarantine
+        }
+    }
     if (-not (Test-Path -LiteralPath $path)) {
-        Invoke-External helm pull $Chart --repo $Repository --version $Version --destination $chartDirectory
+        Invoke-WithRetry -Description "$Chart chart download" -Operation {
+            Invoke-External helm pull $Chart --repo $Repository --version $Version --destination $chartDirectory
+        }
     }
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
     if ($actual -ne $Expected) {

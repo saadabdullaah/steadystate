@@ -168,6 +168,41 @@ func TestDatabaseUnstructuredReconcileCreatesAbsentChildWithDesiredIdentity(t *t
 	}
 }
 
+func TestDatabaseFinalBackupReconcileCreatesAbsentBackupWithDesiredIdentity(t *testing.T) {
+	database := databaseStatusFixture()
+	scheme := runtime.NewScheme()
+	if err := platformv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	scheme.AddKnownTypeWithName(resources.CNPGBackupGVK, &unstructured.Unstructured{})
+
+	reconciler := &DatabaseReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(database).Build(),
+		Scheme: scheme,
+	}
+	desired := resources.DatabaseFinalBackup(database)
+	changed, err := reconciler.reconcileDatabaseFinalBackup(context.Background(), desired)
+	if err != nil {
+		t.Fatalf("final Backup create-on-not-found reconciliation failed: %v", err)
+	}
+	if !changed {
+		t.Fatal("final Backup create-on-not-found reconciliation reported no write")
+	}
+
+	current := &unstructured.Unstructured{}
+	current.SetGroupVersionKind(resources.CNPGBackupGVK)
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(desired), current); err != nil {
+		t.Fatalf("created final Backup is unavailable: %v", err)
+	}
+	if current.GetName() != desired.GetName() || current.GetNamespace() != desired.GetNamespace() {
+		t.Fatalf("created final Backup identity = %s/%s, want %s/%s",
+			current.GetNamespace(), current.GetName(), desired.GetNamespace(), desired.GetName())
+	}
+	if len(current.GetOwnerReferences()) != 0 {
+		t.Fatalf("created final Backup has owner references: %#v", current.GetOwnerReferences())
+	}
+}
+
 func databaseStatusFixture() *platformv1alpha1.Database {
 	return &platformv1alpha1.Database{
 		ObjectMeta: metav1.ObjectMeta{

@@ -79,7 +79,10 @@ privileged WAL switch remains a separate explicit administrative operation.
 Deletion creates and waits for one deterministic final Backup before removing
 the data plane; external objects remain. The final Backup deliberately has no
 owner reference to the already-terminating Database and is deleted explicitly
-after completion. A failed final backup holds the finalizer.
+after completion. Its dynamic object is initialized with the complete desired
+GVK, namespace, and deterministic name before `CreateOrUpdate`, just like
+owned unstructured children, while intentionally retaining no owner reference.
+A failed final backup holds the finalizer.
 `steadystate.dev/force-delete=true` is the explicit, data-loss-capable
 emergency escape hatch. Team deletion orders Applications, Databases/final
 backups, then Namespace.

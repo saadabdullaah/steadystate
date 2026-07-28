@@ -274,7 +274,7 @@ Invoke-WebRequest http://127.0.0.1:8080/api/datasources/uid/loki/health -Headers
 Invoke-WebRequest http://127.0.0.1:8080/api/datasources/uid/tempo/health -Headers @{Host='grafana.localtest.me'}
 ```
 
-Only Grafana is exposed through the shared loopback Gateway. Do not create routes for Prometheus, Loki, Tempo, or Alertmanager. A failed datasource normally means its exact-revision Argo child is not Healthy, its Service has no ready EndpointSlice, or its capped emptyDir has exhausted space. Capture diagnostics before restarting anything.
+Only Grafana is exposed through the shared loopback Gateway. Do not create routes for Prometheus, Loki, Tempo, or Alertmanager. A failed datasource normally means its exact-revision Argo child is not Healthy, its Service has no ready EndpointSlice, or its capped emptyDir has exhausted space. Hosted acceptance gives each endpoint a bounded 60-second retry envelope with 15-second individual request limits, so a single slow response is not mistaken for a platform failure. Capture diagnostics before restarting anything.
 
 ## Structured logs do not appear in Loki
 
@@ -394,7 +394,9 @@ If every Database condition reports `ReconciliationFailed` with
 investigating CNPG or SeaweedFS. That message means the operator attempted to
 create an external child without preserving its desired identity. Upgrade to
 a build containing the create-on-not-found regression fix; do not work around
-it by manually creating the generated ObjectStore, Cluster, or Backup.
+it by manually creating the generated ObjectStore, Cluster, or Backup. During
+deletion, the same rule applies to the deterministic ownerless final Backup:
+its GVK, namespace, and name must all be initialized before `CreateOrUpdate`.
 
 If CNPG rejects `spec.imageName` with `Can't use just the image sha`, render
 the generated Cluster and verify that the PostgreSQL operand contains both

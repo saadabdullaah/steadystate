@@ -481,3 +481,22 @@
   privileged WAL switch in a separate administrative call without exposing a
   password. The Phase 7 disaster-recovery workflow uses the same explicit
   local administrative boundary.
+- Head `ad0d146` passed all five CI jobs and Phase 4. Phase 7 run
+  [30316337859](https://github.com/saadabdullaah/steadystate/actions/runs/30316337859)
+  and artifact `8672817016` proved the SQL role boundary, both successful
+  archives, and the complete compatibility path through Database deletion.
+  Finalization then exposed that the ownerless final Backup initialized its
+  GVK but not its name/namespace before `CreateOrUpdate`, producing
+  `resource name may not be empty`. Final Backup reconciliation now seeds the
+  complete desired identity and has a dedicated absent-child/no-owner
+  regression.
+- Phase 5 run
+  [30316337779](https://github.com/saadabdullaah/steadystate/actions/runs/30316337779)
+  reached its real recording but one Grafana datasource health request
+  exhausted a single 15-second HTTP timeout. Grafana route, datasource, and
+  alert requests now use a bounded 60-second retry envelope while retaining
+  15-second request bounds. Phase 6 run
+  [30316337803](https://github.com/saadabdullaah/steadystate/actions/runs/30316337803)
+  failed before cluster work when GitHub's Loki chart asset connection reset.
+  Checksum-verified manifest/chart downloads now retry three times, quarantine
+  any corrupt cached chart, and still fail closed on integrity mismatch.
