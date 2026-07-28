@@ -219,6 +219,13 @@ switch ($Stage) {
         $botID = gh api '/users/steadystate-delivery[bot]' --jq .id
         if ($LASTEXITCODE -ne 0 -or -not $botID) { throw 'Could not resolve the GitHub App bot identity.' }
         git config user.email "$botID+steadystate-delivery[bot]@users.noreply.github.com"
+        $state = [ordered]@{
+            schemaVersion=1;result='running';sourceSHA=$env:GITHUB_SHA;branch=$branch
+            startedAt=(Get-Date).ToUniversalTime().ToString('o')
+            baselineCommit=''
+            checks=@()
+        }
+        Save-State $state
         git switch --create $branch $env:GITHUB_SHA
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the ephemeral acceptance branch.' }
         $manifest = Join-Path $Root 'gitops/applications/demo/application.yaml'
@@ -229,16 +236,11 @@ switch ($Stage) {
         }
         Write-Utf8 $manifest $updated
         git add -- gitops/applications/demo/application.yaml
-        git commit -m 'test(data): establish Phase 7 recovery baseline'
+        git commit --allow-empty -m 'test(data): establish Phase 7 recovery baseline'
         if ($LASTEXITCODE -ne 0) { throw 'Could not commit the baseline.' }
         git push --set-upstream origin $branch
         if ($LASTEXITCODE -ne 0) { throw 'Could not push the baseline.' }
-        $state = [ordered]@{
-            schemaVersion=1;result='running';sourceSHA=$env:GITHUB_SHA;branch=$branch
-            startedAt=(Get-Date).ToUniversalTime().ToString('o')
-            baselineCommit=(& git rev-parse HEAD).Trim()
-            checks=@()
-        }
+        $state.baselineCommit = (& git rev-parse HEAD).Trim()
         Save-State $state
         Write-Host "PHASE7_ACCEPTANCE_PREPARED $branch"
     }
@@ -469,5 +471,6 @@ resources: []
             failure=$(if ($env:PHASE7_FAILURE_MESSAGE) { $env:PHASE7_FAILURE_MESSAGE } else { 'Phase 7 acceptance failed before completion.' })
         }
         Write-Utf8 (Join-Path $ArtifactRoot 'failure.json') (($failure | ConvertTo-Json -Depth 10) + [Environment]::NewLine)
+        $global:LASTEXITCODE = 0
     }
 }

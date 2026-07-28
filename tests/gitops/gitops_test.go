@@ -852,6 +852,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"http://127.0.0.1:8888$Path/?pretty=y",
 		"[uint64]2147483648",
 		"$fullPath.Substring($bucketRoot.Length + 1)",
+		"$global:LASTEXITCODE = 0",
 	} {
 		if !strings.Contains(backupStore, contract) {
 			t.Fatalf("SeaweedFS logical inventory is missing %q", contract)
@@ -878,6 +879,25 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		!strings.Contains(phase7Acceptance, "$recoveryRetainedObjects") ||
 		strings.Contains(phase7Acceptance, "find /data") {
 		t.Fatal("Phase 7 acceptance must verify logical base/WAL object keys for the active backup-server lifetime")
+	}
+	for _, contract := range []string{
+		"baselineCommit=''",
+		"git commit --allow-empty -m 'test(data): establish Phase 7 recovery baseline'",
+		"$global:LASTEXITCODE = 0",
+	} {
+		if !strings.Contains(phase7Acceptance, contract) {
+			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)
+		}
+	}
+	acceptanceWorkflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7.yml")))
+	for _, contract := range []string{
+		"Phase 7 failed before the disposable cluster was created.",
+		`$branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"`,
+		"Cluster 'steadystate' is already absent; GitOps cleanup is complete.",
+	} {
+		if !strings.Contains(acceptanceWorkflow, contract) {
+			t.Fatalf("Phase 7 workflow cleanup is missing %q", contract)
+		}
 	}
 	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
 	for _, contract := range []string{

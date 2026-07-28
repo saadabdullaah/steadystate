@@ -148,7 +148,16 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         shell: pwsh
-        run: ./scripts/dev.ps1 diagnostics
+        run: |
+          $clusters = @(& kind get clusters 2>$null)
+          if ($LASTEXITCODE -eq 0 -and $clusters -contains 'steadystate') {
+            ./scripts/dev.ps1 diagnostics
+          } else {
+            New-Item -ItemType Directory -Force .artifacts/diagnostics | Out-Null
+            'Phase 7 failed before the disposable cluster was created.' |
+              Set-Content -Encoding utf8 .artifacts/diagnostics/pre-cluster-failure.txt
+            $global:LASTEXITCODE = 0
+          }
 
       - name: Capture failure evidence
         if: always() && steps.prepare.outcome != 'skipped' && steps.finalize.outcome != 'success'
@@ -220,15 +229,26 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          $state = Get-Content -Raw .artifacts/phase7/acceptance/state.json | ConvertFrom-Json
-          gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/$($state.branch)"
+          $branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path -LiteralPath .artifacts/phase7/acceptance/state.json) {
+            $state = Get-Content -Raw -LiteralPath .artifacts/phase7/acceptance/state.json | ConvertFrom-Json
+            if ($state.branch) { $branch = [string]$state.branch }
+          }
+          gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/$branch"
 
       - name: Undeploy GitOps
         if: always()
         continue-on-error: true
         timeout-minutes: 8
         shell: pwsh
-        run: ./scripts/dev.ps1 undeploy-gitops
+        run: |
+          $clusters = @(& kind get clusters 2>$null)
+          if ($LASTEXITCODE -eq 0 -and $clusters -contains 'steadystate') {
+            ./scripts/dev.ps1 undeploy-gitops
+          } else {
+            Write-Host "Cluster 'steadystate' is already absent; GitOps cleanup is complete."
+            $global:LASTEXITCODE = 0
+          }
 
       - name: Destroy disposable cluster
         if: always()

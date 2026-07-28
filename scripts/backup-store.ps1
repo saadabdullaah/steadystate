@@ -41,6 +41,7 @@ function Get-ExactResource([string]$Kind, [string]$Name) {
     $value = (& docker $Kind inspect $Name 2>$null)
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previous
+    $global:LASTEXITCODE = 0
     return [pscustomobject]@{ Exists = $exitCode -eq 0; Value = $value }
 }
 
