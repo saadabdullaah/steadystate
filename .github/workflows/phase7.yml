@@ -1,26 +1,6 @@
 name: Phase 7 acceptance
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/phase7.yml"
-      - "api/**"
-      - "apps/demo-app/**"
-      - "cmd/**"
-      - "config/**"
-      - "gitops/**"
-      - "internal/**"
-      - "scripts/backup-store.ps1"
-      - "scripts/bootstrap.ps1"
-      - "scripts/dev.ps1"
-      - "scripts/diagnostics.ps1"
-      - "scripts/gitops.ps1"
-      - "scripts/phase7-acceptance.ps1"
-      - "scripts/secrets.ps1"
-      - "scripts/versions.env"
-      - "docs/demonstrations/phase7-disaster-recovery.tape"
   schedule:
     - cron: "29 6 * * *"
   workflow_dispatch:
