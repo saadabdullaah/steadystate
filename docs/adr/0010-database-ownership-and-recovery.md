@@ -27,6 +27,13 @@ SeaweedFS is not an officially tested Barman target, so a hosted
 provision/WAL/base-backup/delete/restore/checksum compatibility gate is
 mandatory and has no silent fallback.
 
+Backup evidence inventories logical object keys through mini's container-local
+filer HTTP API. It never searches `/data` for filenames because SeaweedFS
+stores filer metadata and object chunks inside LevelDB and volume files.
+Assertions are scoped to the Database lifetime's UID-derived Barman server
+prefix and require both base-backup and WAL keys. The filer port remains
+unpublished, and this read-only inventory uses no S3 credential.
+
 The focused foundation gate keeps Prometheus and Kyverno enabled but omits
 Loki, Tempo, Alloy, and OTel, which Phase 5 acceptance validates separately.
 This reserves the hosted runner for the storage controllers, PostgreSQL, and

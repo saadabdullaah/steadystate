@@ -180,7 +180,7 @@ function Capture-Snapshots([string]$Prefix) {
         & kubectl --request-timeout=10s logs -n cnpg-system deployment/cloudnative-pg --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-cnpg.log")
         & kubectl --request-timeout=10s logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-barman.log")
         & docker logs steadystate-seaweedfs --tail 1000 *> (Join-Path $ArtifactDirectory "$Prefix-seaweedfs.log")
-        & docker exec steadystate-seaweedfs find /data -type f *> (Join-Path $ArtifactDirectory "$Prefix-object-inventory.txt")
+        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactDirectory "$Prefix-object-inventory.txt")
     } finally {
         $ErrorActionPreference = $previous
     }
@@ -225,11 +225,15 @@ Invoke-Kubectl delete database $DatabaseName -n $Namespace --wait=false
 Wait-DatabaseAbsent
 Add-Check $checks 'final-backup-completed' $started 'Database finalization completed only after its deterministic final Barman backup.'
 
-$inventory = @(& docker exec steadystate-seaweedfs find /data -type f)
+$inventory = @(& (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory)
 if ($LASTEXITCODE -ne 0 -or $inventory.Count -eq 0) { throw 'No retained SeaweedFS backup objects were found after Database deletion.' }
-$walInventory = @($inventory | Where-Object { $_ -match '(?i)(/wals?/|wal_)' })
+$serverInventory = @($inventory | Where-Object { $_.StartsWith("$backupServerName/", [StringComparison]::Ordinal) })
+if ($serverInventory.Count -eq 0) { throw "No retained objects were found for backup server $backupServerName." }
+$baseInventory = @($serverInventory | Where-Object { $_ -match '(?i)/base/' })
+if ($baseInventory.Count -eq 0) { throw "No retained base backup object was found for backup server $backupServerName." }
+$walInventory = @($serverInventory | Where-Object { $_ -match '(?i)(/wals?/|wal_)' })
 if ($walInventory.Count -eq 0) { throw 'No retained WAL archive object was found after the forced WAL switch.' }
-[IO.File]::WriteAllLines((Join-Path $ArtifactDirectory 'object-inventory.txt'), $inventory, [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllLines((Join-Path $ArtifactDirectory 'object-inventory.txt'), $serverInventory, [Text.UTF8Encoding]::new($false))
 Add-Check $checks 'external-objects-retained' (Get-Date) "Backup objects and $($walInventory.Count) WAL archive objects remain in the external named volume after Kubernetes resource deletion."
 
 $started = Get-Date
@@ -259,7 +263,7 @@ $evidence = [ordered]@{
     recoveryBackupServerName = [string]$recovered.status.backupServerName
     sourceChecksum = $sourceChecksum
     recoveredChecksum = $recoveredChecksum
-    objectCount = $inventory.Count
+    objectCount = $serverInventory.Count
     walObjectCount = $walInventory.Count
     checks = $checks
 }

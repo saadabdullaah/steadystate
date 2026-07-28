@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('Start','Stop','Verify','Endpoint')]
+    [ValidateSet('Start','Stop','Verify','Inventory','Endpoint')]
     [string]$Action = 'Verify',
     [string]$ClusterName = 'steadystate',
     [int]$HostPort = 8333,
@@ -102,6 +102,42 @@ function Wait-Healthy {
     throw 'SeaweedFS did not become healthy within two minutes.'
 }
 
+function Get-FilerDirectory([string]$Path) {
+    $uri = "http://127.0.0.1:8888$Path/?pretty=y"
+    $raw = @(& docker exec $ContainerName wget -qO- --header 'Accept: application/json' $uri)
+    if ($LASTEXITCODE -ne 0 -or -not $raw) {
+        throw "SeaweedFS filer could not list $Path."
+    }
+    try {
+        return (($raw -join [Environment]::NewLine) | ConvertFrom-Json)
+    } catch {
+        throw "SeaweedFS filer returned invalid JSON for ${Path}: $($_.Exception.Message)"
+    }
+}
+
+function Get-BucketObjectInventory {
+    $bucketRoot = "/buckets/$BucketName"
+    $directories = [System.Collections.Generic.Queue[string]]::new()
+    $visited = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $objects = [System.Collections.Generic.List[string]]::new()
+    $directories.Enqueue($bucketRoot)
+    while ($directories.Count -gt 0) {
+        $directory = $directories.Dequeue()
+        if (-not $visited.Add($directory)) { continue }
+        $listing = Get-FilerDirectory $directory
+        foreach ($entry in @($listing.Entries)) {
+            $fullPath = [string]$entry.FullPath
+            if (-not $fullPath.StartsWith("$bucketRoot/", [StringComparison]::Ordinal)) { continue }
+            if (([uint64]$entry.Mode -band [uint64]2147483648) -ne 0) {
+                $directories.Enqueue($fullPath)
+            } else {
+                $objects.Add($fullPath.Substring($bucketRoot.Length + 1))
+            }
+        }
+    }
+    return @($objects | Sort-Object)
+}
+
 Assert-Docker
 $versions = Read-Versions
 $image = $versions.SEAWEEDFS_IMAGE
@@ -172,6 +208,13 @@ switch ($Action) {
         $binding = & docker port $ContainerName 8333/tcp
         if ($binding -notmatch "^127\.0\.0\.1:$HostPort$") { throw "SeaweedFS is not bound only to 127.0.0.1:$HostPort." }
         Write-Host 'SeaweedFS health, exact identity, persistent volume, and loopback binding verified.'
+    }
+    'Inventory' {
+        if (-not (Get-ExactResource container $ContainerName).Exists) { throw 'SeaweedFS container is absent.' }
+        Wait-Healthy
+        $objects = @(Get-BucketObjectInventory)
+        if ($objects.Count -eq 0) { throw "SeaweedFS bucket $BucketName contains no objects." }
+        $objects | Write-Output
     }
     'Endpoint' {
         Write-Output "http://$ContainerName`:8333"

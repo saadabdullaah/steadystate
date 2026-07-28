@@ -449,6 +449,12 @@ use only the loopback-bound S3 port. Do not weaken the probe to process-only
 health, expose the master port, recreate the named volume, or print the S3
 credentials while diagnosing.
 
+Do not use `find /data` to prove that Barman base backups or WAL objects exist.
+SeaweedFS persists logical filer entries inside LevelDB and volume files, so
+physical filenames do not contain S3 keys. Use the read-only
+`backup-store.ps1 -Action Inventory` contract, then verify base and WAL keys
+under the expected UID-derived backup-server prefix.
+
 ## The operator Argo Application is Unknown or has a manifest-generation error
 
 ```powershell

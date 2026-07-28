@@ -500,3 +500,12 @@
   failed before cluster work when GitHub's Loki chart asset connection reset.
   Checksum-verified manifest/chart downloads now retry three times, quarantine
   any corrupt cached chart, and still fail closed on integrity mismatch.
+- Head `635729e` passed all five CI jobs plus Phase 4, Phase 5, and Phase 6.
+  Phase 7 run
+  [30354614185](https://github.com/saadabdullaah/steadystate/actions/runs/30354614185)
+  and artifact `8686673631` proved final Backup creation, completion, and
+  finalizer release. Its next assertion incorrectly searched SeaweedFS's
+  physical LevelDB/volume files for Barman S3 key names. Evidence now obtains
+  a recursive logical object inventory from mini's internal filer API, scopes
+  base-backup and WAL assertions to the Database lifetime's UID-derived server
+  name, and keeps credentials out of output.

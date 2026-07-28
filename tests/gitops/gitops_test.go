@@ -827,6 +827,9 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"-U postgres -d app -qAtc \"SET ROLE app; $SQL\"",
 		"Invoke-AdminPsql $clusterName 'SELECT pg_switch_wal();'",
 		"PostgreSQL administrative compatibility command failed.",
+		"-Action Inventory",
+		"$serverInventory",
+		"$baseInventory",
 	} {
 		if !strings.Contains(phase7Foundation, contract) {
 			t.Fatalf("Phase 7 PostgreSQL compatibility boundary is missing %q", contract)
@@ -834,6 +837,21 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	}
 	if strings.Contains(phase7Foundation, "-U app") {
 		t.Fatal("Phase 7 foundation must not use application-role peer authentication from the postgres container")
+	}
+	if strings.Contains(phase7Foundation, "find /data") {
+		t.Fatal("Phase 7 foundation must inspect logical object keys through the SeaweedFS filer, not physical volume files")
+	}
+	backupStore := string(readFile(t, filepath.Join(root, "scripts", "backup-store.ps1")))
+	for _, contract := range []string{
+		"'Inventory'",
+		"Get-BucketObjectInventory",
+		"http://127.0.0.1:8888$Path/?pretty=y",
+		"[uint64]2147483648",
+		"$fullPath.Substring($bucketRoot.Length + 1)",
+	} {
+		if !strings.Contains(backupStore, contract) {
+			t.Fatalf("SeaweedFS logical inventory is missing %q", contract)
+		}
 	}
 	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
 	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline") ||
@@ -849,6 +867,13 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	if !strings.Contains(phase7Acceptance, "-U postgres -d app -qAtc 'SELECT pg_switch_wal();'") ||
 		strings.Contains(phase7Acceptance, "-U app") {
 		t.Fatal("Phase 7 acceptance must perform the administrative WAL switch through local postgres peer authentication")
+	}
+	if !strings.Contains(phase7Acceptance, "-Action Inventory") ||
+		!strings.Contains(phase7Acceptance, "$sourceBackupServerName") ||
+		!strings.Contains(phase7Acceptance, "$sourceRetainedObjects") ||
+		!strings.Contains(phase7Acceptance, "$recoveryRetainedObjects") ||
+		strings.Contains(phase7Acceptance, "find /data") {
+		t.Fatal("Phase 7 acceptance must verify logical base/WAL object keys for the active backup-server lifetime")
 	}
 	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
 	for _, contract := range []string{

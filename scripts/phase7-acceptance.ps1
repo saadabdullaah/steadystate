@@ -193,7 +193,7 @@ function Capture([string]$Prefix) {
         & kubectl logs -n $Namespace -l "app.kubernetes.io/instance=$ApplicationName" --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-application.log")
         & kubectl logs -n argocd statefulset/argocd-application-controller --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-argo.log")
         & docker logs steadystate-seaweedfs --tail 1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-seaweedfs.log")
-        & docker exec steadystate-seaweedfs find /data -type f *> (Join-Path $ArtifactRoot "snapshots/$Prefix-object-inventory.txt")
+        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactRoot "snapshots/$Prefix-object-inventory.txt")
     } finally {
         $ErrorActionPreference = $previous
     }
@@ -309,13 +309,17 @@ switch ($Stage) {
         New-Backup $backupName $clusterName
         $backup = Wait-Backup $backupName
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/source-backup.json') (($backup | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
-        $sourceInventory = @(& docker exec steadystate-seaweedfs find /data -type f)
+        $sourceBackupServerName = [string]$database.status.backupServerName
+        $allSourceObjects = @(& (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory)
+        $sourceInventory = @($allSourceObjects | Where-Object { $_.StartsWith("$sourceBackupServerName/", [StringComparison]::Ordinal) })
         if ($LASTEXITCODE -ne 0 -or $sourceInventory.Count -eq 0) { throw 'No external source backup objects were found.' }
+        $baseObjects = @($sourceInventory | Where-Object { $_ -match '(?i)/base/' })
+        if ($baseObjects.Count -eq 0) { throw 'No source base-backup object was found.' }
         $walObjects = @($sourceInventory | Where-Object { $_ -match '(?i)(/wals?/|wal_)' })
         if ($walObjects.Count -eq 0) { throw 'No archived WAL object was found after the forced WAL switch.' }
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/source-object-inventory.txt') (($sourceInventory -join [Environment]::NewLine) + [Environment]::NewLine)
         $archiveTime = (Get-Date).ToUniversalTime()
-        $state.sourceBackupServerName = [string]$database.status.backupServerName
+        $state.sourceBackupServerName = $sourceBackupServerName
         $state.sourceChecksum = $source.Checksum
         $state.backupName = $backupName
         $state.walObjectCount = $walObjects.Count
@@ -410,8 +414,13 @@ resources: []
             & kubectl get database $DatabaseName -n $Namespace *> $null
             return $LASTEXITCODE -ne 0
         }
-        $objects = @(& docker exec steadystate-seaweedfs find /data -type f)
-        if ($LASTEXITCODE -ne 0 -or $objects.Count -eq 0) { throw 'External objects were not retained after Database deletion.' }
+        $allObjects = @(& (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory)
+        $sourceRetainedObjects = @($allObjects | Where-Object { $_.StartsWith("$($state.sourceBackupServerName)/", [StringComparison]::Ordinal) })
+        $recoveryRetainedObjects = @($allObjects | Where-Object { $_.StartsWith("$($state.recoveryBackupServerName)/", [StringComparison]::Ordinal) })
+        if ($LASTEXITCODE -ne 0 -or $sourceRetainedObjects.Count -eq 0 -or $recoveryRetainedObjects.Count -eq 0) {
+            throw 'Source or recovery-lifetime external objects were not retained after Database deletion.'
+        }
+        $objects = @($sourceRetainedObjects) + @($recoveryRetainedObjects)
         Add-Check $state 'final-backup-and-external-retention' $started 'Database deletion completed its final backup and retained external data.'
 
         Capture 'success'
