@@ -66,3 +66,50 @@ spec:
           has(container.resources.limits.cpu) &&
           has(container.resources.limits.memory))
       message: Team Pod containers must declare CPU and memory requests and limits.
+    - expression: >-
+        !(
+          has(object.metadata.labels) &&
+          'app.kubernetes.io/managed-by' in object.metadata.labels &&
+          object.metadata.labels['app.kubernetes.io/managed-by'] == 'cloudnative-pg'
+        ) ||
+        (
+          'cnpg.io/cluster' in object.metadata.labels &&
+          'app.kubernetes.io/name' in object.metadata.labels &&
+          object.metadata.labels['app.kubernetes.io/name'] == 'postgresql' &&
+          'app.kubernetes.io/component' in object.metadata.labels &&
+          object.metadata.labels['app.kubernetes.io/component'] == 'database' &&
+          'app.kubernetes.io/instance' in object.metadata.labels &&
+          object.metadata.labels['app.kubernetes.io/instance'] ==
+            object.metadata.labels['cnpg.io/cluster'] &&
+          has(object.spec.serviceAccountName) &&
+          object.spec.serviceAccountName == object.metadata.labels['cnpg.io/cluster'] &&
+          has(object.metadata.ownerReferences) &&
+          (
+            object.metadata.ownerReferences.exists(owner,
+              owner.apiVersion == 'postgresql.cnpg.io/v1' &&
+              owner.kind == 'Cluster' &&
+              owner.name == object.metadata.labels['cnpg.io/cluster'] &&
+              has(owner.controller) &&
+              owner.controller) ||
+            (
+              'cnpg.io/jobRole' in object.metadata.labels &&
+              object.metadata.labels['cnpg.io/jobRole'] in
+                ['import', 'initdb', 'pgbasebackup', 'full-recovery', 'join', 'snapshot-recovery'] &&
+              object.metadata.ownerReferences.exists(owner,
+                owner.apiVersion == 'batch/v1' &&
+                owner.kind == 'Job' &&
+                owner.name.startsWith(object.metadata.labels['cnpg.io/cluster'] + '-') &&
+                owner.name.endsWith('-' + object.metadata.labels['cnpg.io/jobRole']) &&
+                has(owner.controller) &&
+                owner.controller)
+            )
+          ) &&
+          variables.containers.all(container,
+            container.image ==
+              'ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' ||
+            container.image ==
+              'ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb' ||
+            container.image ==
+              'ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0@sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288')
+        )
+      message: CloudNativePG Pods must have exact operator ownership and frozen tag-plus-digest images.

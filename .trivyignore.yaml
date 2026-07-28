@@ -36,3 +36,31 @@ misconfigurations:
       ClusterRoleBinding; the controller can bind it only through a
       namespaced RoleBinding, and tests protect that exact delegation model.
     expired_at: 2027-07-14
+  - id: KSV-0041
+    paths:
+      - config/rbac/role.yaml
+    statement: >-
+      The Database controller must copy only the two S3 credential keys from
+      the SOPS-bootstrapped platform Secret into deterministic Database-owned
+      namespaced Secrets. Tests enforce explicit keys, ownership, redaction,
+      and the absence of Secret values from status, logs, and evidence.
+    expired_at: 2027-07-26
+  - id: KSV-0014
+    paths:
+      - gitops/platform/local-path/local-path-storage.yaml
+    statement: >-
+      This file is the exact checksum-pinned upstream local-path-provisioner
+      manifest. Its privileged host-directory helper requires a writable
+      filesystem inside the isolated platform namespace; the full data
+      profile, exact image/manifest pins, and Kyverno namespace boundary are
+      compensating controls.
+    expired_at: 2027-07-26
+  - id: KSV-0118
+    paths:
+      - gitops/platform/local-path/local-path-storage.yaml
+    statement: >-
+      This file remains byte-identical to the checksum-pinned upstream
+      local-path-provisioner manifest. The provisioner and root helper use the
+      upstream security contexts only inside the dedicated platform namespace;
+      application workloads receive no exemption.
+    expired_at: 2027-07-26

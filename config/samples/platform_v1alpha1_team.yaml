@@ -7,7 +7,7 @@ spec:
     - payments-owner
   quota:
     cpu: "2"
-    memory: 2Gi
+    memory: 4Gi
   allowedRepositories:
     - ghcr.io/saadabdullaah/steadystate-demo-app
     - ghcr.io/saadabdullaah/payments-*

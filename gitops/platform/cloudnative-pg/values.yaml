@@ -1,0 +1,16 @@
+replicaCount: 1
+image:
+  tag: "1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb"
+crds:
+  create: true
+config:
+  clusterWide: true
+rbac:
+  aggregateClusterRoles: false
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi

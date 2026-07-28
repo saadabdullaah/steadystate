@@ -421,18 +421,40 @@ func (r *ApplicationReconciler) reconcileObservabilityResources(ctx context.Cont
 	policy := resources.OTelEgressNetworkPolicy(app)
 	if !app.Spec.Observability.Traces {
 		changed, err := r.deleteOwnedObject(ctx, policy)
+		if err != nil {
+			return mutated, err
+		}
+		mutated = mutated || changed
+	} else {
+		current := policy.DeepCopy()
+		current.Spec = networkingv1.NetworkPolicySpec{}
+		op, err := controllerutil.CreateOrUpdate(ctx, r.Client, current, func() error {
+			desired := resources.OTelEgressNetworkPolicy(app)
+			mergeLabels(&current.ObjectMeta, desired.Labels)
+			current.Spec = desired.Spec
+			return controllerutil.SetControllerReference(app, current, r.Scheme)
+		})
+		if err != nil {
+			return mutated, fmt.Errorf("trace egress NetworkPolicy: %w", err)
+		}
+		mutated = mutated || op != controllerutil.OperationResultNone
+	}
+
+	databasePolicy := resources.DatabaseEgressNetworkPolicy(app)
+	if app.Spec.DatabaseRef == nil {
+		changed, err := r.deleteOwnedObject(ctx, databasePolicy)
 		return mutated || changed, err
 	}
-	current := policy.DeepCopy()
-	current.Spec = networkingv1.NetworkPolicySpec{}
-	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, current, func() error {
-		desired := resources.OTelEgressNetworkPolicy(app)
-		mergeLabels(&current.ObjectMeta, desired.Labels)
-		current.Spec = desired.Spec
-		return controllerutil.SetControllerReference(app, current, r.Scheme)
+	currentDatabasePolicy := databasePolicy.DeepCopy()
+	currentDatabasePolicy.Spec = networkingv1.NetworkPolicySpec{}
+	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, currentDatabasePolicy, func() error {
+		desired := resources.DatabaseEgressNetworkPolicy(app)
+		mergeLabels(&currentDatabasePolicy.ObjectMeta, desired.Labels)
+		currentDatabasePolicy.Spec = desired.Spec
+		return controllerutil.SetControllerReference(app, currentDatabasePolicy, r.Scheme)
 	})
 	if err != nil {
-		return mutated, fmt.Errorf("trace egress NetworkPolicy: %w", err)
+		return mutated, fmt.Errorf("database egress NetworkPolicy: %w", err)
 	}
 	return mutated || op != controllerutil.OperationResultNone, nil
 }

@@ -11,8 +11,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
@@ -82,6 +84,61 @@ func TestSourceRevisionValidation(t *testing.T) {
 	app.Annotations[platformv1alpha1.SourceRevisionAnnotationKey] = "ABC123"
 	if _, err := resolvedSourceRevision(app); err == nil {
 		t.Fatal("invalid source revision was accepted")
+	}
+}
+
+func TestApplicationDatabaseReadinessGate(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	if err := platformv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	app := unitApplication()
+	app.Namespace = "team-payments"
+	app.Spec.DatabaseRef = &platformv1alpha1.ApplicationDatabaseReference{Name: "orders"}
+
+	reconciler := &ApplicationReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build()}
+	if ready, _, err := reconciler.applicationDatabaseReady(context.Background(), app); err != nil || ready {
+		t.Fatalf("missing Database readiness = %t, err = %v; want pending without error", ready, err)
+	}
+
+	database := databaseStatusFixture()
+	database.Status.ObservedGeneration = database.Generation - 1
+	database.Status.Conditions = []metav1.Condition{{
+		Type: conditionManagedDatabaseReady, Status: metav1.ConditionTrue,
+		ObservedGeneration: database.Generation - 1, Reason: "DatabaseReady",
+	}}
+	reconciler.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(database).Build()
+	if ready, _, err := reconciler.applicationDatabaseReady(context.Background(), app); err != nil || ready {
+		t.Fatalf("stale Database readiness = %t, err = %v; want false", ready, err)
+	}
+
+	database.Status.ObservedGeneration = database.Generation
+	database.Status.Conditions[0].ObservedGeneration = database.Generation
+	reconciler.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(database).Build()
+	if ready, _, err := reconciler.applicationDatabaseReady(context.Background(), app); err != nil || !ready {
+		t.Fatalf("current Database readiness = %t, err = %v; want true", ready, err)
+	}
+}
+
+func TestDatabaseWatchMapsToBoundApplications(t *testing.T) {
+	t.Parallel()
+	database := databaseStatusFixture()
+	app := unitApplication()
+	app.Namespace = database.Namespace
+	app.Spec.DatabaseRef = &platformv1alpha1.ApplicationDatabaseReference{Name: database.Name}
+	other := unitApplication()
+	other.Name = "unbound"
+	other.Namespace = database.Namespace
+
+	scheme := runtime.NewScheme()
+	if err := platformv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	reconciler := &ApplicationReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(app, other).Build()}
+	requests := reconciler.applicationsForDatabase(context.Background(), database)
+	if len(requests) != 1 || requests[0].Name != app.Name || requests[0].Namespace != app.Namespace {
+		t.Fatalf("unexpected Database watch mapping: %#v", requests)
 	}
 }
 

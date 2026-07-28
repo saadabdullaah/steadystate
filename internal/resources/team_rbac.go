@@ -21,8 +21,8 @@ func TeamServiceAccount(team *platformv1alpha1.Team) *corev1.ServiceAccount {
 // TeamOwnerRules defines the install-time ClusterRole delegated inside each Team namespace.
 func TeamOwnerRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
-		{APIGroups: []string{"platform.steadystate.dev"}, Resources: []string{"applications"}, Verbs: []string{"create", "delete", "get", "list", "patch", "update", "watch"}},
-		{APIGroups: []string{"platform.steadystate.dev"}, Resources: []string{"applications/status"}, Verbs: []string{"get"}},
+		{APIGroups: []string{"platform.steadystate.dev"}, Resources: []string{"applications", "databases"}, Verbs: []string{"create", "delete", "get", "list", "patch", "update", "watch"}},
+		{APIGroups: []string{"platform.steadystate.dev"}, Resources: []string{"applications/status", "databases/status"}, Verbs: []string{"get"}},
 		{APIGroups: []string{""}, Resources: []string{"configmaps", "secrets"}, Verbs: []string{"create", "delete", "get", "list", "patch", "update", "watch"}},
 		{APIGroups: []string{""}, Resources: []string{"events", "pods", "services"}, Verbs: []string{"get", "list", "watch"}},
 		{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"}},

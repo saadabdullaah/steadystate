@@ -123,6 +123,13 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 		"SYFT_LINUX_AMD64_SHA256", "SYFT_WINDOWS_AMD64_SHA256",
 		"SOPS_LINUX_AMD64_SHA256", "SOPS_WINDOWS_AMD64_SHA256",
 		"AGE_LINUX_AMD64_SHA256", "AGE_WINDOWS_AMD64_SHA256",
+		"LOCAL_PATH_PROVISIONER_VERSION", "LOCAL_PATH_PROVISIONER_MANIFEST_SHA256",
+		"CERT_MANAGER_CHART_VERSION", "CERT_MANAGER_VERSION", "CERT_MANAGER_CHART_SHA256",
+		"CLOUDNATIVE_PG_CHART_VERSION", "CLOUDNATIVE_PG_VERSION", "CLOUDNATIVE_PG_CHART_SHA256",
+		"BARMAN_CLOUD_CHART_VERSION", "BARMAN_CLOUD_VERSION", "BARMAN_CLOUD_SIDECAR_DIGEST", "BARMAN_CLOUD_CHART_SHA256",
+		"CNPG_OPERATOR_IMAGE", "BARMAN_CLOUD_SIDECAR_IMAGE",
+		"POSTGRESQL_OPERAND_IMAGE", "SEAWEEDFS_VERSION", "SEAWEEDFS_IMAGE",
+		"CNPG_CRDS_SHA256", "BARMAN_CLOUD_CRDS_SHA256",
 	} {
 		if !strings.Contains(text, key+"=") {
 			t.Errorf("versions.env is missing %s", key)
@@ -170,6 +177,22 @@ func TestVersionLockContainsRequiredPins(t *testing.T) {
 	} {
 		if !regexp.MustCompile(`(?m)^` + key + `=[0-9a-f]{64}\r?$`).MatchString(text) {
 			t.Errorf("%s must be a lowercase sha256 checksum", key)
+		}
+	}
+	for _, expected := range []string{
+		"LOCAL_PATH_PROVISIONER_VERSION=0.0.36",
+		"CERT_MANAGER_CHART_VERSION=v1.21.0",
+		"CLOUDNATIVE_PG_CHART_VERSION=0.29.0",
+		"BARMAN_CLOUD_CHART_VERSION=0.7.0",
+		"BARMAN_CLOUD_SIDECAR_DIGEST=sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288",
+		"CNPG_OPERATOR_IMAGE=ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb",
+		"BARMAN_CLOUD_SIDECAR_IMAGE=ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0@sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288",
+		"SEAWEEDFS_VERSION=4.39",
+		"POSTGRESQL_OPERAND_IMAGE=ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9",
+		"SEAWEEDFS_IMAGE=chrislusf/seaweedfs@sha256:c7d6c721b30ae711db766bbbfd40192776e263d4e51e22f57baef7bef93c12c6",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Errorf("Phase 7 pin is missing %q", expected)
 		}
 	}
 	if !regexp.MustCompile(`(?m)^ISOLATION_CLIENT_IMAGE=[^@\s]+@sha256:[0-9a-f]{64}$`).MatchString(text) {

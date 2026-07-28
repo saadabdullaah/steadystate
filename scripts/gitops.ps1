@@ -8,6 +8,7 @@ param(
     [string]$EvidencePath,
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity,
+    [string]$BackupStoreEndpoint = $(if ($env:BACKUP_STORE_ENDPOINT) { $env:BACKUP_STORE_ENDPOINT } else { 'http://172.30.240.10:8333' }),
     [ValidateSet('minimal','standard','full')][string]$Profile = 'standard'
 )
 
@@ -39,6 +40,24 @@ function Invoke-External {
     }
 }
 
+function Invoke-WithRetry {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Operation,
+        [Parameter(Mandatory)][string]$Description,
+        [int]$MaximumAttempts = 3
+    )
+    for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
+        try {
+            & $Operation
+            return
+        } catch {
+            if ($attempt -eq $MaximumAttempts) { throw }
+            Write-Warning "$Description failed on attempt $attempt of $MaximumAttempts; retrying."
+            Start-Sleep -Seconds (5 * $attempt)
+        }
+    }
+}
+
 function Write-Utf8 {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Content)
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
@@ -63,7 +82,9 @@ function Get-ArgoManifest {
     }
     if (-not (Test-Path -LiteralPath $path)) {
         $uri = "https://raw.githubusercontent.com/argoproj/argo-cd/v$version/manifests/install.yaml"
-        Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile $path
+        Invoke-WithRetry -Description 'Argo CD manifest download' -Operation {
+            Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile $path
+        }
     }
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
     if ($actual -ne $expected) {
@@ -90,8 +111,17 @@ function Assert-ChartChecksum {
     $chartDirectory = Join-Path $ArtifactRoot 'charts'
     New-Item -ItemType Directory -Force -Path $chartDirectory | Out-Null
     $path = Join-Path $chartDirectory "$Chart-$Version.tgz"
+    if (Test-Path -LiteralPath $path) {
+        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+        if ($actual -ne $Expected) {
+            $quarantine = "$path.invalid-$(Get-Date -Format 'yyyyMMddHHmmss')"
+            Move-Item -LiteralPath $path -Destination $quarantine
+        }
+    }
     if (-not (Test-Path -LiteralPath $path)) {
-        Invoke-External helm pull $Chart --repo $Repository --version $Version --destination $chartDirectory
+        Invoke-WithRetry -Description "$Chart chart download" -Operation {
+            Invoke-External helm pull $Chart --repo $Repository --version $Version --destination $chartDirectory
+        }
     }
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
     if ($actual -ne $Expected) {
@@ -142,12 +172,15 @@ function Render-RootTemplate {
     )
     $telemetryPipeline = if ($DisableTelemetryPipeline) { 'false' } else { 'true' }
     $security = if ($DisableSecurity) { 'false' } else { 'true' }
+    $dataFoundation = if ($Profile -eq 'full') { 'true' } else { 'false' }
     $arguments = @(
         'template', 'steadystate-root', $ChartPath,
         '--namespace', 'argocd',
         '--set-string', "gitRevision=$GitRevision",
         '--set', "enableTelemetryPipeline=$telemetryPipeline",
         '--set', "enableSecurity=$security",
+        '--set', "enableDataFoundation=$dataFoundation",
+        '--set-string', "backupStoreEndpoint=$BackupStoreEndpoint",
         '--show-only', $Template
     )
     if ($BootstrapRoot) {
@@ -277,6 +310,14 @@ function Invoke-Deploy {
     Render-RootTemplate -Template 'templates/root-application.yaml.tpl' -Path $rootApplication -BootstrapRoot
     Invoke-External kubectl apply -f $projects
     Invoke-External kubectl apply -f $rootApplication
+    if ($Profile -eq 'full') {
+        $null = Wait-ArgoApplication -Name 'data-namespaces'
+        if (-not $env:SOPS_AGE_KEY -and -not (Test-Path -LiteralPath $localAgeKey -PathType Leaf)) {
+            throw 'The full profile requires SOPS_AGE_KEY or the ignored local age key to decrypt backup-store credentials.'
+        }
+        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyBackup
+        if ($LASTEXITCODE -ne 0) { throw 'Encrypted backup-store credential bootstrap failed.' }
+    }
     Write-Host "Argo CD and the SteadyState GitOps root are deployed at revision '$GitRevision'."
 }
 
@@ -313,6 +354,9 @@ function Invoke-Test {
     }
     if (-not $DisableSecurity) {
         $applicationNames += @('kyverno','kyverno-policies')
+    }
+    if ($Profile -eq 'full') {
+        $applicationNames += @('data-namespaces','local-path-storage','cert-manager','cloudnative-pg','barman-cloud')
     }
     $applicationNames += @('steadystate-operator','payments','steadystate-root')
 
@@ -384,6 +428,14 @@ function Invoke-Verify {
     Assert-ChartChecksum 'https://grafana.github.io/helm-charts' 'tempo' $versions.TEMPO_CHART_VERSION $versions.TEMPO_CHART_SHA256
     Assert-ChartChecksum 'https://open-telemetry.github.io/opentelemetry-helm-charts' 'opentelemetry-collector' $versions.OTEL_COLLECTOR_CHART_VERSION $versions.OTEL_COLLECTOR_CHART_SHA256
     Assert-ChartChecksum 'https://kyverno.github.io/kyverno/' 'kyverno' $versions.KYVERNO_CHART_VERSION $versions.KYVERNO_CHART_SHA256
+    Assert-ChartChecksum 'https://charts.jetstack.io' 'cert-manager' $versions.CERT_MANAGER_CHART_VERSION $versions.CERT_MANAGER_CHART_SHA256
+    Assert-ChartChecksum 'https://cloudnative-pg.github.io/charts' 'cloudnative-pg' $versions.CLOUDNATIVE_PG_CHART_VERSION $versions.CLOUDNATIVE_PG_CHART_SHA256
+    Assert-ChartChecksum 'https://cloudnative-pg.github.io/charts' 'plugin-barman-cloud' $versions.BARMAN_CLOUD_CHART_VERSION $versions.BARMAN_CLOUD_CHART_SHA256
+    $localPathManifest = Join-Path $Root 'gitops/platform/local-path/local-path-storage.yaml'
+    $localPathHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $localPathManifest).Hash.ToLowerInvariant()
+    if ($localPathHash -ne $versions.LOCAL_PATH_PROVISIONER_MANIFEST_SHA256) {
+        throw "Vendored local-path manifest checksum mismatch: expected $($versions.LOCAL_PATH_PROVISIONER_MANIFEST_SHA256), got $localPathHash"
+    }
     Push-Location $Root
     try {
         Invoke-External go test ./tests/gitops/...
@@ -408,7 +460,7 @@ function Invoke-Undeploy {
 
     if ($argoApplicationsExist) {
         Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s
-        Invoke-External kubectl delete application.argoproj.io payments kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s
+        Invoke-External kubectl delete application.argoproj.io payments barman-cloud cloudnative-pg cert-manager local-path-storage data-namespaces kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s
         Invoke-External kubectl delete application.argoproj.io kyverno -n argocd --ignore-not-found=true --wait=true --timeout=180s
     }
     if ($steadyStateApplicationsExist) {
@@ -424,7 +476,7 @@ function Invoke-Undeploy {
     Invoke-External kubectl delete -k (Join-Path $Root 'config/default') --ignore-not-found=true --wait=true --timeout=180s
     Invoke-External kubectl delete validatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno --ignore-not-found=true --wait=true --timeout=60s
     Invoke-External kubectl delete mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno --ignore-not-found=true --wait=true --timeout=60s
-    Invoke-External kubectl delete namespace monitoring argo-rollouts kyverno --ignore-not-found=true --wait=true --timeout=180s
+    Invoke-External kubectl delete namespace monitoring argo-rollouts kyverno cnpg-system cert-manager local-path-storage --ignore-not-found=true --wait=true --timeout=180s
     Invoke-External kubectl delete customresourcedefinition `
         rollouts.argoproj.io analysisruns.argoproj.io analysistemplates.argoproj.io clusteranalysistemplates.argoproj.io experiments.argoproj.io `
         alertmanagerconfigs.monitoring.coreos.com alertmanagers.monitoring.coreos.com podmonitors.monitoring.coreos.com probes.monitoring.coreos.com `

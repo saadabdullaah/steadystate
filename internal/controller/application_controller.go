@@ -35,11 +35,12 @@ import (
 const ApplicationFinalizer = "steadystate.dev/finalizer"
 
 const (
-	conditionConfigurationReady  = "ConfigurationReady"
-	conditionSecurityPolicyReady = "SecurityPolicyReady"
-	conditionServiceHealth       = "ServiceHealth"
-	conditionRolloutHealthy      = "RolloutHealthy"
-	conditionReady               = "Ready"
+	conditionConfigurationReady       = "ConfigurationReady"
+	conditionSecurityPolicyReady      = "SecurityPolicyReady"
+	conditionServiceHealth            = "ServiceHealth"
+	conditionApplicationDatabaseReady = "DatabaseReady"
+	conditionRolloutHealthy           = "RolloutHealthy"
+	conditionReady                    = "Ready"
 )
 
 // ApplicationReconciler reconciles an Application object.
@@ -144,6 +145,19 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	databaseReady, databaseMessage, err := r.applicationDatabaseReady(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("verify Application database: %w", err)
+	}
+	if !databaseReady {
+		status := databaseBlockedStatus(app, databaseMessage)
+		changed, statusErr := r.patchStatus(ctx, app, status)
+		if changed {
+			r.event(app, corev1.EventTypeWarning, "DatabaseUnavailable", databaseMessage)
+		}
+		return ctrl.Result{}, statusErr
+	}
+
 	runtimeState, err := r.reconcileRuntimeChildren(ctx, app)
 	if err != nil {
 		reason := "ReconciliationFailed"
@@ -193,6 +207,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	default:
 		desiredStatus, routeRejected = workloadStatus(app, runtimeState.deployment, runtimeState.route, digestResolution, sourceRevision)
 	}
+	setCondition(&desiredStatus, app.Generation, conditionApplicationDatabaseReady, metav1.ConditionTrue, "DatabaseReady", databaseReadyMessage(app))
 	statusChanged, err := r.patchStatus(ctx, app, desiredStatus)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -203,6 +218,31 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.event(app, corev1.EventTypeNormal, "Reconciled", "Application resources and status were reconciled")
 	}
 	return ctrl.Result{RequeueAfter: runtimeState.requeueAfter}, nil
+}
+
+func (r *ApplicationReconciler) applicationDatabaseReady(ctx context.Context, app *platformv1alpha1.Application) (bool, string, error) {
+	if app.Spec.DatabaseRef == nil {
+		return true, "No database binding was requested", nil
+	}
+	database := &platformv1alpha1.Database{}
+	key := types.NamespacedName{Name: app.Spec.DatabaseRef.Name, Namespace: app.Namespace}
+	if err := r.Get(ctx, key, database); apierrors.IsNotFound(err) {
+		return false, fmt.Sprintf("Database %s is missing", key), nil
+	} else if err != nil {
+		return false, "", err
+	}
+	ready := meta.FindStatusCondition(database.Status.Conditions, conditionManagedDatabaseReady)
+	if database.Status.ObservedGeneration != database.Generation || ready == nil || ready.ObservedGeneration != database.Generation || ready.Status != metav1.ConditionTrue {
+		return false, fmt.Sprintf("Database %s is not current-generation Ready", key), nil
+	}
+	return true, fmt.Sprintf("Database %s is ready", key), nil
+}
+
+func databaseReadyMessage(app *platformv1alpha1.Application) string {
+	if app.Spec.DatabaseRef == nil {
+		return "No database binding was requested"
+	}
+	return fmt.Sprintf("Database %s/%s is current-generation Ready", app.Namespace, app.Spec.DatabaseRef.Name)
 }
 
 func isSecurityAdmissionRejection(err error) bool {
@@ -399,7 +439,27 @@ func degradedStatus(app *platformv1alpha1.Application, reason, message string) p
 	}
 	setCondition(&status, app.Generation, conditionSecurityPolicyReady, securityStatus, reason, message)
 	setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionUnknown, reason, "No child resources were mutated")
+	if app.Spec.DatabaseRef == nil {
+		setCondition(&status, app.Generation, conditionApplicationDatabaseReady, metav1.ConditionTrue, "DatabaseNotRequested", "No database binding was requested")
+	} else {
+		setCondition(&status, app.Generation, conditionApplicationDatabaseReady, metav1.ConditionUnknown, reason, "Database readiness was not evaluated")
+	}
 	setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, reason, message)
+	return status
+}
+
+func databaseBlockedStatus(app *platformv1alpha1.Application, message string) platformv1alpha1.ApplicationStatus {
+	status := baseStatus(app)
+	if status.ActiveVersion == "" {
+		status.Phase = platformv1alpha1.ApplicationPhasePending
+	} else {
+		status.Phase = platformv1alpha1.ApplicationPhaseDegraded
+	}
+	status.CandidateVersion = ""
+	setCondition(&status, app.Generation, conditionConfigurationReady, metav1.ConditionFalse, "DatabaseUnavailable", "No generated children were mutated")
+	setCondition(&status, app.Generation, conditionApplicationDatabaseReady, metav1.ConditionFalse, "DatabaseUnavailable", message)
+	setCondition(&status, app.Generation, conditionRolloutHealthy, metav1.ConditionUnknown, "DatabaseUnavailable", "Last healthy workload state is preserved")
+	setCondition(&status, app.Generation, conditionReady, metav1.ConditionFalse, "DatabaseUnavailable", message)
 	return status
 }
 
@@ -537,6 +597,23 @@ func (r *ApplicationReconciler) applicationsForTeam(ctx context.Context, object 
 	return r.applicationRequestsInNamespace(ctx, resources.TeamNamespacePrefix+object.GetName())
 }
 
+func (r *ApplicationReconciler) applicationsForDatabase(ctx context.Context, object client.Object) []ctrlreconcile.Request {
+	applications := &platformv1alpha1.ApplicationList{}
+	if err := r.List(ctx, applications, client.InNamespace(object.GetNamespace())); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "unable to list Applications for Database change", "database", client.ObjectKeyFromObject(object))
+		return nil
+	}
+	requests := make([]ctrlreconcile.Request, 0)
+	for i := range applications.Items {
+		reference := applications.Items[i].Spec.DatabaseRef
+		if reference != nil && reference.Name == object.GetName() {
+			requests = append(requests, ctrlreconcile.Request{NamespacedName: client.ObjectKeyFromObject(&applications.Items[i])})
+		}
+	}
+	sort.Slice(requests, func(i, j int) bool { return requests[i].Name < requests[j].Name })
+	return requests
+}
+
 func (r *ApplicationReconciler) applicationsForSecurityReport(ctx context.Context, object client.Object) []ctrlreconcile.Request {
 	return r.applicationRequestsInNamespace(ctx, object.GetNamespace())
 }
@@ -568,7 +645,8 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&appsv1.ReplicaSet{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(applicationRequestForPod)).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForNamespace)).
-		Watches(&platformv1alpha1.Team{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForTeam))
+		Watches(&platformv1alpha1.Team{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForTeam)).
+		Watches(&platformv1alpha1.Database{}, handler.EnqueueRequestsFromMapFunc(r.applicationsForDatabase))
 
 	optionalWatches := []struct {
 		gvk         schema.GroupVersionKind

@@ -27,3 +27,23 @@ func OTelEgressNetworkPolicy(application *platformv1alpha1.Application) *network
 		},
 	}
 }
+
+// DatabaseEgressNetworkPolicy permits only an explicitly bound PostgreSQL cluster.
+func DatabaseEgressNetworkPolicy(application *platformv1alpha1.Application) *networkingv1.NetworkPolicy {
+	tcp := corev1.ProtocolTCP
+	clusterName := ""
+	if application.Spec.DatabaseRef != nil {
+		clusterName = DatabaseClusterNameFor(application.Spec.DatabaseRef.Name)
+	}
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: DatabaseEgressPolicyName(application), Namespace: application.Namespace, Labels: Labels(application)},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: SelectorLabels(application)},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress: []networkingv1.NetworkPolicyEgressRule{{
+				To:    []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"cnpg.io/cluster": clusterName}}}},
+				Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &intstr.IntOrString{Type: intstr.Int, IntVal: 5432}}},
+			}},
+		},
+	}
+}

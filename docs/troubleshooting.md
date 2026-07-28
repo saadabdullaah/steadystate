@@ -118,7 +118,7 @@ Run the suite on a standard-profile cluster only after building, loading, deploy
 .\scripts\dev.ps1 diagnostics
 ```
 
-No evidence file is written when an assertion fails. Preserve the cluster until diagnostics are captured. For a direct-network failure, verify all `calico-node` replicas are Ready and inspect the three generated Team NetworkPolicies. For RBAC, compare `kubectl auth can-i` using `system:serviceaccount:team-orders:steadystate-team-owner` in both namespaces. For quota rejection, inspect `steadystate-quota` usage and the admission error. If Team deletion stalls, inspect the Team condition, Namespace ownership annotation, Application finalizers, and controller logs before changing any finalizer manually.
+No evidence file is written when an assertion fails. Preserve the cluster until diagnostics are captured. For a direct-network failure, verify all `calico-node` replicas are Ready and inspect the generated Team NetworkPolicies. For RBAC, compare `kubectl auth can-i` using `system:serviceaccount:team-orders:steadystate-team-owner` in both namespaces. For quota rejection, inspect `steadystate-quota` usage and the admission error. A CNPG initdb Pod rejected for `limits.memory` leaves its `WaitForFirstConsumer` PVC Pending because no eligible Pod can schedule; fix the Team ceiling rather than the PVC. The payments sample uses a 4 GiB memory ceiling so its normal database, application, and temporary hosted compatibility database can coexist. ResourceQuota is an admission ceiling, not reserved memory, so this does not increase the measured working set. If a PostgreSQL Pod is Running but the CNPG Cluster reports `Instance Status Extraction Error: HTTP communication issue`, inspect the Database-owned `*-allow-operator` policy and CNPG logs for port 8000 timeouts. Only the `cloudnative-pg` Pod in `cnpg-system` should be admitted to that instance-manager endpoint. If Team deletion stalls, inspect the Team condition, Namespace ownership annotation, Application finalizers, and controller logs before changing any finalizer manually.
 
 ## Argo CD route or login fails
 
@@ -274,7 +274,7 @@ Invoke-WebRequest http://127.0.0.1:8080/api/datasources/uid/loki/health -Headers
 Invoke-WebRequest http://127.0.0.1:8080/api/datasources/uid/tempo/health -Headers @{Host='grafana.localtest.me'}
 ```
 
-Only Grafana is exposed through the shared loopback Gateway. Do not create routes for Prometheus, Loki, Tempo, or Alertmanager. A failed datasource normally means its exact-revision Argo child is not Healthy, its Service has no ready EndpointSlice, or its capped emptyDir has exhausted space. Capture diagnostics before restarting anything.
+Only Grafana is exposed through the shared loopback Gateway. Do not create routes for Prometheus, Loki, Tempo, or Alertmanager. A failed datasource normally means its exact-revision Argo child is not Healthy, its Service has no ready EndpointSlice, or its capped emptyDir has exhausted space. Hosted acceptance gives each endpoint a bounded 60-second retry envelope with 15-second individual request limits, so a single slow response is not mistaken for a platform failure. Capture diagnostics before restarting anything.
 
 ## Structured logs do not appear in Loki
 
@@ -364,3 +364,157 @@ The controller preserves the active version, runtime digest, Git revision, and s
 ```
 
 The local identity belongs only at `.artifacts/secrets/steadystate.agekey`; GitHub uses the `SOPS_AGE_KEY` repository secret. Never commit the decrypted `.artifacts/secrets/rendered/grafana-admin.yaml` or paste the private key into logs. To rotate the Grafana credential, run `rotate-secrets`, review only the encrypted diff, deploy it, verify login, and retire the prior credential. If the age private key is lost, recover it from the repository secret or rotate to a new recipient and re-encrypt before deleting the old key.
+
+## Database stays Provisioning or Degraded
+
+```powershell
+.\scripts\dev.ps1 start-backup-store -Profile full
+kubectl get database,cluster.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n team-payments -o yaml
+kubectl get pod,pvc -n team-payments -l cnpg.io/cluster
+kubectl logs -n steadystate-system deployment/steadystate-controller-manager --tail=300
+kubectl logs -n cnpg-system deployment/cloudnative-pg --tail=300
+kubectl logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --tail=300
+```
+
+Confirm the encrypted platform backup Secret was applied, the exact SeaweedFS
+container is healthy, and the kind nodes are attached to
+`steadystate-backup`. Never print the Secret keys. Recovery must be declared
+at Database creation; do not patch the generated Cluster or set
+`ObjectStore.spec.serverName`.
+
+The Database sample is full-profile-only. The reusable demo leaf intentionally
+has no `databaseRef`. A standard-profile root renders it unchanged beside Team
+intent; a full-profile root adds `databaseRef.name=orders` and the Database
+source. If a standard regression unexpectedly shows `DatabaseUnavailable`,
+render the root chart and verify `enableDataFoundation=false`; do not install
+the data stack just to make an earlier-phase test green.
+
+If every Database condition reports `ReconciliationFailed` with
+`resource name may not be empty`, inspect the operator version before
+investigating CNPG or SeaweedFS. That message means the operator attempted to
+create an external child without preserving its desired identity. Upgrade to
+a build containing the create-on-not-found regression fix; do not work around
+it by manually creating the generated ObjectStore, Cluster, or Backup. During
+deletion, the same rule applies to the deterministic ownerless final Backup:
+its GVK, namespace, and name must all be initialized before `CreateOrUpdate`.
+
+If CNPG rejects `spec.imageName` with `Can't use just the image sha`, render
+the generated Cluster and verify that the PostgreSQL operand contains both
+the frozen `18.4-system-trixie` tag and its `sha256` digest. A digest alone is
+immutable but does not give CNPG the version information it needs for upgrade
+detection. Do not remove the digest or bypass the CNPG admission webhook.
+
+If a CNPG `*-initdb`, `*-join`, or recovery Job repeatedly reports
+`steadystate-verify-team-images`, inspect its Pod template before changing
+Kyverno. It must carry the CloudNativePG PostgreSQL/database label set, use the
+Cluster-named ServiceAccount, have the expected Job owner/name/role, and use
+only the frozen PostgreSQL, CNPG bootstrap-controller, and Barman images. The
+Phase 7 rule recognizes both direct Cluster-owned instance Pods and these
+exact Job-owned Pods. Never add a Team-namespace exception or treat
+user-supplied `cnpg.io/*` labels as trust.
+
+If admission instead reports
+`kyverno.io/image-verification-outcomes annotation not present`, confirm the
+CNPG and Barman chart values use their frozen tag-plus-digest images and that
+both the pinning and image-verification policies exclude
+`app.kubernetes.io/managed-by=cloudnative-pg`. Exact CNPG identity belongs in
+the universal Deny policy; do not restore the old image-policy exception,
+which runs too late in Kyverno's image-verification admission path.
+
+If CNPG initdb Pods are admitted and pull both frozen images but repeatedly
+finish `Error`, inspect the captured `*-cnpg-job-pods.log` before changing
+storage or image pins. The Database backup egress policy must allow the exact
+SeaweedFS endpoint, Kubernetes API Service on 443, private RFC1918
+control-plane endpoints on 6443, and same-Cluster ports 5432/8000. Calico sees
+the kind API destination after Service DNAT, and the host-network
+kube-apiserver cannot be selected by a namespaced Pod selector. Team DNS
+remains a separate additive policy. An incomplete API rule blocks CNPG's
+in-Pod instance manager and causes the operator to recreate initdb
+indefinitely.
+
+## SeaweedFS is running but Docker reports unhealthy
+
+```powershell
+docker inspect steadystate-seaweedfs --format '{{json .State.Health}}'
+docker inspect steadystate-seaweedfs --format '{{json .NetworkSettings.Networks.steadystate-backup}}'
+.\scripts\dev.ps1 stop-backup-store
+.\scripts\dev.ps1 start-backup-store
+```
+
+The authenticated S3 root on port `8333` is not a readiness endpoint and may
+return a non-success response without credentials. The exact container health
+check uses SeaweedFS mini's internal master endpoint
+`http://127.0.0.1:9333/cluster/status`; external backup traffic continues to
+use only the loopback-bound S3 port. Do not weaken the probe to process-only
+health, expose the master port, recreate the named volume, or print the S3
+credentials while diagnosing.
+
+Do not use `find /data` to prove that Barman base backups or WAL objects exist.
+SeaweedFS persists logical filer entries inside LevelDB and volume files, so
+physical filenames do not contain S3 keys. Use the read-only
+`backup-store.ps1 -Action Inventory` contract, then verify base and WAL keys
+under the expected UID-derived backup-server prefix.
+
+For disposable compatibility cleanup, add the emergency annotation with
+`kubectl annotate database <name> -n <namespace>
+steadystate.dev/force-delete=true --overwrite`. Do not round-trip the live JSON
+through `ConvertFrom-Json` and assign a new dotted annotation property:
+PowerShell exposes existing annotation maps as fixed `PSCustomObject`
+properties and rejects that mutation.
+
+## The operator Argo Application is Unknown or has a manifest-generation error
+
+```powershell
+kubectl get application -n argocd steadystate-operator -o yaml
+helm template steadystate-root .\gitops\clusters\local --namespace argocd
+kustomize build .\config\default
+```
+
+Read `status.conditions` before waiting longer. A manifest-generation error
+cannot become healthy through retries. The root chart must create the
+controller container's `env` list atomically when injecting
+`BACKUP_STORE_ENDPOINT`; appending to `/env/-` is invalid when the base
+Deployment has no environment list. Fix the chart in Git and let Argo render
+it again—do not patch the live Deployment or create CRDs manually.
+
+## Application reports DatabaseUnavailable
+
+Inspect the Application and Database conditions, connection Secret metadata,
+and owned database egress policy. The operator preserves existing healthy
+children while a new reference is missing or unready. Fix the Database in Git
+and wait for current-generation `Ready=True`; never copy connection values to
+a ConfigMap or patch status.
+
+## Database is Healthy but readiness consumers keep waiting
+
+```powershell
+kubectl get database orders -n team-payments -o yaml
+kubectl get application -n argocd payments -o yaml
+```
+
+A Healthy Database must expose current-generation `Ready=True`;
+`DatabaseReady` belongs to the bound Application. If the Database is Healthy
+but has only `DatabaseReady=True`, deploy the corrected operator so it removes
+the obsolete pre-release condition and publishes the declared Database API
+contract. Do not weaken Argo health or acceptance checks to accept the wrong
+condition type.
+
+If Pod-local `psql -U app` reports `Peer authentication failed`, do not print
+or pass the application password through workflow arguments. CNPG's postgres
+container runs as the `postgres` operating-system user. Administrative
+automation connects locally as database role `postgres`; workload SQL must
+then use `SET ROLE app`, while `pg_switch_wal()` remains a separate
+administrative statement.
+
+## Database deletion is blocked
+
+```powershell
+kubectl get database,backup.postgresql.cnpg.io -n team-payments -o yaml
+kubectl logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --tail=300
+```
+
+Deletion intentionally waits for the deterministic final Backup. Restore
+external-store connectivity and let it complete. Only when data loss is
+explicitly accepted may an administrator add
+`steadystate.dev/force-delete: "true"`. The operator never adds it
+automatically, and external objects remain after deletion.

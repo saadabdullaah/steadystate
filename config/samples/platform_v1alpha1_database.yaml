@@ -1,0 +1,15 @@
+apiVersion: platform.steadystate.dev/v1alpha1
+kind: Database
+metadata:
+  name: orders
+  namespace: team-payments
+spec:
+  engine: postgres
+  instances: 1
+  storage:
+    size: 1Gi
+    storageClassName: local-path
+  backups:
+    enabled: true
+    schedule: "0 0 2 * * *"
+    retention: 7d

@@ -46,6 +46,15 @@ spec:
             type: object
           spec:
             properties:
+              databaseRef:
+                properties:
+                  name:
+                    maxLength: 63
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               deployment:
                 default:
                   automaticRollback: true

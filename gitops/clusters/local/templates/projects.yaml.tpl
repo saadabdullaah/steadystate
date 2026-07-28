@@ -35,6 +35,8 @@ spec:
     - https://grafana.github.io/helm-charts
     - https://open-telemetry.github.io/opentelemetry-helm-charts
     - https://kyverno.github.io/kyverno/
+    - https://charts.jetstack.io
+    - https://cloudnative-pg.github.io/charts
   destinations:
     - server: https://kubernetes.default.svc
       namespace: argocd
@@ -46,6 +48,12 @@ spec:
       namespace: argo-rollouts
     - server: https://kubernetes.default.svc
       namespace: kyverno
+    - server: https://kubernetes.default.svc
+      namespace: local-path-storage
+    - server: https://kubernetes.default.svc
+      namespace: cert-manager
+    - server: https://kubernetes.default.svc
+      namespace: cnpg-system
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
@@ -61,6 +69,12 @@ spec:
       kind: MutatingPolicy
     - group: policies.kyverno.io
       kind: ValidatingPolicy
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+    - group: storage.k8s.io
+      kind: StorageClass
   namespaceResourceWhitelist:
     - group: ""
       kind: ConfigMap
@@ -90,8 +104,18 @@ spec:
       kind: Prometheus
     - group: monitoring.coreos.com
       kind: ServiceMonitor
+    - group: monitoring.coreos.com
+      kind: PodMonitor
+    - group: coordination.k8s.io
+      kind: Lease
     - group: policy
       kind: PodDisruptionBudget
+    - group: batch
+      kind: Job
+    - group: cert-manager.io
+      kind: Certificate
+    - group: cert-manager.io
+      kind: Issuer
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -101,7 +125,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-30"
 spec:
-  description: Team boundaries and namespaced SteadyState Applications only.
+  description: Team boundaries and namespaced SteadyState Databases and Applications only.
   sourceRepos:
     - {{ .Values.repoURL | quote }}
   destinations:
@@ -111,6 +135,8 @@ spec:
     - group: platform.steadystate.dev
       kind: Team
   namespaceResourceWhitelist:
+    - group: platform.steadystate.dev
+      kind: Database
     - group: platform.steadystate.dev
       kind: Application
   orphanedResources:

@@ -707,6 +707,15 @@ try {
         } else {
             'A hosted Phase 4 acceptance stage failed.'
         }
+        $registryPath = Join-Path $ArtifactRoot 'registry.json'
+        if (-not (Test-Path -LiteralPath $registryPath -PathType Leaf)) {
+            $unavailableRegistry = [ordered]@{
+                result = 'unavailable'
+                capturedAt = (Get-Date).ToUniversalTime().ToString('o')
+                reason = 'Acceptance failed before immutable registry metadata was resolved.'
+            }
+            Write-Utf8 $registryPath (($unavailableRegistry | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
+        }
         Save-FinalEvidence $state failed $message
         Write-Host 'PHASE4_FAILURE_EVIDENCE_CAPTURED' -ForegroundColor Yellow
     }

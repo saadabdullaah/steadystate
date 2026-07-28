@@ -2,7 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +20,7 @@ import (
 	"time"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -28,6 +35,7 @@ func TestLoadConfig(t *testing.T) {
 		"INJECT_LATENCY_MS":           "250",
 		"CRASH_AFTER_REQUESTS":        "42",
 		"OTEL_EXPORTER_OTLP_ENDPOINT": "otel-collector.monitoring.svc.cluster.local:4317",
+		"DATABASE_URL":                "postgresql://example.invalid/app",
 	}
 	configuration, err := loadConfig(func(key string) string { return values[key] })
 	if err != nil {
@@ -36,7 +44,8 @@ func TestLoadConfig(t *testing.T) {
 	if configuration.Name != "payments" || configuration.Namespace != "team-a" || configuration.Owner != "payments-team" ||
 		configuration.Version != "v1.2.3" || configuration.Port != 9090 || configuration.InjectErrorRate != 0.125 ||
 		configuration.InjectLatency != 250*time.Millisecond || configuration.CrashAfterRequests != 42 ||
-		configuration.OTLPEndpoint != "otel-collector.monitoring.svc.cluster.local:4317" {
+		configuration.OTLPEndpoint != "otel-collector.monitoring.svc.cluster.local:4317" ||
+		configuration.DatabaseURL != "postgresql://example.invalid/app" {
 		t.Fatalf("unexpected configuration: %#v", configuration)
 	}
 }
@@ -346,8 +355,198 @@ func TestCrashThresholdIsOneShot(t *testing.T) {
 	}
 }
 
+func TestOrdersAPIAndDatabaseSpans(t *testing.T) {
+	database := newOrdersTestDatabase(t)
+	defer closeDatabase(database)
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter), sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	defer func() { _ = provider.Shutdown(t.Context()) }()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	ready := &atomic.Bool{}
+	ready.Store(true)
+	handler := newHandlerWithRuntime(config{
+		Name: "demo", Namespace: "team-payments", Version: "v0.7.0", DatabaseURL: "postgresql://redacted",
+	}, ready, runtimeHooks{database: database, tracerProvider: provider, log: logger})
+
+	for index, item := range []string{"first", "second"} {
+		request := httptest.NewRequest(http.MethodPost, "/orders", strings.NewReader(fmt.Sprintf(`{"item":%q,"quantity":%d}`, item, index+1)))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("traceparent", "00-77777777777777777777777777777777-1111111111111111-01")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("POST /orders returned %d: %s", recorder.Code, recorder.Body.String())
+		}
+	}
+
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/orders", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("GET /orders returned %d: %s", list.Code, list.Body.String())
+	}
+	orders := []order{}
+	if err := json.Unmarshal(list.Body.Bytes(), &orders); err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 2 || orders[0].ID != 1 || orders[1].ID != 2 {
+		t.Fatalf("orders are not stable and complete: %#v", orders)
+	}
+
+	one := httptest.NewRecorder()
+	handler.ServeHTTP(one, httptest.NewRequest(http.MethodGet, "/orders/2", nil))
+	if one.Code != http.StatusOK || !strings.Contains(one.Body.String(), `"item":"second"`) {
+		t.Fatalf("GET /orders/2 returned %d: %s", one.Code, one.Body.String())
+	}
+	readiness := httptest.NewRecorder()
+	handler.ServeHTTP(readiness, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if readiness.Code != http.StatusOK {
+		t.Fatalf("database-backed readiness returned %d", readiness.Code)
+	}
+	metrics := httptest.NewRecorder()
+	handler.ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, expected := range []string{
+		`http_requests_total{application="demo",namespace="team-payments",status="200",version="v0.7.0"} 2`,
+		`http_requests_total{application="demo",namespace="team-payments",status="201",version="v0.7.0"} 2`,
+	} {
+		if !strings.Contains(metrics.Body.String(), expected) {
+			t.Errorf("database RED metrics are missing %q", expected)
+		}
+	}
+	for _, forbidden := range []string{`:"first"`, `:"second"`, "postgresql://redacted"} {
+		if strings.Contains(logs.String(), forbidden) {
+			t.Errorf("database access logs leaked %q: %s", forbidden, logs.String())
+		}
+	}
+	if !strings.Contains(logs.String(), `"route":"/orders"`) || !strings.Contains(logs.String(), `"route":"/orders/{id}"`) {
+		t.Errorf("database access logs lack normalized routes: %s", logs.String())
+	}
+
+	spans := exporter.GetSpans()
+	databaseSpans := 0
+	for _, span := range spans {
+		if strings.HasPrefix(span.Name, "postgresql ") {
+			databaseSpans++
+			encoded, err := json.Marshal(span.Attributes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(encoded)
+			for _, required := range []string{"db.operation.name", "db.collection.name", "orders"} {
+				if !strings.Contains(text, required) {
+					t.Errorf("database span %q is missing %q: %s", span.Name, required, text)
+				}
+			}
+			if strings.Contains(text, "first") || strings.Contains(text, "second") || strings.Contains(text, "redacted") {
+				t.Errorf("database span leaked a value or credential: %s", text)
+			}
+		}
+	}
+	if databaseSpans != 4 {
+		t.Fatalf("recorded %d database spans, want 4", databaseSpans)
+	}
+}
+
+func TestOrdersAPIIsAbsentWithoutDatabaseBinding(t *testing.T) {
+	handler := testRuntimeHandler(config{Name: "demo", Version: "v0.7.0"}, runtimeHooks{})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/orders", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("unbound GET /orders returned %d, want 404", recorder.Code)
+	}
+}
+
 func testRuntimeHandler(configuration config, hooks runtimeHooks) http.Handler {
 	ready := &atomic.Bool{}
 	ready.Store(true)
 	return newHandlerWithRuntime(configuration, ready, hooks)
+}
+
+var ordersDriverSequence atomic.Int64
+
+type ordersDriver struct {
+	mu     sync.Mutex
+	orders []order
+}
+
+func newOrdersTestDatabase(t *testing.T) *sql.DB {
+	t.Helper()
+	driverName := fmt.Sprintf("steadystate-orders-%d", ordersDriverSequence.Add(1))
+	sql.Register(driverName, &ordersDriver{})
+	database, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return database
+}
+
+func (value *ordersDriver) Open(string) (driver.Conn, error) {
+	return &ordersConnection{driver: value}, nil
+}
+
+type ordersConnection struct {
+	driver *ordersDriver
+}
+
+func (*ordersConnection) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("Prepare is not supported")
+}
+func (*ordersConnection) Close() error { return nil }
+func (*ordersConnection) Begin() (driver.Tx, error) {
+	return nil, errors.New("transactions are not supported")
+}
+func (*ordersConnection) Ping(context.Context) error {
+	return nil
+}
+
+func (connection *ordersConnection) QueryContext(_ context.Context, query string, arguments []driver.NamedValue) (driver.Rows, error) {
+	connection.driver.mu.Lock()
+	defer connection.driver.mu.Unlock()
+	columns := []string{"id", "item", "quantity", "created_at"}
+	switch {
+	case strings.HasPrefix(query, "INSERT INTO orders"):
+		created := order{
+			ID: int64(len(connection.driver.orders) + 1), Item: arguments[0].Value.(string),
+			Quantity: int(arguments[1].Value.(int64)), CreatedAt: time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC),
+		}
+		connection.driver.orders = append(connection.driver.orders, created)
+		return &ordersRows{columns: columns, values: [][]driver.Value{orderValues(created)}}, nil
+	case strings.Contains(query, "WHERE id = $1"):
+		id := arguments[0].Value.(int64)
+		for _, value := range connection.driver.orders {
+			if value.ID == id {
+				return &ordersRows{columns: columns, values: [][]driver.Value{orderValues(value)}}, nil
+			}
+		}
+		return &ordersRows{columns: columns}, nil
+	case strings.Contains(query, "ORDER BY id ASC"):
+		values := make([][]driver.Value, 0, len(connection.driver.orders))
+		for _, value := range connection.driver.orders {
+			values = append(values, orderValues(value))
+		}
+		return &ordersRows{columns: columns, values: values}, nil
+	default:
+		return nil, fmt.Errorf("unexpected query: %s", query)
+	}
+}
+
+func orderValues(value order) []driver.Value {
+	return []driver.Value{value.ID, value.Item, int64(value.Quantity), value.CreatedAt}
+}
+
+type ordersRows struct {
+	columns []string
+	values  [][]driver.Value
+	index   int
+}
+
+func (rows *ordersRows) Columns() []string { return rows.columns }
+func (rows *ordersRows) Close() error      { return nil }
+func (rows *ordersRows) Next(destination []driver.Value) error {
+	if rows.index >= len(rows.values) {
+		return io.EOF
+	}
+	copy(destination, rows.values[rows.index])
+	rows.index++
+	return nil
 }

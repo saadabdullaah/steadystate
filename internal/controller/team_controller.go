@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -300,6 +301,48 @@ func (r *TeamReconciler) reconcileDeletion(ctx context.Context, team *platformv1
 	if _, err := r.patchTeamStatus(ctx, team, terminatingTeamStatus(team)); err != nil {
 		return ctrl.Result{}, err
 	}
+	applications := &platformv1alpha1.ApplicationList{}
+	if err := r.List(ctx, applications, client.InNamespace(namespace.Name)); err != nil {
+		return ctrl.Result{}, err
+	}
+	if len(applications.Items) > 0 {
+		for i := range applications.Items {
+			if applications.Items[i].DeletionTimestamp.IsZero() {
+				if err := r.Delete(ctx, &applications.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, err
+				}
+			}
+		}
+		r.event(team, corev1.EventTypeNormal, "ApplicationDeletionRequested", "Waiting for Team Applications to finalize before Databases")
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+	databases := &platformv1alpha1.DatabaseList{}
+	if err := r.List(ctx, databases, client.InNamespace(namespace.Name)); err != nil {
+		return ctrl.Result{}, err
+	}
+	if len(databases.Items) > 0 {
+		for i := range databases.Items {
+			database := &databases.Items[i]
+			if strings.EqualFold(team.Annotations[platformv1alpha1.ForceDeleteAnnotationKey], "true") &&
+				!strings.EqualFold(database.Annotations[platformv1alpha1.ForceDeleteAnnotationKey], "true") {
+				before := database.DeepCopy()
+				if database.Annotations == nil {
+					database.Annotations = map[string]string{}
+				}
+				database.Annotations[platformv1alpha1.ForceDeleteAnnotationKey] = "true"
+				if err := r.Patch(ctx, database, client.MergeFrom(before)); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
+			if database.DeletionTimestamp.IsZero() {
+				if err := r.Delete(ctx, database); err != nil && !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, err
+				}
+			}
+		}
+		r.event(team, corev1.EventTypeNormal, "DatabaseDeletionRequested", "Waiting for Team Databases and final backups before Namespace deletion")
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
 	if namespace.DeletionTimestamp.IsZero() {
 		if err := r.Delete(ctx, namespace); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
@@ -421,6 +464,18 @@ func teamRequestsForObject(_ context.Context, object client.Object) []ctrlreconc
 	return []ctrlreconcile.Request{{NamespacedName: types.NamespacedName{Name: teamName}}}
 }
 
+func teamRequestForPlatformObject(_ context.Context, object client.Object) []ctrlreconcile.Request {
+	namespace := object.GetNamespace()
+	if !strings.HasPrefix(namespace, resources.TeamNamespacePrefix) {
+		return nil
+	}
+	teamName := strings.TrimPrefix(namespace, resources.TeamNamespacePrefix)
+	if teamName == "" {
+		return nil
+	}
+	return []ctrlreconcile.Request{{NamespacedName: types.NamespacedName{Name: teamName}}}
+}
+
 func (r *TeamReconciler) teamRequestsForOwnerClusterRole(ctx context.Context, object client.Object) []ctrlreconcile.Request {
 	if object.GetName() != resources.TeamOwnerName {
 		return nil
@@ -449,6 +504,8 @@ func (r *TeamReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&rbacv1.RoleBinding{}, mapper).
 		Watches(&rbacv1.ClusterRole{}, handler.EnqueueRequestsFromMapFunc(r.teamRequestsForOwnerClusterRole)).
 		Watches(&networkingv1.NetworkPolicy{}, mapper).
+		Watches(&platformv1alpha1.Application{}, handler.EnqueueRequestsFromMapFunc(teamRequestForPlatformObject)).
+		Watches(&platformv1alpha1.Database{}, handler.EnqueueRequestsFromMapFunc(teamRequestForPlatformObject)).
 		Named("team").
 		Complete(r)
 }

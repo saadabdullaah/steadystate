@@ -2,6 +2,8 @@ package gitops_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"os/exec"
@@ -37,7 +39,10 @@ func TestGitOpsRendersDeterministically(t *testing.T) {
 		"gitops/platform",
 		"gitops/platform/observability",
 		"gitops/platform/kyverno-policies",
+		"gitops/platform/data-namespaces",
+		"gitops/platform/local-path",
 		"gitops/teams/payments",
+		"gitops/databases/orders",
 		"gitops/applications/demo",
 	} {
 		arguments := []string{"build", filepath.Join(root, filepath.FromSlash(path))}
@@ -77,6 +82,8 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"https://grafana.github.io/helm-charts",
 		"https://open-telemetry.github.io/opentelemetry-helm-charts",
 		"https://kyverno.github.io/kyverno/",
+		"https://charts.jetstack.io",
+		"https://cloudnative-pg.github.io/charts",
 	})
 
 	expectedWaves := map[string]string{
@@ -135,12 +142,26 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	if err != nil || !found || len(images) != 1 || images[0] != "ghcr.io/saadabdullaah/steadystate-operator:v0.3.0" {
 		t.Fatalf("operator image override is invalid: %#v, found=%v, err=%v", images, found, err)
 	}
+	patches := nestedSlice(t, operator, "spec", "source", "kustomize", "patches")
+	if len(patches) != 1 {
+		t.Fatalf("operator environment patch is invalid: %#v", patches)
+	}
+	patch, ok := patches[0].(map[string]any)
+	if !ok {
+		t.Fatalf("operator environment patch has type %T", patches[0])
+	}
+	patchBody, ok := patch["patch"].(string)
+	if !ok || strings.Contains(patchBody, "/spec/template/spec/containers/0/env/-") ||
+		!strings.Contains(patchBody, "path: /spec/template/spec/containers/0/env") ||
+		!strings.Contains(patchBody, "name: BACKUP_STORE_ENDPOINT") {
+		t.Fatalf("operator environment patch must create the absent env list atomically: %s", patchBody)
+	}
 
 	payments := findObject(t, objects, "Application", "payments")
 	assertAutomated(t, payments, false)
 	sources := nestedSlice(t, payments, "spec", "sources")
 	if len(sources) != 2 {
-		t.Fatalf("payments has %d sources, want 2", len(sources))
+		t.Fatalf("standard-profile payments has %d sources, want Team and Application only", len(sources))
 	}
 	expectedPaths := []string{"gitops/teams/payments", "gitops/applications/demo"}
 	for index, rawSource := range sources {
@@ -159,6 +180,10 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		if err != nil || !found || annotations["steadystate.dev/source-revision"] != "$ARGOCD_APP_REVISION" {
 			t.Fatalf("source %s has invalid revision annotations: %#v", expectedPaths[index], annotations)
 		}
+	}
+	applicationSource := sources[1].(map[string]any)
+	if _, found, err := unstructured.NestedSlice(applicationSource, "kustomize", "patches"); err != nil || found {
+		t.Fatalf("standard profile must not carry a database binding patch: found=%v err=%v", found, err)
 	}
 	options, found, err := unstructured.NestedStringSlice(payments, "spec", "syncPolicy", "syncOptions")
 	if err != nil || !found || !contains(options, "RespectIgnoreDifferences=true") {
@@ -233,6 +258,9 @@ func TestProjectRestrictions(t *testing.T) {
 		"policies.kyverno.io/ImageValidatingPolicy",
 		"policies.kyverno.io/MutatingPolicy",
 		"policies.kyverno.io/ValidatingPolicy",
+		"admissionregistration.k8s.io/MutatingWebhookConfiguration",
+		"admissionregistration.k8s.io/ValidatingWebhookConfiguration",
+		"storage.k8s.io/StorageClass",
 		"/ConfigMap",
 		"/Secret",
 		"/ServiceAccount",
@@ -247,18 +275,23 @@ func TestProjectRestrictions(t *testing.T) {
 		"monitoring.coreos.com/Alertmanager",
 		"monitoring.coreos.com/Prometheus",
 		"monitoring.coreos.com/ServiceMonitor",
+		"monitoring.coreos.com/PodMonitor",
+		"coordination.k8s.io/Lease",
 		"policy/PodDisruptionBudget",
+		"batch/Job",
+		"cert-manager.io/Certificate",
+		"cert-manager.io/Issuer",
 	})
 	platformDestinations := nestedSlice(t, platform, "spec", "destinations")
 	actualDestinations := make([]string, 0, len(platformDestinations))
 	for _, raw := range platformDestinations {
 		actualDestinations = append(actualDestinations, raw.(map[string]any)["namespace"].(string))
 	}
-	assertExactSet(t, actualDestinations, []string{"argocd", "steadystate-system", "monitoring", "argo-rollouts", "kyverno"})
+	assertExactSet(t, actualDestinations, []string{"argocd", "steadystate-system", "monitoring", "argo-rollouts", "kyverno", "local-path-storage", "cert-manager", "cnpg-system"})
 
 	tenant := findObject(t, objects, "AppProject", "tenant")
 	assertExactSet(t, resourceKinds(t, tenant, "clusterResourceWhitelist"), []string{"platform.steadystate.dev/Team"})
-	assertExactSet(t, resourceKinds(t, tenant, "namespaceResourceWhitelist"), []string{"platform.steadystate.dev/Application"})
+	assertExactSet(t, resourceKinds(t, tenant, "namespaceResourceWhitelist"), []string{"platform.steadystate.dev/Application", "platform.steadystate.dev/Database"})
 	warn, found, err := unstructured.NestedBool(tenant, "spec", "orphanedResources", "warn")
 	if err != nil || !found || warn {
 		t.Fatalf("tenant orphan warning must be explicitly false: found=%v value=%v err=%v", found, warn, err)
@@ -278,13 +311,21 @@ func TestTenantLeavesContainOnlyOwnedCustomResources(t *testing.T) {
 		t.Fatalf("Team leaf rendered unexpected objects: %#v", objectIdentities(teamObjects))
 	}
 	assertAnnotation(t, teamObjects[0], "argocd.argoproj.io/sync-wave", "-1")
+	assertString(t, teamObjects[0], "4Gi", "spec", "quota", "memory")
+
+	databaseObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "databases", "orders")))
+	if len(databaseObjects) != 1 || objectString(databaseObjects[0], "kind") != "Database" ||
+		objectString(databaseObjects[0], "apiVersion") != "platform.steadystate.dev/v1alpha1" {
+		t.Fatalf("Database leaf rendered unexpected objects: %#v", objectIdentities(databaseObjects))
+	}
+	assertAnnotation(t, databaseObjects[0], "argocd.argoproj.io/sync-wave", "0")
 
 	applicationObjects := decodeManifests(t, run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "applications", "demo")))
 	if len(applicationObjects) != 1 || objectString(applicationObjects[0], "kind") != "Application" ||
 		objectString(applicationObjects[0], "apiVersion") != "platform.steadystate.dev/v1alpha1" {
 		t.Fatalf("Application leaf rendered unexpected objects: %#v", objectIdentities(applicationObjects))
 	}
-	assertAnnotation(t, applicationObjects[0], "argocd.argoproj.io/sync-wave", "0")
+	assertAnnotation(t, applicationObjects[0], "argocd.argoproj.io/sync-wave", "1")
 }
 
 func TestArgoConfigurationContracts(t *testing.T) {
@@ -537,6 +578,7 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 		"https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main",
 		"https://token.actions.githubusercontent.com",
 		"https://rekor.sigstore.dev",
+		"exclude-cloudnative-pg",
 	} {
 		if !strings.Contains(imagePolicyText, identity) {
 			t.Errorf("ImageValidatingPolicy is missing trust contract %q", identity)
@@ -550,11 +592,33 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 	if !strings.Contains(staticScript, "exit 0") {
 		t.Fatal("the static policy script must clear expected native denial exit codes on success")
 	}
+	safetyPolicyText := string(readFile(t, filepath.Join(policyPath, "universal-team-safety.yaml")))
+	for _, token := range []string{
+		"CloudNativePG Pods must have exact operator ownership and frozen tag-plus-digest images.",
+		"object.spec.serviceAccountName == object.metadata.labels['cnpg.io/cluster']",
+		"['import', 'initdb', 'pgbasebackup', 'full-recovery', 'join', 'snapshot-recovery']",
+		"owner.apiVersion == 'batch/v1'",
+		"ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb",
+	} {
+		if !strings.Contains(safetyPolicyText, token) {
+			t.Errorf("Universal Team safety is missing CNPG contract %q", token)
+		}
+	}
+	for _, valuesPath := range []string{
+		filepath.Join(root, "gitops", "platform", "cloudnative-pg", "values.yaml"),
+		filepath.Join(root, "gitops", "platform", "barman-cloud", "values.yaml"),
+	} {
+		values := string(readFile(t, valuesPath))
+		if !strings.Contains(values, "@sha256:") {
+			t.Errorf("%s must pin its injected operand image by tag and digest", valuesPath)
+		}
+	}
 	boundaries := string(readFile(t, filepath.Join(root, "docs", "security", "kyverno-policy-boundaries.md")))
 	for _, token := range []string{
-		"No Phase 7 exception exists in the foundation",
-		"exact operator-managed ServiceAccount",
-		"pinned repositories and digests",
+		"excludes CloudNativePG-managed Pods",
+		"operator-generated ServiceAccount",
+		"`snapshot-recovery`",
+		"positive fixture",
 		"namespace-wide exemptions",
 		"user-supplied bypass labels",
 	} {
@@ -601,13 +665,15 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 3 {
+	if len(parameters) != 5 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
 		"gitRevision":             "$ARGOCD_APP_REVISION",
 		"enableTelemetryPipeline": "true",
 		"enableSecurity":          "true",
+		"enableDataFoundation":    "false",
+		"backupStoreEndpoint":     "http://172.30.240.10:8333",
 	}
 	for _, raw := range parameters {
 		parameter := raw.(map[string]any)
@@ -635,12 +701,193 @@ func TestGitOpsCommandsAreMirrored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery", "verify-observability", "test-observability", "phase5-acceptance"} {
+	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery", "verify-observability", "test-observability", "phase5-acceptance", "start-backup-store", "stop-backup-store", "verify-data", "test-data-recovery", "phase7-acceptance"} {
 		if !strings.Contains(string(makefile), command) {
 			t.Errorf("Makefile is missing %s", command)
 		}
 		if !strings.Contains(string(devScript), "'"+command+"'") {
 			t.Errorf("scripts/dev.ps1 is missing %s", command)
+		}
+	}
+}
+
+func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
+	root := repositoryRoot(t)
+	rendered := run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--namespace", "argocd",
+		"--set-string", "gitRevision="+testRevision,
+		"--set", "enableDataFoundation=true",
+	)
+	objects := decodeManifests(t, rendered)
+	if len(objects) != 19 {
+		t.Fatalf("full data foundation rendered %d objects, want 19", len(objects))
+	}
+	expectedWaves := map[string]string{
+		"data-namespaces":    "-10",
+		"local-path-storage": "-9",
+		"cert-manager":       "-8",
+		"cloudnative-pg":     "-7",
+		"barman-cloud":       "-6",
+	}
+	for name, wave := range expectedWaves {
+		assertAnnotation(t, findObject(t, objects, "Application", name), "argocd.argoproj.io/sync-wave", wave)
+	}
+	assertAnnotation(t, findObject(t, objects, "Application", "steadystate-operator"), "argocd.argoproj.io/sync-wave", "-5")
+	assertExternalChartApplication(t, objects, "cert-manager", "https://charts.jetstack.io", "cert-manager", "v1.21.0", "gitops/platform/cert-manager/values.yaml", "cert-manager")
+	assertExternalChartApplication(t, objects, "cloudnative-pg", "https://cloudnative-pg.github.io/charts", "cloudnative-pg", "0.29.0", "gitops/platform/cloudnative-pg/values.yaml", "cnpg-system")
+	assertExternalChartApplication(t, objects, "barman-cloud", "https://cloudnative-pg.github.io/charts", "plugin-barman-cloud", "0.7.0", "gitops/platform/barman-cloud/values.yaml", "cnpg-system")
+	payments := findObject(t, objects, "Application", "payments")
+	sources := nestedSlice(t, payments, "spec", "sources")
+	if len(sources) != 3 {
+		t.Fatalf("full-profile payments has %d sources, want Team, Database, and Application", len(sources))
+	}
+	if objectString(sources[1].(map[string]any), "path") != "gitops/databases/orders" {
+		t.Fatalf("full profile is missing the Database source: %#v", sources[1])
+	}
+	databasePatches := nestedSlice(t, sources[2].(map[string]any), "kustomize", "patches")
+	if len(databasePatches) != 1 {
+		t.Fatalf("full profile must add exactly one database binding patch: %#v", databasePatches)
+	}
+	databasePatch, ok := databasePatches[0].(map[string]any)
+	if !ok {
+		t.Fatalf("full-profile database patch has type %T", databasePatches[0])
+	}
+	databasePatchBody, ok := databasePatch["patch"].(string)
+	if !ok || !strings.Contains(databasePatchBody, "path: /spec/databaseRef") ||
+		!strings.Contains(databasePatchBody, "name: orders") ||
+		strings.Contains(databasePatchBody, "op: remove") {
+		t.Fatalf("full profile database binding patch is invalid: %q", databasePatchBody)
+	}
+
+	manifest := readFile(t, filepath.Join(root, "gitops", "platform", "local-path", "local-path-storage.yaml"))
+	sum := sha256.Sum256(manifest)
+	if actual := hex.EncodeToString(sum[:]); actual != "a5b4b057e4e400a2ca7188b03dc11303f874bfe600fc837d5446d86b3d13e26c" {
+		t.Fatalf("vendored local-path manifest checksum = %s", actual)
+	}
+	localPathRendered := run(t, root, "kustomize", "build", filepath.Join(root, "gitops", "platform", "local-path"))
+	localPath := string(localPathRendered)
+	if !strings.Contains(localPath, `storageclass.kubernetes.io/is-default-class: "true"`) {
+		t.Fatal("local-path StorageClass is not rendered as the local default")
+	}
+	for _, object := range decodeManifests(t, localPathRendered) {
+		if objectString(object, "kind") == "Namespace" {
+			t.Fatal("local-path leaf must not compete with data-namespaces for Namespace ownership")
+		}
+	}
+	certManagerValues := string(readFile(t, filepath.Join(root, "gitops", "platform", "cert-manager", "values.yaml")))
+	if !strings.Contains(certManagerValues, "leaderElection:") || !strings.Contains(certManagerValues, "namespace: cert-manager") {
+		t.Fatal("cert-manager leader election must remain inside the permitted cert-manager namespace")
+	}
+}
+
+func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) {
+	root := repositoryRoot(t)
+	phase4 := string(readFile(t, filepath.Join(root, "scripts", "phase4-acceptance.ps1")))
+	if !strings.Contains(phase4, "Acceptance failed before immutable registry metadata was resolved.") {
+		t.Fatal("Phase 4 failure evidence must cover pre-registry preparation failures")
+	}
+	phase5 := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase5.yml")))
+	for _, contract := range []string{
+		"id: deploy",
+		"steps.deploy.outcome != 'skipped' && steps.finalize.outcome != 'success'",
+		"always() && steps.deploy.outcome != 'skipped'",
+	} {
+		if !strings.Contains(phase5, contract) {
+			t.Fatalf("Phase 5 deployment-failure evidence is missing %q", contract)
+		}
+	}
+	ci := string(readFile(t, filepath.Join(root, ".github", "workflows", "ci.yml")))
+	if !strings.Contains(ci, "tests/security|gitops/platform/local-path/local-path-storage.yaml") {
+		t.Fatal("Checkov must exclude only the checksum-pinned local-path source fixture")
+	}
+	installTools := string(readFile(t, filepath.Join(root, "scripts", "install-tools.ps1")))
+	if !strings.Contains(installTools, "Invoke-Download -Url $ChecksumUrl -Destination $checksumPath") ||
+		!strings.Contains(installTools, "for ($attempt = 1; $attempt -le 5; $attempt++)") {
+		t.Fatal("PowerShell checksum downloads must use bounded retries")
+	}
+	phase7Foundation := string(readFile(t, filepath.Join(root, "scripts", "phase7-foundation.ps1")))
+	if !strings.Contains(phase7Foundation, "Wait-ArgoApplicationsHealthy @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')") ||
+		strings.Contains(phase7Foundation, `Invoke-Kubectl wait -n argocd "--for=jsonpath={.status.health.status}=Healthy"`) {
+		t.Fatal("Phase 7 foundation must tolerate later-wave Argo Applications not existing yet")
+	}
+	for _, contract := range []string{
+		"label=io.x-k8s.kind.cluster=steadystate",
+		"oomKilled={{.State.OOMKilled}}",
+		"docker system df",
+		"$Prefix-cnpg-job-pods.yaml",
+		"$Prefix-cnpg-job-pods.log",
+		"kubectl --request-timeout=10s",
+	} {
+		if !strings.Contains(phase7Foundation, contract) {
+			t.Fatalf("Phase 7 failure diagnostics are missing %q", contract)
+		}
+	}
+	for _, contract := range []string{
+		"-U postgres -d app -qAtc \"SET ROLE app; $SQL\"",
+		"Invoke-AdminPsql $clusterName 'SELECT pg_switch_wal();'",
+		"PostgreSQL administrative compatibility command failed.",
+		"-Action Inventory",
+		"$serverInventory",
+		"$baseInventory",
+		"Invoke-Kubectl annotate database $DatabaseName -n $Namespace 'steadystate.dev/force-delete=true' --overwrite",
+	} {
+		if !strings.Contains(phase7Foundation, contract) {
+			t.Fatalf("Phase 7 PostgreSQL compatibility boundary is missing %q", contract)
+		}
+	}
+	if strings.Contains(phase7Foundation, "-U app") {
+		t.Fatal("Phase 7 foundation must not use application-role peer authentication from the postgres container")
+	}
+	if strings.Contains(phase7Foundation, "find /data") {
+		t.Fatal("Phase 7 foundation must inspect logical object keys through the SeaweedFS filer, not physical volume files")
+	}
+	if strings.Contains(phase7Foundation, "$document.metadata.annotations.'steadystate.dev/force-delete'") {
+		t.Fatal("Phase 7 disposable cleanup must not add a missing PSCustomObject annotation through property assignment")
+	}
+	backupStore := string(readFile(t, filepath.Join(root, "scripts", "backup-store.ps1")))
+	for _, contract := range []string{
+		"'Inventory'",
+		"Get-BucketObjectInventory",
+		"http://127.0.0.1:8888$Path/?pretty=y",
+		"[uint64]2147483648",
+		"$fullPath.Substring($bucketRoot.Length + 1)",
+	} {
+		if !strings.Contains(backupStore, contract) {
+			t.Fatalf("SeaweedFS logical inventory is missing %q", contract)
+		}
+	}
+	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
+	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline") ||
+		strings.Contains(phase7Workflow, "-DisableSecurity") {
+		t.Fatal("Phase 7 compatibility must isolate the data stack while retaining monitoring and Kyverno")
+	}
+	for _, contract := range []string{"success-cnpg-job-pods.yaml", "success-cnpg-job-pods.log"} {
+		if !strings.Contains(phase7Workflow, contract) {
+			t.Fatalf("Phase 7 success evidence must require %q", contract)
+		}
+	}
+	phase7Acceptance := string(readFile(t, filepath.Join(root, "scripts", "phase7-acceptance.ps1")))
+	if !strings.Contains(phase7Acceptance, "-U postgres -d app -qAtc 'SELECT pg_switch_wal();'") ||
+		strings.Contains(phase7Acceptance, "-U app") {
+		t.Fatal("Phase 7 acceptance must perform the administrative WAL switch through local postgres peer authentication")
+	}
+	if !strings.Contains(phase7Acceptance, "-Action Inventory") ||
+		!strings.Contains(phase7Acceptance, "$sourceBackupServerName") ||
+		!strings.Contains(phase7Acceptance, "$sourceRetainedObjects") ||
+		!strings.Contains(phase7Acceptance, "$recoveryRetainedObjects") ||
+		strings.Contains(phase7Acceptance, "find /data") {
+		t.Fatal("Phase 7 acceptance must verify logical base/WAL object keys for the active backup-server lifetime")
+	}
+	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
+	for _, contract := range []string{
+		"id: KSV-0041\n    paths:\n      - config/rbac/role.yaml",
+		"id: KSV-0014\n    paths:\n      - gitops/platform/local-path/local-path-storage.yaml",
+		"id: KSV-0118\n    paths:\n      - gitops/platform/local-path/local-path-storage.yaml",
+		"expired_at: 2027-07-26",
+	} {
+		if !strings.Contains(ignores, contract) {
+			t.Fatalf("time-bounded Phase 7 scanner exception is missing %q", contract)
 		}
 	}
 }
@@ -672,7 +919,7 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 
 	for _, command := range []string{
 		"steadystate-root -n argocd --ignore-not-found=true --wait=true --timeout=60s",
-		"payments kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s",
+		"payments barman-cloud cloudnative-pg cert-manager local-path-storage data-namespaces kyverno-policies alloy otel-collector tempo loki monitoring argo-rollouts -n argocd --ignore-not-found=true --wait=true --timeout=180s",
 		"kyverno -n argocd --ignore-not-found=true --wait=true --timeout=180s",
 		"applications.platform.steadystate.dev --all --all-namespaces --ignore-not-found=true --wait=true --timeout=180s",
 		"teams.platform.steadystate.dev --all --ignore-not-found=true --wait=true --timeout=180s",
@@ -681,7 +928,7 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 		"config/default') --ignore-not-found=true --wait=true --timeout=180s",
 		"validatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno",
 		"mutatingwebhookconfiguration -l app.kubernetes.io/part-of=kyverno",
-		"namespace monitoring argo-rollouts kyverno --ignore-not-found=true --wait=true --timeout=180s",
+		"namespace monitoring argo-rollouts kyverno cnpg-system cert-manager local-path-storage --ignore-not-found=true --wait=true --timeout=180s",
 		"validatingpolicies.policies.kyverno.io",
 	} {
 		if !strings.Contains(text, command) {
@@ -879,6 +1126,8 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 		"metrics/memory.json",
 		"Set-AcceptanceStage",
 		"currentStage",
+		"Invoke-GrafanaRequest",
+		"did not succeed within",
 		"--request-timeout=20s",
 		"Save-ClusterEvidence",
 		"kubectl patch applications.platform.steadystate.dev telemetry",
@@ -1102,7 +1351,7 @@ func TestPhase5ObservabilityFoundationContracts(t *testing.T) {
 		}
 	}
 	script := string(readFile(t, filepath.Join(root, "scripts", "gitops.ps1")))
-	for _, token := range []string{"Assert-ChartChecksum", "helm pull", "LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256"} {
+	for _, token := range []string{"Assert-ChartChecksum", "Invoke-WithRetry", "MaximumAttempts = 3", "helm pull", "LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256"} {
 		if !strings.Contains(script, token) {
 			t.Errorf("GitOps verification is missing %q", token)
 		}
@@ -1119,8 +1368,8 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, token := range []string{
 		"name: Phase 4 acceptance",
 		"timeout-minutes: 60",
-		"timeout --signal=TERM --kill-after=30s 21m vhs docs/demonstrations/phase4-canary-promotion.tape",
-		"timeout --signal=TERM --kill-after=30s 29m vhs docs/demonstrations/phase4-automatic-rollback.tape",
+		"timeout --signal=TERM --kill-after=30s 14m vhs docs/demonstrations/phase4-canary-promotion.tape",
+		"timeout --signal=TERM --kill-after=30s 17m vhs docs/demonstrations/phase4-automatic-rollback.tape",
 		"cancel-in-progress: false",
 		"phase4-acceptance-${{ github.sha }}",
 		"if-no-files-found: error",
@@ -1240,16 +1489,36 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, tape := range []struct {
 		content string
 		result  string
+		prefix  string
 		timeout string
+		inner   string
 		output  string
 	}{
-		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "Set WaitTimeout 20m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
-		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "Set WaitTimeout 28m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
+		{promotionTape, "PHASE4_PROMOTION_RESULT_(PASSED|FAILED)", "PHASE4_PROMOTION_RESULT", "Set WaitTimeout 13m", "timeout --signal=TERM --kill-after=10s 12m", "Output .artifacts/phase4/acceptance/phase4-canary-promotion.gif"},
+		{rollbackTape, "PHASE4_ROLLBACK_RESULT_(PASSED|FAILED)", "PHASE4_ROLLBACK_RESULT", "Set WaitTimeout 16m", "timeout --signal=TERM --kill-after=10s 15m", "Output .artifacts/phase4/acceptance/phase4-automatic-rollback.gif"},
 	} {
-		for _, token := range []string{tape.output, tape.timeout, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-recording.ps1", "Wait+Screen", tape.result} {
+		for _, token := range []string{tape.output, tape.timeout, tape.inner, "Set Framerate 2", "Set PlaybackSpeed 8.0", "scripts/phase4-acceptance.ps1", "Wait+Screen /", tape.result, "result=FAILED; if ", "then result=PASSED; fi; clear; echo ", tape.prefix + "_$result"} {
 			if !strings.Contains(tape.content, token) {
 				t.Errorf("Phase 4 VHS tape is missing %q", token)
 			}
+		}
+		typeLine := ""
+		for _, line := range strings.Split(tape.content, "\n") {
+			if strings.HasPrefix(line, "Type ") {
+				typeLine = line
+				break
+			}
+		}
+		if typeLine == "" {
+			t.Error("Phase 4 VHS tape is missing its acceptance command")
+		}
+		for _, terminalMarker := range []string{tape.prefix + "_PASSED", tape.prefix + "_FAILED"} {
+			if strings.Contains(typeLine, terminalMarker) {
+				t.Errorf("Phase 4 VHS command contains terminal marker %q and can satisfy its own screen wait", terminalMarker)
+			}
+		}
+		if strings.Contains(tape.content, "\nWait /") || strings.Contains(tape.content, "Wait+Line") {
+			t.Error("Phase 4 VHS must scan the whole screen instead of only the terminal's last line")
 		}
 		if strings.Contains(tape.content, "Output docs/demonstrations/") {
 			t.Error("Phase 4 VHS output must not modify tracked demonstration files during Git delivery")

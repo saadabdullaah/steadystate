@@ -219,3 +219,304 @@
 - All seven security checks passed. The admitted workload was rewritten to the verified immutable digest, unsigned and wrong-identity images were denied, unsafe Pod fixtures and CNPG-label spoofing were denied, `SecurityPolicyReady` preserved the healthy tuple, and SOPS decryption left no tracked plaintext.
 - Evidence retained 178 diagnostic files. Kyverno used 220,540,928 bytes and the standard profile used 6,059,945,984 bytes, within the unchanged 500 MiB and 7 GiB budgets. Evidence JSON SHA-256 is `b98d06b3035af17e3e4bc3a589cac06c7c5bf7c852b539e2ad1688cbba199fec`; the 31,604-byte GIF SHA-256 is `1d6fc52a43ccf3815e3042bb06e28aebc987566c0f0a8fb427f71a431013b246`.
 - Published annotated tag and GitHub release [`v0.6.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.6.0) from the exact validated commit with the GIF, evidence JSON, and both SPDX SBOMs attached. No remote Phase 6 branch or PR remains; Dependabot PR #42 stays separate.
+
+## 2026-07-26 - Phase 7 data and recovery release candidate
+
+- Added exact full-profile pins for local-path-provisioner, cert-manager,
+  CloudNativePG, Barman Cloud Plugin, PostgreSQL, and SeaweedFS, including
+  chart/manifest/CRD integrity and a mandatory hosted compatibility gate.
+- Added SOPS-encrypted backup credentials and an exact-name, loopback-only
+  SeaweedFS lifecycle whose named volume is preserved unless purge is
+  explicit.
+- Added the `Database` API, deterministic CNPG/Barman/monitoring/network
+  resources, UID-derived archives, Argo health/waves/project boundaries,
+  controller watches/status/drift repair, backup-first finalization, ordered
+  Team deletion, and the emergency force-delete contract.
+- Activated `Application.spec.databaseRef`, `DatabaseReady`, explicit
+  SecretKeyRefs, database NetworkPolicies, and the demo orders API with
+  database-aware readiness and value-free spans.
+- Added the full disaster-recovery workflow: signed image, 100 acknowledged
+  orders, WAL/base backup, complete kind destruction, Git-only recovery,
+  exact checksum, RTO/RPO, backup alert/recovery, final backup, retained
+  objects, budgets, redacted diagnostics, and VHS evidence.
+- Initial foundation commit is `7d5b6b7`. PR, hosted artifact, signed image,
+  generated delivery PR, exact-main gates, tag, and release identifiers will
+  be recorded after validation. Phase 7 is not yet published.
+
+### Draft validation
+
+- Opened consolidated draft PR [#47](https://github.com/saadabdullaah/steadystate/pull/47),
+  `feat: complete Phase 7 data and recovery`, from
+  `phase-7/storage-foundation`. The first head combined foundation commit
+  `7d5b6b7` and implementation commit `afdfb4d`.
+- Initial CI run
+  [30205678023](https://github.com/saadabdullaah/steadystate/actions/runs/30205678023)
+  passed quality, Windows, envtest, and kind-smoke. Security correctly failed
+  on two high-entropy test SHA fixtures; the unpublished implementation
+  commit is being rewritten with deterministic low-entropy fixtures rather
+  than adding a scanner exception.
+- Phase 4 run
+  [30205678008](https://github.com/saadabdullaah/steadystate/actions/runs/30205678008)
+  and Phase 5 run
+  [30205678009](https://github.com/saadabdullaah/steadystate/actions/runs/30205678009)
+  retained diagnostics showing that the operator Argo child could not render:
+  its JSON patch appended to an absent container `env` list. The correction
+  creates that list atomically and adds a render-contract regression test.
+- Phase 7 foundation run
+  [30205678027](https://github.com/saadabdullaah/steadystate/actions/runs/30205678027)
+  proved the exact SeaweedFS image started and wrote its named volume, but the
+  health check incorrectly probed the authenticated S3 root. It now uses the
+  image's internal master `/cluster/status` readiness endpoint while keeping
+  the S3 port loopback-only. Phase 6 compatibility run
+  [30205678031](https://github.com/saadabdullaah/steadystate/actions/runs/30205678031)
+  passed unchanged.
+- Corrected run, artifact, and final commit identifiers remain pending; this
+  section will be completed rather than replaced after hosted validation.
+- Corrected head `70dbb3b` passed quality, Windows, envtest, kind-smoke, and
+  Phase 6 compatibility in runs
+  [30208021265](https://github.com/saadabdullaah/steadystate/actions/runs/30208021265)
+  and
+  [30208021240](https://github.com/saadabdullaah/steadystate/actions/runs/30208021240).
+  The operator render and SeaweedFS readiness corrections both worked.
+- Phase 4 run
+  [30208021246](https://github.com/saadabdullaah/steadystate/actions/runs/30208021246)
+  and Phase 5 run
+  [30208021340](https://github.com/saadabdullaah/steadystate/actions/runs/30208021340)
+  then exposed a profile-boundary error: standard-profile tenant rendering
+  included the Phase 7 Database and `databaseRef`, correctly degrading without
+  the full data stack. Standard rendering now contains only Team/Application
+  intent and removes the binding; the full profile retains all three sources.
+- Phase 7 foundation run
+  [30208021244](https://github.com/saadabdullaah/steadystate/actions/runs/30208021244)
+  reached the healthy external store and full GitOps graph, then cert-manager's
+  default `kube-system` leader-election resources were rejected by the
+  restricted platform project. Exact chart values now keep leader election in
+  `cert-manager`; duplicate local-path Namespace ownership is also removed.
+- CI security retained report artifact `8633670383`. Trivy identified the
+  Database controller's required Secret-copy permission and two findings in
+  the byte-exact upstream local-path manifest. Time-bounded, path-specific
+  exceptions document those required trust boundaries without weakening
+  application policy or changing the checksum-pinned manifest.
+- Corrected head `f28b59a` passed Windows, envtest, kind-smoke, Phase 5
+  acceptance, and Phase 6 compatibility in runs
+  [30213150530](https://github.com/saadabdullaah/steadystate/actions/runs/30213150530),
+  [30213150482](https://github.com/saadabdullaah/steadystate/actions/runs/30213150482),
+  and
+  [30213150474](https://github.com/saadabdullaah/steadystate/actions/runs/30213150474).
+- Quality failed before repository checks because the Kubernetes checksum
+  download received a connection reset. All PowerShell checksum and binary
+  downloads now share the existing bounded five-attempt retry contract.
+- Security artifact `8635080653` showed Trivy, Gosec, Govulncheck, Gitleaks,
+  and Kyverno gates passing. Checkov's 19 findings were all against the
+  byte-exact upstream local-path manifest. Checkov now excludes only that
+  immutable source fixture; checksum, Kustomize rendering, namespace
+  ownership, and platform-boundary tests remain blocking.
+- Phase 4 artifact `8635247414` from run
+  [30213150538](https://github.com/saadabdullaah/steadystate/actions/runs/30213150538)
+  proved every platform child Healthy but captured a deterministic Kustomize
+  comparison error: the standard-profile remove patch targeted a
+  `databaseRef` already removed by the acceptance branch. The reusable demo
+  leaf now omits the binding, and only the full profile adds it.
+- Phase 7 artifact `8635239188` from run
+  [30213150486](https://github.com/saadabdullaah/steadystate/actions/runs/30213150486)
+  proved bootstrap, the exact backup store, branch images, and full GitOps
+  deployment. The compatibility script then queried the later-wave
+  `cloudnative-pg` Application before Argo created it. Its bounded wait now
+  tolerates absence while waves advance and requires eventual Synced/Healthy
+  state rather than failing immediately.
+- Corrected head `cb10021` passed all five CI jobs, Phase 4 acceptance, Phase 5
+  acceptance, and Phase 6 compatibility in runs
+  [30214986778](https://github.com/saadabdullaah/steadystate/actions/runs/30214986778),
+  [30214986783](https://github.com/saadabdullaah/steadystate/actions/runs/30214986783),
+  [30214986781](https://github.com/saadabdullaah/steadystate/actions/runs/30214986781),
+  and
+  [30214986732](https://github.com/saadabdullaah/steadystate/actions/runs/30214986732).
+- Phase 7 run
+  [30214986776](https://github.com/saadabdullaah/steadystate/actions/runs/30214986776)
+  and artifact `8635863984` showed SeaweedFS remained healthy while every
+  Kubernetes diagnostic failed with API-server EOF/reset errors before the
+  Database proof began. This was full-graph runner pressure, not a backup or
+  restore assertion. The focused foundation job now omits the separately
+  validated Loki/Tempo/Alloy/OTel pipeline while retaining Prometheus,
+  Kyverno, CNPG, Barman, PostgreSQL, and SeaweedFS. Failure evidence now also
+  records exact kind container state/OOM flags, resource use, and Docker disk
+  consumption.
+- Corrected head `d02f8b1` passed all five CI jobs, Phase 4 acceptance,
+  Phase 5 acceptance, and Phase 6 compatibility. Phase 7 run
+  [30217802874](https://github.com/saadabdullaah/steadystate/actions/runs/30217802874)
+  and artifact `8636565821` proved that the focused full-profile graph kept
+  every kind node running without OOM, installed the complete data stack, and
+  reached the real Database reconciliation path.
+- That proof exposed a controller defect rather than an infrastructure
+  failure: create-on-not-found reconciliation initialized external resources
+  without the desired name and namespace, producing
+  `resource name may not be empty`. The correction preserves external-child
+  identity, keeps unstructured metadata JSON-compatible, and adds a direct
+  absent-child regression test. A corrected compatibility artifact remains
+  required before Phase 7 can close.
+- Head `3b69183` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 7 run
+  [30220026714](https://github.com/saadabdullaah/steadystate/actions/runs/30220026714)
+  and artifact `8637197321` proved the identity correction and reached CNPG
+  admission. CNPG then correctly rejected the digest-only PostgreSQL operand
+  because it could not detect image upgrades. The frozen tag and digest are
+  now combined as `18.4-system-trixie@sha256:...` everywhere: generated
+  Cluster, version contract, Kyverno allowlist, acceptance assertion, and
+  tests.
+- Phase 4 run
+  [30220026723](https://github.com/saadabdullaah/steadystate/actions/runs/30220026723)
+  and artifact `8637268709` passed the complete product proof through automatic
+  promotion, exact 10/25/50/100 traffic measurements, provenance, and
+  zero-outage assertions. Only VHS missed the two-second colored completion
+  marker and reached its tape timeout. Both Phase 4 tapes now wait on a plain
+  last-line marker that remains visible for ten seconds using syntax supported
+  by the pinned VHS `0.11.0`.
+- Head `20c49e2` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 4 run
+  [30231244539](https://github.com/saadabdullaah/steadystate/actions/runs/30231244539)
+  again passed the complete promotion proof; its artifact `8640504482`
+  confirmed the child marker was present only in redirected output while the
+  VHS terminal remained at a prompt. The tapes now emit the authoritative
+  pass/fail marker from their own shell after the wrapper exits.
+- Phase 7 run
+  [30231244531](https://github.com/saadabdullaah/steadystate/actions/runs/30231244531)
+  and artifact `8640491291` proved the tagged immutable PostgreSQL operand was
+  admitted and CNPG initialized both real Cluster resources. Kyverno then
+  denied their Job-owned initdb Pods because the Phase 6 image exception only
+  recognized direct Cluster ownership. The corrected boundary admits only the
+  exact CNPG `1.30.0` bootstrap/recovery roles, labels, Cluster ServiceAccount,
+  owner naming, and frozen PostgreSQL, bootstrap-controller, and Barman
+  images; universal Team safety and the forged-label regression remain
+  enforced.
+- Head `c97e7a5` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 7 run
+  [30256491321](https://github.com/saadabdullaah/steadystate/actions/runs/30256491321)
+  and artifact `8649843581` showed CNPG accepted the exact identity and
+  bootstrapped both Clusters, but Kyverno's ImageValidatingPolicy required its
+  internal verification-outcomes annotation before applying the non-demo
+  exception. CNPG and Barman chart values now inject exact tag-plus-digest
+  images; their Pods bypass the demo-image mutator/verifier and are instead
+  admitted only by the exact CNPG clause in universal Team safety.
+- Phase 4 run
+  [30256491215](https://github.com/saadabdullaah/steadystate/actions/runs/30256491215)
+  reached only the VHS wait timeout. The tapes now run the real acceptance
+  stage directly under a bounded Unix timeout and emit their result from the
+  controlling shell, eliminating the nested redirected-process boundary.
+- Head `b34e0bf` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 4 run
+  [30261883299](https://github.com/saadabdullaah/steadystate/actions/runs/30261883299)
+  proved the complete promotion path in 8.5 minutes, including exact
+  10/25/50/100 traffic shares and provenance. Pinned VHS still ignored the
+  terminal marker, so recordings now use bounded empirical sleeps while the
+  immediately following state gate remains authoritative.
+- Phase 7 run
+  [30261883285](https://github.com/saadabdullaah/steadystate/actions/runs/30261883285)
+  and artifact `8651903691` proved admission, immutable image pulls, and CNPG
+  initdb execution. The init Pods then repeatedly errored because their egress
+  policy permitted only SeaweedFS and blocked the Kubernetes API required by
+  CNPG's in-Pod manager. The corrected policy adds only API-service,
+  kube-apiserver, and same-Cluster PostgreSQL/manager paths; failure evidence
+  now retains every CNPG job Pod object and container log.
+- Head `d9835c6` again passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 7 run
+  [30273988013](https://github.com/saadabdullaah/steadystate/actions/runs/30273988013)
+  and artifact `8657101498` supplied the definitive initdb log:
+  `dial tcp 10.96.0.1:443: i/o timeout`. Calico evaluates the kind Service
+  path after DNAT, where the endpoint is a private node address on 6443 and
+  cannot be selected as a namespaced kube-apiserver Pod. The policy now
+  permits only RFC1918 destinations on 6443 in addition to the exact Service
+  IP, and failure capture applies ten-second API request bounds.
+- Phase 4 run
+  [30273987989](https://github.com/saadabdullaah/steadystate/actions/runs/30273987989)
+  reached GIF encoding after the fixed 13-minute recording; artifact
+  `8656731427` retained its failure evidence. The process was killed by its
+  14-minute outer bound. The tape now clears to an explicit result marker and
+  uses VHS whole-screen matching, which ends recording when the real command
+  exits while retaining independent inner, VHS, and job timeouts.
+- Head `c18a9ce` passed all five CI jobs, Phase 5 acceptance, and Phase 6
+  compatibility. Phase 4 run
+  [30285247205](https://github.com/saadabdullaah/steadystate/actions/runs/30285247205)
+  and artifact `8660789470` proved the whole-screen wait matched the literal
+  terminal markers while VHS was still typing its command, before the
+  acceptance stage ran. The tapes now construct one result marker from a
+  shell variable only after the bounded stage exits, and a render-contract
+  test rejects terminal marker literals in every `Type` line.
+- Phase 7 run
+  [30285247223](https://github.com/saadabdullaah/steadystate/actions/runs/30285247223)
+  and artifact `8661331384` proved the corrected API egress path: the GitOps
+  `orders` Cluster completed initdb, became Ready, archived WAL, and completed
+  its scheduled backup. The temporary `compat` initdb Pod alone was rejected
+  because the 2 GiB Team quota had only 720 MiB of limit headroom remaining
+  and CNPG requested 1 GiB. The sample ceiling is now 4 GiB, with a
+  deterministic rendered-value regression; this is quota capacity, not
+  allocated memory.
+- Head `114722f` passed all five CI jobs plus Phase 4, Phase 5, and Phase 6.
+  Phase 7 run
+  [30288745403](https://github.com/saadabdullaah/steadystate/actions/runs/30288745403)
+  and artifact `8662750840` proved both CNPG initdb jobs completed, both
+  PostgreSQL Pods were Running, and both archives recorded successful backups.
+  CloudNativePG nevertheless kept each Cluster in `Instance Status Extraction
+  Error` because Team default-deny blocked the operator's HTTPS status request
+  to the instance-manager Pod on TCP 8000. Each Database now admits that port
+  only from the `cloudnative-pg` Pod in `cnpg-system`, with a least-privilege
+  builder regression.
+- Head `ef811de` again passed all five CI jobs plus Phase 4, Phase 5, and
+  Phase 6. Phase 7 run
+  [30299878348](https://github.com/saadabdullaah/steadystate/actions/runs/30299878348)
+  and artifact `8666864746` confirmed the operator NetworkPolicy: both
+  Databases became `Healthy`, both CNPG Clusters reported Ready, and both
+  archives had successful backups. The foundation verifier still timed out
+  because the controller emitted Application-only `DatabaseReady=True`
+  instead of the Database API's declared `Ready=True`. Database status now
+  uses the public Ready condition, removes the obsolete pre-release condition,
+  and Application binding reads that same current-generation contract.
+- Head `1302d47` again passed all five CI jobs plus Phase 4, Phase 5, and
+  Phase 6. Phase 7 run
+  [30308130782](https://github.com/saadabdullaah/steadystate/actions/runs/30308130782)
+  advanced through Healthy Database status and failed immediately at the
+  first real SQL command: Unix-socket peer authentication correctly rejected
+  database role `app` because the CNPG container runs as operating-system user
+  `postgres`. Compatibility automation now authenticates locally as
+  `postgres`, executes workload statements under `SET ROLE app`, and keeps the
+  privileged WAL switch in a separate administrative call without exposing a
+  password. The Phase 7 disaster-recovery workflow uses the same explicit
+  local administrative boundary.
+- Head `ad0d146` passed all five CI jobs and Phase 4. Phase 7 run
+  [30316337859](https://github.com/saadabdullaah/steadystate/actions/runs/30316337859)
+  and artifact `8672817016` proved the SQL role boundary, both successful
+  archives, and the complete compatibility path through Database deletion.
+  Finalization then exposed that the ownerless final Backup initialized its
+  GVK but not its name/namespace before `CreateOrUpdate`, producing
+  `resource name may not be empty`. Final Backup reconciliation now seeds the
+  complete desired identity and has a dedicated absent-child/no-owner
+  regression.
+- Phase 5 run
+  [30316337779](https://github.com/saadabdullaah/steadystate/actions/runs/30316337779)
+  reached its real recording but one Grafana datasource health request
+  exhausted a single 15-second HTTP timeout. Grafana route, datasource, and
+  alert requests now use a bounded 60-second retry envelope while retaining
+  15-second request bounds. Phase 6 run
+  [30316337803](https://github.com/saadabdullaah/steadystate/actions/runs/30316337803)
+  failed before cluster work when GitHub's Loki chart asset connection reset.
+  Checksum-verified manifest/chart downloads now retry three times, quarantine
+  any corrupt cached chart, and still fail closed on integrity mismatch.
+- Head `635729e` passed all five CI jobs plus Phase 4, Phase 5, and Phase 6.
+  Phase 7 run
+  [30354614185](https://github.com/saadabdullaah/steadystate/actions/runs/30354614185)
+  and artifact `8686673631` proved final Backup creation, completion, and
+  finalizer release. Its next assertion incorrectly searched SeaweedFS's
+  physical LevelDB/volume files for Barman S3 key names. Evidence now obtains
+  a recursive logical object inventory from mini's internal filer API, scopes
+  base-backup and WAL assertions to the Database lifetime's UID-derived server
+  name, and keeps credentials out of output.
+- Head `247c464` again passed all five CI jobs plus Phase 4, Phase 5, and
+  Phase 6. Phase 7 run
+  [30357626649](https://github.com/saadabdullaah/steadystate/actions/runs/30357626649)
+  produced passed evidence before disposable cleanup: 100 canonical rows,
+  12 source-lifetime objects including 8 WAL objects, distinct source/recovery
+  server names, and identical source/restored checksum
+  `1fd183f94ddcb9114f1282249bba2299479d16499e4113abb0168292f19c6070`.
+  The job failed only because PowerShell cannot add a new dotted property to
+  an existing annotations `PSCustomObject` through assignment. Cleanup now
+  uses explicit `kubectl annotate --overwrite`, leaving the successful path
+  and evidence contract unchanged.

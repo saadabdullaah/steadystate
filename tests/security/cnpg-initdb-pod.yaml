@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: orders-postgres-1-initdb-fixture
+  namespace: team-payments
+  labels:
+    cnpg.io/cluster: orders-postgres
+    cnpg.io/jobRole: initdb
+    app.kubernetes.io/managed-by: cloudnative-pg
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/instance: orders-postgres
+  ownerReferences:
+    - apiVersion: batch/v1
+      kind: Job
+      name: orders-postgres-1-initdb
+      uid: 2f673d57-e938-4ec8-9bf6-b7a8a311f50f
+      controller: true
+      blockOwnerDeletion: true
+spec:
+  serviceAccountName: orders-postgres
+  automountServiceAccountToken: true
+  restartPolicy: Never
+  initContainers:
+    - name: bootstrap-controller
+      image: ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+  containers:
+    - name: initdb
+      image: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi

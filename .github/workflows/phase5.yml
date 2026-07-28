@@ -82,6 +82,7 @@ jobs:
           kind load docker-image ghcr.io/saadabdullaah/steadystate-demo-app:v0.1.0-bad --name steadystate
 
       - name: Deploy exact-revision GitOps observability
+        id: deploy
         timeout-minutes: 15
         shell: pwsh
         run: |
@@ -120,7 +121,7 @@ jobs:
         run: ./scripts/dev.ps1 diagnostics
 
       - name: Capture failure evidence
-        if: always() && steps.prepare.outcome != 'skipped' && steps.finalize.outcome != 'success'
+        if: always() && steps.deploy.outcome != 'skipped' && steps.finalize.outcome != 'success'
         continue-on-error: true
         timeout-minutes: 5
         shell: pwsh
@@ -129,7 +130,7 @@ jobs:
         run: ./scripts/phase5-acceptance.ps1 -Stage CaptureFailure
 
       - name: Verify artifact completeness
-        if: always() && steps.prepare.outcome != 'skipped'
+        if: always() && steps.deploy.outcome != 'skipped'
         timeout-minutes: 2
         shell: pwsh
         run: |

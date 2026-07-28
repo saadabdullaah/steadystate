@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,15 +16,18 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -43,6 +47,7 @@ type config struct {
 	InjectLatency      time.Duration
 	CrashAfterRequests uint64
 	OTLPEndpoint       string
+	DatabaseURL        string
 }
 
 type runtimeHooks struct {
@@ -50,6 +55,7 @@ type runtimeHooks struct {
 	exit           func(int)
 	log            *slog.Logger
 	tracerProvider trace.TracerProvider
+	database       *sql.DB
 }
 
 type requestRuntime struct {
@@ -72,6 +78,18 @@ type response struct {
 	Owner       string `json:"owner,omitempty"`
 	Status      string `json:"status"`
 	Version     string `json:"version"`
+}
+
+type order struct {
+	ID        int64     `json:"id"`
+	Item      string    `json:"item"`
+	Quantity  int       `json:"quantity"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type createOrderRequest struct {
+	Item     string `json:"item"`
+	Quantity int    `json:"quantity"`
 }
 
 func main() {
@@ -97,6 +115,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 		Version:      valueOrDefault(getenv("STEADYSTATE_APP_VERSION"), "development"),
 		Port:         8080,
 		OTLPEndpoint: getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		DatabaseURL:  getenv("DATABASE_URL"),
 	}
 	if rawPort := getenv("PORT"); rawPort != "" {
 		port, err := strconv.Atoi(rawPort)
@@ -148,13 +167,24 @@ func run(ctx context.Context, configuration config) error {
 			slog.Error("flush tracing", "error", shutdownErr)
 		}
 	}()
+	var database *sql.DB
+	if configuration.DatabaseURL != "" {
+		database, err = openDatabase(ctx, configuration.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer closeDatabase(database)
+	}
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", configuration.Port))
 	if err != nil {
 		return fmt.Errorf("listen on port %d: %w", configuration.Port, err)
 	}
 	ready := &atomic.Bool{}
 	server := &http.Server{
-		Handler:           newHandler(configuration, ready),
+		Handler: newHandlerWithRuntime(configuration, ready, runtimeHooks{
+			sleep: time.Sleep, exit: os.Exit, log: slog.Default(),
+			tracerProvider: otel.GetTracerProvider(), database: database,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -213,9 +243,26 @@ func newHandlerWithRuntime(configuration config, ready *atomic.Bool, hooks runti
 			writeJSON(writer, http.StatusServiceUnavailable, response{Application: configuration.Name, Namespace: configuration.Namespace, Status: "not-ready", Version: configuration.Version})
 			return
 		}
+		if configuration.DatabaseURL != "" {
+			if hooks.database == nil {
+				writeJSON(writer, http.StatusServiceUnavailable, response{Application: configuration.Name, Namespace: configuration.Namespace, Status: "database-not-ready", Version: configuration.Version})
+				return
+			}
+			pingContext, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := hooks.database.PingContext(pingContext); err != nil {
+				writeJSON(writer, http.StatusServiceUnavailable, response{Application: configuration.Name, Namespace: configuration.Namespace, Status: "database-not-ready", Version: configuration.Version})
+				return
+			}
+		}
 		writeJSON(writer, http.StatusOK, response{Application: configuration.Name, Namespace: configuration.Namespace, Status: "ready", Version: configuration.Version})
 	})
 	mux.Handle("/metrics", metrics.handler)
+	propagators := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+	if configuration.DatabaseURL != "" {
+		mux.Handle("/orders", runtime.observedDatabaseHandler("/orders", runtime.serveOrders, propagators))
+		mux.Handle("/orders/", runtime.observedDatabaseHandler("/orders/{id}", runtime.serveOrder, propagators))
+	}
 	applicationHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/" {
 			http.NotFound(writer, request)
@@ -224,9 +271,225 @@ func newHandlerWithRuntime(configuration config, ready *atomic.Bool, hooks runti
 		trace.SpanFromContext(request.Context()).SetAttributes(attribute.String("http.route", "/"))
 		runtime.serveApplication(writer, request)
 	})
-	propagators := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 	mux.Handle("/", otelhttp.NewHandler(applicationHandler, "HTTP /", otelhttp.WithTracerProvider(hooks.tracerProvider), otelhttp.WithPropagators(propagators)))
 	return mux
+}
+
+type statusCapturingWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (writer *statusCapturingWriter) WriteHeader(status int) {
+	if writer.status != 0 {
+		return
+	}
+	writer.status = status
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *statusCapturingWriter) Write(value []byte) (int, error) {
+	if writer.status == 0 {
+		writer.WriteHeader(http.StatusOK)
+	}
+	return writer.ResponseWriter.Write(value)
+}
+
+func (runtime *requestRuntime) observedDatabaseHandler(route string, handler http.HandlerFunc, propagators propagation.TextMapPropagator) http.Handler {
+	observed := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		started := time.Now()
+		requestID := request.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = newRequestID()
+		}
+		writer.Header().Set("X-Request-ID", requestID)
+		captured := &statusCapturingWriter{ResponseWriter: writer}
+		handler(captured, request)
+		if captured.status == 0 {
+			captured.status = http.StatusOK
+		}
+		status := strconv.Itoa(captured.status)
+		elapsed := time.Since(started)
+		runtime.metrics.requests.WithLabelValues(runtime.configuration.Name, runtime.configuration.Namespace, runtime.configuration.Version, status).Inc()
+		runtime.metrics.duration.WithLabelValues(runtime.configuration.Name, runtime.configuration.Namespace, runtime.configuration.Version, status).Observe(elapsed.Seconds())
+		spanContext := trace.SpanContextFromContext(request.Context())
+		runtime.hooks.log.InfoContext(request.Context(), "http request",
+			"request_id", requestID,
+			"trace_id", spanContext.TraceID().String(),
+			"span_id", spanContext.SpanID().String(),
+			"method", request.Method,
+			"route", route,
+			"status", captured.status,
+			"latency_seconds", elapsed.Seconds(),
+			"application", runtime.configuration.Name,
+			"namespace", runtime.configuration.Namespace,
+			"version", runtime.configuration.Version,
+		)
+	})
+	return otelhttp.NewHandler(observed, "HTTP "+route, otelhttp.WithTracerProvider(runtime.hooks.tracerProvider), otelhttp.WithPropagators(propagators))
+}
+
+func openDatabase(ctx context.Context, databaseURL string) (*sql.DB, error) {
+	database, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("open PostgreSQL connection: %w", err)
+	}
+	database.SetMaxOpenConns(8)
+	database.SetMaxIdleConns(4)
+	database.SetConnMaxLifetime(30 * time.Minute)
+	pingContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := database.PingContext(pingContext); err != nil {
+		closeDatabase(database)
+		return nil, fmt.Errorf("ping PostgreSQL: %w", err)
+	}
+	if _, err := database.ExecContext(pingContext, `
+		CREATE TABLE IF NOT EXISTS orders (
+			id BIGSERIAL PRIMARY KEY,
+			item TEXT NOT NULL CHECK (length(item) BETWEEN 1 AND 200),
+			quantity INTEGER NOT NULL CHECK (quantity > 0),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`); err != nil {
+		closeDatabase(database)
+		return nil, fmt.Errorf("initialize orders schema: %w", err)
+	}
+	return database, nil
+}
+
+func (runtime *requestRuntime) serveOrders(writer http.ResponseWriter, request *http.Request) {
+	if runtime.hooks.database == nil {
+		http.Error(writer, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	trace.SpanFromContext(request.Context()).SetAttributes(attribute.String("http.route", "/orders"))
+	switch request.Method {
+	case http.MethodPost:
+		var input createOrderRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 16*1024))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil || input.Item == "" || len(input.Item) > 200 || input.Quantity < 1 {
+			http.Error(writer, "item and positive quantity are required", http.StatusBadRequest)
+			return
+		}
+		created := order{}
+		databaseContext, databaseSpan := runtime.startDatabaseSpan(request.Context(), "INSERT")
+		err := runtime.hooks.database.QueryRowContext(databaseContext,
+			"INSERT INTO orders (item, quantity) VALUES ($1, $2) RETURNING id, item, quantity, created_at",
+			input.Item, input.Quantity,
+		).Scan(&created.ID, &created.Item, &created.Quantity, &created.CreatedAt)
+		endDatabaseSpan(databaseSpan, err)
+		if err != nil {
+			http.Error(writer, "database operation failed", http.StatusInternalServerError)
+			return
+		}
+		writeOrderJSON(writer, http.StatusCreated, created)
+	case http.MethodGet:
+		databaseContext, databaseSpan := runtime.startDatabaseSpan(request.Context(), "SELECT")
+		rows, err := runtime.hooks.database.QueryContext(databaseContext, "SELECT id, item, quantity, created_at FROM orders ORDER BY id ASC")
+		if err != nil {
+			endDatabaseSpan(databaseSpan, err)
+			http.Error(writer, "database operation failed", http.StatusInternalServerError)
+			return
+		}
+		defer func() {
+			closeRows(rows)
+			endDatabaseSpan(databaseSpan, rows.Err())
+		}()
+		orders := make([]order, 0)
+		for rows.Next() {
+			var value order
+			if err := rows.Scan(&value.ID, &value.Item, &value.Quantity, &value.CreatedAt); err != nil {
+				http.Error(writer, "database operation failed", http.StatusInternalServerError)
+				return
+			}
+			orders = append(orders, value)
+		}
+		if err := rows.Err(); err != nil {
+			http.Error(writer, "database operation failed", http.StatusInternalServerError)
+			return
+		}
+		writeOrderJSON(writer, http.StatusOK, orders)
+	default:
+		writer.Header().Set("Allow", "GET, POST")
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func closeDatabase(database *sql.DB) {
+	if err := database.Close(); err != nil {
+		slog.Error("close PostgreSQL connection", "error", err)
+	}
+}
+
+func closeRows(rows *sql.Rows) {
+	if err := rows.Close(); err != nil {
+		slog.Error("close PostgreSQL result rows", "error", err)
+	}
+}
+
+func (runtime *requestRuntime) serveOrder(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writer.Header().Set("Allow", "GET")
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if runtime.hooks.database == nil {
+		http.Error(writer, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	rawID := strings.TrimPrefix(request.URL.Path, "/orders/")
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id < 1 {
+		http.NotFound(writer, request)
+		return
+	}
+	trace.SpanFromContext(request.Context()).SetAttributes(
+		attribute.String("http.route", "/orders/{id}"),
+	)
+	var value order
+	databaseContext, databaseSpan := runtime.startDatabaseSpan(request.Context(), "SELECT")
+	err = runtime.hooks.database.QueryRowContext(databaseContext,
+		"SELECT id, item, quantity, created_at FROM orders WHERE id = $1", id,
+	).Scan(&value.ID, &value.Item, &value.Quantity, &value.CreatedAt)
+	endDatabaseSpan(databaseSpan, err)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.NotFound(writer, request)
+		return
+	}
+	if err != nil {
+		http.Error(writer, "database operation failed", http.StatusInternalServerError)
+		return
+	}
+	writeOrderJSON(writer, http.StatusOK, value)
+}
+
+func (runtime *requestRuntime) startDatabaseSpan(ctx context.Context, operation string) (context.Context, trace.Span) {
+	return runtime.hooks.tracerProvider.Tracer("steadystate-demo/database").Start(
+		ctx,
+		"postgresql "+operation+" orders",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			attribute.String("db.system", "postgresql"),
+			attribute.String("db.collection.name", "orders"),
+			attribute.String("db.operation.name", operation),
+		),
+	)
+}
+
+func endDatabaseSpan(span trace.Span, err error) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "database operation failed")
+	}
+	span.End()
+}
+
+func writeOrderJSON(writer http.ResponseWriter, statusCode int, value any) {
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(statusCode)
+	if err := json.NewEncoder(writer).Encode(value); err != nil {
+		slog.Error("write order response", "error", err)
+	}
 }
 
 func newDemoMetrics(configuration config) *demoMetrics {

@@ -194,6 +194,140 @@ spec:
       prune: true
       selfHeal: true
 {{- end }}
+{{- if .Values.enableDataFoundation }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data-namespaces
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  project: platform
+  source:
+    repoURL: {{ .Values.repoURL | quote }}
+    targetRevision: {{ .Values.gitRevision | quote }}
+    path: gitops/platform/data-namespaces
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: local-path-storage
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-9"
+spec:
+  project: platform
+  source:
+    repoURL: {{ .Values.repoURL | quote }}
+    targetRevision: {{ .Values.gitRevision | quote }}
+    path: gitops/platform/local-path
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: local-path-storage
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+spec:
+  project: platform
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: cert-manager
+      targetRevision: {{ .Values.certManagerChartVersion | quote }}
+      helm:
+        releaseName: cert-manager
+        valueFiles:
+          - $values/gitops/platform/cert-manager/values.yaml
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudnative-pg
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-7"
+spec:
+  project: platform
+  sources:
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: cloudnative-pg
+      targetRevision: {{ .Values.cloudNativePGChartVersion | quote }}
+      helm:
+        releaseName: cloudnative-pg
+        valueFiles:
+          - $values/gitops/platform/cloudnative-pg/values.yaml
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: barman-cloud
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+spec:
+  project: platform
+  sources:
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: plugin-barman-cloud
+      targetRevision: {{ .Values.barmanCloudChartVersion | quote }}
+      helm:
+        releaseName: barman-cloud
+        valueFiles:
+          - $values/gitops/platform/barman-cloud/values.yaml
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+{{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -201,7 +335,9 @@ metadata:
   name: steadystate-operator
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-10"
+    # Full-profile external CRDs must exist before manager discovery registers
+    # Database child watches. Standard profiles retain the historical wave.
+    argocd.argoproj.io/sync-wave: {{ if .Values.enableDataFoundation }}"-5"{{ else }}"-10"{{ end }}
 spec:
   project: platform
   source:
@@ -211,6 +347,18 @@ spec:
     kustomize:
       images:
         - {{ .Values.operatorImage | quote }}
+      patches:
+        - target:
+            group: apps
+            version: v1
+            kind: Deployment
+            name: controller-manager
+          patch: |-
+            - op: add
+              path: /spec/template/spec/containers/0/env
+              value:
+                - name: BACKUP_STORE_ENDPOINT
+                  value: {{ .Values.backupStoreEndpoint | quote }}
   destination:
     server: https://kubernetes.default.svc
     namespace: steadystate-system
@@ -302,6 +450,15 @@ spec:
         commonAnnotations:
           steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
         commonAnnotationsEnvsubst: true
+{{- if .Values.enableDataFoundation }}
+    - repoURL: {{ .Values.repoURL | quote }}
+      targetRevision: {{ .Values.gitRevision | quote }}
+      path: gitops/databases/orders
+      kustomize:
+        commonAnnotations:
+          steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
+        commonAnnotationsEnvsubst: true
+{{- end }}
     - repoURL: {{ .Values.repoURL | quote }}
       targetRevision: {{ .Values.gitRevision | quote }}
       path: gitops/applications/demo
@@ -309,6 +466,19 @@ spec:
         commonAnnotations:
           steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
         commonAnnotationsEnvsubst: true
+{{- if .Values.enableDataFoundation }}
+        patches:
+          - target:
+              group: platform.steadystate.dev
+              version: v1alpha1
+              kind: Application
+              name: demo
+            patch: |-
+              - op: add
+                path: /spec/databaseRef
+                value:
+                  name: orders
+{{- end }}
   destination:
     server: https://kubernetes.default.svc
     namespace: team-payments
@@ -320,6 +490,11 @@ spec:
   ignoreDifferences:
     - group: platform.steadystate.dev
       kind: Team
+      jsonPointers:
+        - /metadata/finalizers
+        - /status
+    - group: platform.steadystate.dev
+      kind: Database
       jsonPointers:
         - /metadata/finalizers
         - /status
