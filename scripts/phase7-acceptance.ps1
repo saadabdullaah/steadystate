@@ -50,7 +50,7 @@ function Wait-Until([int]$TimeoutSeconds, [string]$Failure, [scriptblock]$Condit
 }
 
 function Get-KubeObject([string[]]$Arguments) {
-    $raw = @(& kubectl @Arguments -o json 2>$null)
+    $raw = @(& kubectl --request-timeout=10s @Arguments -o json 2>$null)
     if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
     return ($raw -join [Environment]::NewLine) | ConvertFrom-Json
 }

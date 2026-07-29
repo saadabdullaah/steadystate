@@ -16,7 +16,7 @@ jobs:
   acceptance:
     name: database-disaster-recovery
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 105
     env:
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
     steps:
@@ -30,7 +30,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
-          app-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
           private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: steadystate
@@ -127,15 +127,32 @@ jobs:
           $state = Get-Content -Raw .artifacts/phase7/acceptance/state.json | ConvertFrom-Json
           ./scripts/dev.ps1 deploy-gitops -Profile full -GitRevision $state.branch
 
+      - name: Refresh repository-scoped recovery token
+        id: recovery-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: steadystate
+
+      - name: Refresh recovery Git authentication
+        shell: pwsh
+        env:
+          APP_TOKEN: ${{ steps.recovery-token.outputs.token }}
+        run: |
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$env:APP_TOKEN"))
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $encoded"
+
       - name: Record whole-cluster disaster recovery
         id: recovery
-        timeout-minutes: 56
+        timeout-minutes: 66
         shell: bash
         env:
           CI: ""
           COLORTERM: truecolor
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: timeout --signal=TERM --kill-after=30s 55m vhs docs/demonstrations/phase7-disaster-recovery.tape
+          GH_TOKEN: ${{ steps.recovery-token.outputs.token }}
+        run: timeout --signal=TERM --kill-after=30s 65m vhs docs/demonstrations/phase7-disaster-recovery.tape
 
       - name: Finalize evidence
         id: finalize
@@ -221,13 +238,23 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
 
+      - name: Create repository-scoped cleanup token
+        if: always() && steps.prepare.outcome != 'skipped'
+        id: cleanup-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: steadystate
+
       - name: Delete ephemeral Git branch
         if: always() && steps.prepare.outcome != 'skipped'
         continue-on-error: true
         timeout-minutes: 2
         shell: pwsh
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}
         run: |
           $branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           if (Test-Path -LiteralPath .artifacts/phase7/acceptance/state.json) {
