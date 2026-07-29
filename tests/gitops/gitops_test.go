@@ -885,6 +885,9 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"git commit --allow-empty -m 'test(data): establish Phase 7 recovery baseline'",
 		"$global:LASTEXITCODE = 0",
 		"kubectl --request-timeout=10s @Arguments",
+		"'application' { 'applications.platform.steadystate.dev' }",
+		"'database' { 'databases.platform.steadystate.dev' }",
+		"databases.platform.steadystate.dev,applications.platform.steadystate.dev",
 	} {
 		if !strings.Contains(phase7Acceptance, contract) {
 			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)

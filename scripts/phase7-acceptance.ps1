@@ -73,7 +73,12 @@ function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 900) {
 function Wait-Ready([string]$Kind, [string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 900) {
     $result = $null
     Wait-Until $TimeoutSeconds "$Kind $Namespace/$Name did not become current-generation Ready." {
-        $arguments = @('get',$Kind,$Name)
+        $resource = switch ($Kind) {
+            'application' { 'applications.platform.steadystate.dev' }
+            'database' { 'databases.platform.steadystate.dev' }
+            default { $Kind }
+        }
+        $arguments = @('get',$resource,$Name)
         if ($Namespace) { $arguments += @('-n',$Namespace) }
         $script:result = Get-KubeObject $arguments
         if (-not $script:result) { return $false }
@@ -182,7 +187,7 @@ function Capture([string]$Prefix) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & kubectl get database,application -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-platform.yaml")
+        & kubectl get databases.platform.steadystate.dev,applications.platform.steadystate.dev -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-platform.yaml")
         & kubectl get cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-data.yaml")
         & kubectl get application.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")
         & kubectl get pod,pvc,service,networkpolicy -n $Namespace -o wide *> (Join-Path $ArtifactRoot "snapshots/$Prefix-workloads.txt")
