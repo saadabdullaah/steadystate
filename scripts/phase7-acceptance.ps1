@@ -270,11 +270,19 @@ switch ($Stage) {
             throw 'The signed Application Pod was not admission-pinned to an immutable digest.'
         }
         $postgresPod = Get-KubeObject @('get','pod','-n',$Namespace,'-l',"cnpg.io/cluster=$(([string]$database.status.connectionSecretName) -replace '-app$','')")
-        $postgresImages = @($postgresPod.items[0].spec.containers | ForEach-Object { [string]$_.image })
-        $postgresInitImages = @($postgresPod.items[0].spec.initContainers | ForEach-Object { [string]$_.image })
-        if ($postgresImages -notcontains 'ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' -or
-            $postgresImages -notcontains 'ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0@sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288' -or
-            $postgresInitImages -notcontains 'ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb') {
+        $postgresImages = @{}
+        @($postgresPod.items[0].spec.containers) | ForEach-Object { $postgresImages[[string]$_.name] = [string]$_.image }
+        $postgresInitImages = @{}
+        @($postgresPod.items[0].spec.initContainers) | ForEach-Object { $postgresInitImages[[string]$_.name] = [string]$_.image }
+        $pinnedDataImages = [ordered]@{
+            postgres = $postgresImages['postgres']
+            bootstrapController = $postgresInitImages['bootstrap-controller']
+            barmanSidecar = $postgresInitImages['plugin-barman-cloud']
+        }
+        Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/pinned-data-images.json') (($pinnedDataImages | ConvertTo-Json) + [Environment]::NewLine)
+        if ($pinnedDataImages.postgres -ne 'ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' -or
+            $pinnedDataImages.barmanSidecar -ne 'ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0@sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288' -or
+            $pinnedDataImages.bootstrapController -ne 'ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb') {
             throw 'CNPG, bootstrap-controller, or Barman operand images are not the exact chart-pinned Phase 7 tag-plus-digest references.'
         }
         Add-Check $state 'pinned-data-stack-and-security-enforced' $started 'Pinned data controllers are Argo Healthy; Application and CNPG operand images are immutable; Database status contains no credentials.'

@@ -888,6 +888,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"'application' { 'applications.platform.steadystate.dev' }",
 		"'database' { 'databases.platform.steadystate.dev' }",
 		"databases.platform.steadystate.dev,applications.platform.steadystate.dev",
+		"$postgresInitImages['plugin-barman-cloud']",
+		"snapshots/pinned-data-images.json",
 	} {
 		if !strings.Contains(phase7Acceptance, contract) {
 			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)
