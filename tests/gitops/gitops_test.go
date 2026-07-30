@@ -894,6 +894,9 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"recoveryBackupServerName=$null",
 		"rtoMinutes=$null;rpoMinutes=$null;memoryMiB=$null",
 		"databases.platform.steadystate.dev $DatabaseName",
+		"--ignore-not-found -o name",
+		"Stopping the external backup store failed.",
+		"Restarting the external backup store failed.",
 	} {
 		if !strings.Contains(phase7Acceptance, contract) {
 			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)

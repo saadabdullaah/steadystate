@@ -405,6 +405,7 @@ switch ($Stage) {
 
         $started = Get-Date
         & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Stop
+        if ($LASTEXITCODE -ne 0) { throw 'Stopping the external backup store failed.' }
         $failedBackup = "phase7-outage-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         New-Backup $failedBackup (([string]$recoveredDatabase.status.connectionSecretName) -replace '-app$','')
         $failed = Wait-Backup $failedBackup 300 -AllowFailure
@@ -413,6 +414,7 @@ switch ($Stage) {
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/prometheus-backup-alert.json') (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 '/api/v1/query?query=ALERTS%7Balertname%3D%22SteadyStateDatabaseBackupStale%22%7D')
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/alertmanager-backup-outage.json') (Get-ServiceRaw 'monitoring-kube-prometheus-alertmanager' 9093 '/api/v2/alerts')
         & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Start
+        if ($LASTEXITCODE -ne 0) { throw 'Restarting the external backup store failed.' }
         $recoveryBackup = "phase7-recovered-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         New-Backup $recoveryBackup (([string]$recoveredDatabase.status.connectionSecretName) -replace '-app$','')
         $null = Wait-Backup $recoveryBackup
@@ -430,9 +432,11 @@ resources: []
         Save-State $state
         Start-Sleep -Seconds 15
         & kubectl --request-timeout=20s delete databases.platform.steadystate.dev $DatabaseName -n $Namespace --wait=false *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not request Database deletion.' }
         Wait-Until 900 'Database final backup deletion did not complete.' {
-            & kubectl --request-timeout=10s get databases.platform.steadystate.dev $DatabaseName -n $Namespace *> $null
-            return $LASTEXITCODE -ne 0
+            $remaining = @(& kubectl --request-timeout=10s get databases.platform.steadystate.dev $DatabaseName -n $Namespace --ignore-not-found -o name 2>$null)
+            if ($LASTEXITCODE -ne 0) { return $false }
+            return $remaining.Count -eq 0
         }
         $allObjects = @(& (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory)
         $sourceRetainedObjects = @($allObjects | Where-Object { $_.StartsWith("$($state.sourceBackupServerName)/", [StringComparison]::Ordinal) })
