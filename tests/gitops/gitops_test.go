@@ -1210,7 +1210,6 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 		"persist-credentials: false",
 		"actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
 		"client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}",
-		".artifacts/phase7/acceptance/snapshots/pinned-data-images.json",
 		"private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}",
 		"permission-contents: write",
 		"phase3-acceptance-${{ github.sha }}",
