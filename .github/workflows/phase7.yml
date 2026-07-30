@@ -16,7 +16,7 @@ jobs:
   acceptance:
     name: database-disaster-recovery
     runs-on: ubuntu-latest
-    timeout-minutes: 105
+    timeout-minutes: 75
     env:
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
     steps:
@@ -146,13 +146,13 @@ jobs:
 
       - name: Record whole-cluster disaster recovery
         id: recovery
-        timeout-minutes: 66
+        timeout-minutes: 41
         shell: bash
         env:
           CI: ""
           COLORTERM: truecolor
           GH_TOKEN: ${{ steps.recovery-token.outputs.token }}
-        run: timeout --signal=TERM --kill-after=30s 65m vhs docs/demonstrations/phase7-disaster-recovery.tape
+        run: timeout --signal=TERM --kill-after=30s 40m vhs docs/demonstrations/phase7-disaster-recovery.tape
 
       - name: Finalize evidence
         id: finalize

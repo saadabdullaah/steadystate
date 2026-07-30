@@ -40,6 +40,13 @@ function Add-Check($State, [string]$Name, [datetime]$Started, [string]$Details) 
     Save-State $State
 }
 
+function Set-Stage($State, [string]$Name) {
+    $State.currentStage = $Name
+    $State.stageStartedAt = (Get-Date).ToUniversalTime().ToString('o')
+    Save-State $State
+    Write-Host "PHASE7_STAGE $Name"
+}
+
 function Wait-Until([int]$TimeoutSeconds, [string]$Failure, [scriptblock]$Condition) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -61,7 +68,7 @@ function Get-ServiceRaw([string]$Service, [int]$Port, [string]$Path) {
     return ($raw -join [Environment]::NewLine)
 }
 
-function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 900) {
+function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 300) {
     $application = $null
     Wait-Until $TimeoutSeconds "Argo Application $Name did not become Healthy and Synced." {
         $script:application = Get-KubeObject @('get','applications.argoproj.io',$Name,'-n','argocd')
@@ -70,7 +77,7 @@ function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 900) {
     return $script:application
 }
 
-function Wait-Ready([string]$Kind, [string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 900) {
+function Wait-Ready([string]$Kind, [string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 600) {
     $result = $null
     Wait-Until $TimeoutSeconds "$Kind $Namespace/$Name did not become current-generation Ready." {
         $resource = switch ($Kind) {
@@ -109,14 +116,14 @@ function Get-CanonicalOrders {
 
 function Get-PrimaryPod([string]$ClusterName) {
     $pod = $null
-    Wait-Until 600 "Primary Pod for $ClusterName was not found." {
+    Wait-Until 180 "Primary Pod for $ClusterName was not found." {
         $script:pod = (& kubectl --request-timeout=10s get pod -n $Namespace -l "cnpg.io/cluster=$ClusterName,cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}' 2>$null)
         return $LASTEXITCODE -eq 0 -and [bool]$script:pod
     }
     return $script:pod
 }
 
-function Wait-Backup([string]$Name, [int]$TimeoutSeconds = 900, [switch]$AllowFailure) {
+function Wait-Backup([string]$Name, [int]$TimeoutSeconds = 420, [switch]$AllowFailure) {
     $backup = $null
     Wait-Until $TimeoutSeconds "Backup $Namespace/$Name did not finish." {
         $script:backup = Get-KubeObject @('get','backup.postgresql.cnpg.io',$Name,'-n',$Namespace)
@@ -174,12 +181,15 @@ function Convert-MemoryToMiB([string]$Value) {
 }
 
 function Git-CommitAndPush([string]$Message) {
-    git add -- gitops/applications/demo/application.yaml gitops/databases/orders/database.yaml gitops/databases/orders/kustomization.yaml
-    git commit -m $Message
+    git add -- gitops/applications/demo/application.yaml gitops/databases/orders/database.yaml gitops/databases/orders/kustomization.yaml | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Acceptance Git staging failed.' }
+    git commit -m $Message | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Acceptance Git commit failed.' }
-    git push origin "HEAD:$((Get-State).branch)"
+    git push origin "HEAD:$((Get-State).branch)" | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Acceptance Git push failed.' }
-    return (& git rev-parse HEAD).Trim()
+    $sha = [string](& git rev-parse HEAD)
+    if ($LASTEXITCODE -ne 0 -or -not $sha) { throw 'Could not resolve the acceptance commit SHA.' }
+    return $sha.Trim()
 }
 
 function Capture([string]$Prefix) {
@@ -233,6 +243,7 @@ switch ($Stage) {
             sourceChecksum=$null;recoveredChecksum=$null
             rtoMinutes=$null;rpoMinutes=$null;memoryMiB=$null
             walObjectCount=$null;objectCount=$null
+            currentStage='prepared';stageStartedAt=$null;failedAt=$null;lastError=$null
             checks=@()
         }
         Save-State $state
@@ -256,6 +267,8 @@ switch ($Stage) {
     }
     'Test' {
         $state = Get-State
+        try {
+        Set-Stage $state 'initial-readiness'
         $started = Get-Date
         $database = Wait-Ready 'database' $DatabaseName $Namespace
         $application = Wait-Ready 'application' $ApplicationName $Namespace
@@ -292,6 +305,7 @@ switch ($Stage) {
         }
         Add-Check $state 'pinned-data-stack-and-security-enforced' $started 'Pinned data controllers are Argo Healthy; Application and CNPG operand images are immutable; Database status contains no credentials.'
 
+        Set-Stage $state 'source-data-and-backup'
         $started = Get-Date
         $databaseTraceID = '77777777777777777777777777777777'
         for ($index = 1; $index -le 100; $index++) {
@@ -347,6 +361,7 @@ switch ($Stage) {
         Save-State $state
         Add-Check $state 'base-backup-and-wal-archived' $started 'An on-demand plugin backup completed after a forced WAL switch.'
 
+        Set-Stage $state 'cluster-destruction'
         $rtoStarted = (Get-Date).ToUniversalTime()
         $state.failureStartedAt = $rtoStarted.ToString('o')
         Save-State $state
@@ -354,6 +369,7 @@ switch ($Stage) {
         if ($LASTEXITCODE -ne 0) { throw 'Whole-cluster destruction failed.' }
         Add-Check $state 'entire-kind-cluster-destroyed' $rtoStarted 'The kind cluster was destroyed while the named SeaweedFS volume remained intact.'
 
+        Set-Stage $state 'recovery-commit'
         $databaseManifest = Join-Path $Root 'gitops/databases/orders/database.yaml'
         $databaseContent = Get-Content -Raw $databaseManifest
         if ($databaseContent -match '(?m)^  recovery:') { throw 'Baseline Database unexpectedly contains recovery state.' }
@@ -366,16 +382,19 @@ switch ($Stage) {
         $state.recoveryCommit = Git-CommitAndPush 'test(data): restore orders from retained archive'
         Save-State $state
 
+        Set-Stage $state 'recovery-bootstrap'
         & (Join-Path $PSScriptRoot 'dev.ps1') bootstrap -Profile full
         if ($LASTEXITCODE -ne 0) { throw 'Full-profile rebootstrap failed.' }
         & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Start
         if ($LASTEXITCODE -ne 0) { throw 'Reconnecting the retained backup store failed.' }
         & (Join-Path $PSScriptRoot 'dev.ps1') load-images
         if ($LASTEXITCODE -ne 0) { throw 'Branch image load failed.' }
+        Set-Stage $state 'recovery-gitops'
         & (Join-Path $PSScriptRoot 'dev.ps1') deploy-gitops -Profile full -GitRevision $state.branch
         if ($LASTEXITCODE -ne 0) { throw 'Recovery GitOps deployment failed.' }
-        $recoveredDatabase = Wait-Ready 'database' $DatabaseName $Namespace 1200
-        $recoveredApplication = Wait-Ready 'application' $ApplicationName $Namespace 600
+        Set-Stage $state 'recovery-readiness-and-checksum'
+        $recoveredDatabase = Wait-Ready 'database' $DatabaseName $Namespace 600
+        $recoveredApplication = Wait-Ready 'application' $ApplicationName $Namespace 300
         $recovered = Get-CanonicalOrders
         $rto = ((Get-Date).ToUniversalTime() - $rtoStarted).TotalMinutes
         if ($rto -gt 30) { throw "Recovery RTO $([Math]::Round($rto,2)) minutes exceeds 30 minutes." }
@@ -389,6 +408,7 @@ switch ($Stage) {
         Save-State $state
         Add-Check $state 'cluster-recreated-and-checksum-restored' $rtoStarted 'GitOps recreated the full cluster and restored all acknowledged orders within the RTO/RPO objectives.'
 
+        Set-Stage $state 'resource-budgets'
         $started = Get-Date
         $dataMiB = Invoke-PrometheusScalar 'sum(container_memory_working_set_bytes{namespace=~"cnpg-system|cert-manager|local-path-storage|team-payments",container!="",image!=""}) / 1024 / 1024'
         $totalMiB = Invoke-PrometheusScalar 'sum(container_memory_working_set_bytes{container!="",image!=""}) / 1024 / 1024'
@@ -403,6 +423,7 @@ switch ($Stage) {
         Capture-RenderedState
         Capture 'recovered'
 
+        Set-Stage $state 'backup-outage-and-recovery'
         $started = Get-Date
         & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Stop
         if ($LASTEXITCODE -ne 0) { throw 'Stopping the external backup store failed.' }
@@ -422,6 +443,7 @@ switch ($Stage) {
         Wait-BackupAlert $false
         Add-Check $state 'backup-alert-fired-and-recovered' $started 'A stopped external store made backup freshness unhealthy and fired an alert; restarting it and completing a backup cleared both.'
 
+        Set-Stage $state 'final-backup-and-retention'
         $started = Get-Date
         Write-Utf8 (Join-Path $Root 'gitops/databases/orders/kustomization.yaml') @"
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -433,7 +455,7 @@ resources: []
         Start-Sleep -Seconds 15
         & kubectl --request-timeout=20s delete databases.platform.steadystate.dev $DatabaseName -n $Namespace --wait=false *> $null
         if ($LASTEXITCODE -ne 0) { throw 'Could not request Database deletion.' }
-        Wait-Until 900 'Database final backup deletion did not complete.' {
+        Wait-Until 480 'Database final backup deletion did not complete.' {
             $remaining = @(& kubectl --request-timeout=10s get databases.platform.steadystate.dev $DatabaseName -n $Namespace --ignore-not-found -o name 2>$null)
             if ($LASTEXITCODE -ne 0) { return $false }
             return $remaining.Count -eq 0
@@ -451,8 +473,18 @@ resources: []
         $state.completedAt = (Get-Date).ToUniversalTime().ToString('o')
         $state.result = 'passed'
         $state.objectCount = $objects.Count
+        $state.currentStage = 'completed'
         Save-State $state
         Write-Host 'PHASE7_ACCEPTANCE_RESULT_PASSED'
+        } catch {
+            $failureState = Get-State
+            $failureState.result = 'failed'
+            $failureState.failedAt = (Get-Date).ToUniversalTime().ToString('o')
+            $failureState.lastError = (([string]$_.Exception.Message) -replace 'postgresql://\S+', 'postgresql://[REDACTED]') -replace '(?i)(token|password|secret)=\S+', '$1=[REDACTED]'
+            Save-State $failureState
+            Write-Host "PHASE7_ACCEPTANCE_RESULT_FAILED stage=$($failureState.currentStage)"
+            throw
+        }
     }
     'Finalize' {
         $state = Get-State
@@ -467,7 +499,7 @@ resources: []
                 throw "Phase 7 acceptance state is missing $field."
             }
         }
-        if ($state.result -ne 'passed' -or $state.sourceChecksum -ne $state.recoveredChecksum -or
+        if ($state.result -ne 'passed' -or $state.currentStage -ne 'completed' -or $state.sourceChecksum -ne $state.recoveredChecksum -or
             [double]$state.rtoMinutes -le 0 -or [double]$state.rtoMinutes -gt 30 -or
             [double]$state.rpoMinutes -lt 0 -or [double]$state.rpoMinutes -gt 5 -or
             [int]$state.walObjectCount -lt 1 -or

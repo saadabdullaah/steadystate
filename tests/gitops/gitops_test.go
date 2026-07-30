@@ -897,6 +897,9 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"--ignore-not-found -o name",
 		"Stopping the external backup store failed.",
 		"Restarting the external backup store failed.",
+		"PHASE7_STAGE",
+		"PHASE7_ACCEPTANCE_RESULT_FAILED stage=",
+		"return $sha.Trim()",
 	} {
 		if !strings.Contains(phase7Acceptance, contract) {
 			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)
@@ -907,8 +910,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"Phase 7 failed before the disposable cluster was created.",
 		`$branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"`,
 		"Cluster 'steadystate' is already absent; GitOps cleanup is complete.",
-		"timeout-minutes: 105",
-		"timeout --signal=TERM --kill-after=30s 65m vhs docs/demonstrations/phase7-disaster-recovery.tape",
+		"timeout-minutes: 75",
+		"timeout --signal=TERM --kill-after=30s 40m vhs docs/demonstrations/phase7-disaster-recovery.tape",
 		"id: recovery-token",
 		"id: cleanup-token",
 		"GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}",

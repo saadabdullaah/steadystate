@@ -6,7 +6,7 @@ Set Height 720
 Set TypingSpeed 15ms
 Set Framerate 2
 Set PlaybackSpeed 12.0
-Set WaitTimeout 65m
+Set WaitTimeout 40m
 
 Type "pwsh -NoProfile -File scripts/phase7-acceptance.ps1 -Stage Test || (echo PHASE7_ACCEPTANCE_RESULT_FAILED; exit 1)"
 Enter
