@@ -64,7 +64,7 @@ function Get-ServiceRaw([string]$Service, [int]$Port, [string]$Path) {
 function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 900) {
     $application = $null
     Wait-Until $TimeoutSeconds "Argo Application $Name did not become Healthy and Synced." {
-        $script:application = Get-KubeObject @('get','application.argoproj.io',$Name,'-n','argocd')
+        $script:application = Get-KubeObject @('get','applications.argoproj.io',$Name,'-n','argocd')
         return $script:application -and $script:application.status.health.status -eq 'Healthy' -and $script:application.status.sync.status -eq 'Synced'
     }
     return $script:application
@@ -110,7 +110,7 @@ function Get-CanonicalOrders {
 function Get-PrimaryPod([string]$ClusterName) {
     $pod = $null
     Wait-Until 600 "Primary Pod for $ClusterName was not found." {
-        $script:pod = (& kubectl get pod -n $Namespace -l "cnpg.io/cluster=$ClusterName,cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}' 2>$null)
+        $script:pod = (& kubectl --request-timeout=10s get pod -n $Namespace -l "cnpg.io/cluster=$ClusterName,cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}' 2>$null)
         return $LASTEXITCODE -eq 0 -and [bool]$script:pod
     }
     return $script:pod
@@ -136,16 +136,16 @@ function New-Backup([string]$Name, [string]$ClusterName) {
             method='plugin'
             pluginConfiguration=[ordered]@{name='barman-cloud.cloudnative-pg.io'}
         }
-    } | ConvertTo-Json -Depth 15 | & kubectl apply -f - *> $null
+    } | ConvertTo-Json -Depth 15 | & kubectl --request-timeout=20s apply -f - *> $null
     if ($LASTEXITCODE -ne 0) { throw "Could not create Backup $Name." }
 }
 
 function Wait-BackupAlert([bool]$Firing) {
-    $prometheus = (& kubectl get pod -n monitoring -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>$null)
+    $prometheus = (& kubectl --request-timeout=10s get pod -n monitoring -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>$null)
     if ($LASTEXITCODE -ne 0 -or -not $prometheus) { throw 'Prometheus Pod was not found.' }
     $expected = if ($Firing) { 1 } else { 0 }
     Wait-Until 150 "Database backup-freshness alert did not reach firing=$Firing within 150 seconds." {
-        $raw = @(& kubectl exec -n monitoring $prometheus -c prometheus -- wget -qO- 'http://127.0.0.1:9090/api/v1/query?query=ALERTS%7Balertname%3D%22SteadyStateDatabaseBackupStale%22%2Calertstate%3D%22firing%22%7D' 2>$null)
+        $raw = @(& kubectl --request-timeout=20s exec -n monitoring $prometheus -c prometheus -- wget -qO- 'http://127.0.0.1:9090/api/v1/query?query=ALERTS%7Balertname%3D%22SteadyStateDatabaseBackupStale%22%2Calertstate%3D%22firing%22%7D' 2>$null)
         if ($LASTEXITCODE -ne 0 -or -not $raw) { return $false }
         $query = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
         return @($query.data.result).Count -eq $expected
@@ -153,10 +153,10 @@ function Wait-BackupAlert([bool]$Firing) {
 }
 
 function Invoke-PrometheusScalar([string]$Expression) {
-    $prometheus = (& kubectl get pod -n monitoring -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>$null)
+    $prometheus = (& kubectl --request-timeout=10s get pod -n monitoring -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>$null)
     if ($LASTEXITCODE -ne 0 -or -not $prometheus) { throw 'Prometheus Pod was not found.' }
     $encoded = [Uri]::EscapeDataString($Expression)
-    $raw = @(& kubectl exec -n monitoring $prometheus -c prometheus -- wget -qO- "http://127.0.0.1:9090/api/v1/query?query=$encoded")
+    $raw = @(& kubectl --request-timeout=20s exec -n monitoring $prometheus -c prometheus -- wget -qO- "http://127.0.0.1:9090/api/v1/query?query=$encoded")
     if ($LASTEXITCODE -ne 0 -or -not $raw) { throw 'Prometheus resource query failed.' }
     $result = (($raw -join [Environment]::NewLine) | ConvertFrom-Json).data.result
     if (@($result).Count -ne 1) { throw "Prometheus query returned $(@($result).Count) results." }
@@ -189,7 +189,7 @@ function Capture([string]$Prefix) {
     try {
         & kubectl get databases.platform.steadystate.dev,applications.platform.steadystate.dev -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-platform.yaml")
         & kubectl get cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-data.yaml")
-        & kubectl get application.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")
+        & kubectl get applications.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")
         & kubectl get pod,pvc,service,networkpolicy -n $Namespace -o wide *> (Join-Path $ArtifactRoot "snapshots/$Prefix-workloads.txt")
         & kubectl get prometheusrule -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-alert-rules.yaml")
         & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-operator.log")
@@ -227,7 +227,12 @@ switch ($Stage) {
         $state = [ordered]@{
             schemaVersion=1;result='running';sourceSHA=$env:GITHUB_SHA;branch=$branch
             startedAt=(Get-Date).ToUniversalTime().ToString('o')
-            baselineCommit=''
+            baselineCommit='';recoveryCommit=$null;retirementCommit=$null
+            sourceBackupServerName=$null;recoveryBackupServerName=$null;backupName=$null
+            archiveConfirmedAt=$null;failureStartedAt=$null;completedAt=$null
+            sourceChecksum=$null;recoveredChecksum=$null
+            rtoMinutes=$null;rpoMinutes=$null;memoryMiB=$null
+            walObjectCount=$null;objectCount=$null
             checks=@()
         }
         Save-State $state
@@ -318,7 +323,7 @@ switch ($Stage) {
 
         $clusterName = ([string]$database.status.connectionSecretName) -replace '-app$',''
         $pod = Get-PrimaryPod $clusterName
-        & kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc 'SELECT pg_switch_wal();' *> $null
+        & kubectl --request-timeout=20s exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc 'SELECT pg_switch_wal();' *> $null
         if ($LASTEXITCODE -ne 0) { throw 'WAL switch failed.' }
         $backupName = "phase7-dr-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         New-Backup $backupName $clusterName
@@ -424,9 +429,9 @@ resources: []
         $state.retirementCommit = Git-CommitAndPush 'test(data): retire recovered orders database'
         Save-State $state
         Start-Sleep -Seconds 15
-        & kubectl delete database $DatabaseName -n $Namespace --wait=false *> $null
+        & kubectl --request-timeout=20s delete databases.platform.steadystate.dev $DatabaseName -n $Namespace --wait=false *> $null
         Wait-Until 900 'Database final backup deletion did not complete.' {
-            & kubectl get database $DatabaseName -n $Namespace *> $null
+            & kubectl --request-timeout=10s get databases.platform.steadystate.dev $DatabaseName -n $Namespace *> $null
             return $LASTEXITCODE -ne 0
         }
         $allObjects = @(& (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory)

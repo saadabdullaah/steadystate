@@ -200,6 +200,7 @@ jobs:
             '.artifacts/phase7/acceptance/registry/manifest.json',
             '.artifacts/phase7/acceptance/snapshots/source-backup.json',
             '.artifacts/phase7/acceptance/snapshots/source-object-inventory.txt',
+            '.artifacts/phase7/acceptance/snapshots/pinned-data-images.json',
             '.artifacts/phase7/acceptance/snapshots/recovered-data.yaml',
             '.artifacts/phase7/acceptance/snapshots/success-data.yaml',
             '.artifacts/phase7/acceptance/snapshots/success-object-inventory.txt',

@@ -890,6 +890,10 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"databases.platform.steadystate.dev,applications.platform.steadystate.dev",
 		"$postgresInitImages['plugin-barman-cloud']",
 		"snapshots/pinned-data-images.json",
+		"sourceBackupServerName=$null",
+		"recoveryBackupServerName=$null",
+		"rtoMinutes=$null;rpoMinutes=$null;memoryMiB=$null",
+		"databases.platform.steadystate.dev $DatabaseName",
 	} {
 		if !strings.Contains(phase7Acceptance, contract) {
 			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)
@@ -906,6 +910,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"id: cleanup-token",
 		"GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}",
 		"client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}",
+		".artifacts/phase7/acceptance/snapshots/pinned-data-images.json",
 	} {
 		if !strings.Contains(acceptanceWorkflow, contract) {
 			t.Fatalf("Phase 7 workflow cleanup is missing %q", contract)
@@ -1205,6 +1210,7 @@ func TestPhase3HostedAcceptanceContracts(t *testing.T) {
 		"persist-credentials: false",
 		"actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
 		"client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}",
+		".artifacts/phase7/acceptance/snapshots/pinned-data-images.json",
 		"private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}",
 		"permission-contents: write",
 		"phase3-acceptance-${{ github.sha }}",
