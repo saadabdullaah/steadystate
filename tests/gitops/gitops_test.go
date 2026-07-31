@@ -900,6 +900,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"PHASE7_STAGE",
 		"PHASE7_ACCEPTANCE_RESULT_FAILED stage=",
 		"return $sha.Trim()",
+		"Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090",
 	} {
 		if !strings.Contains(phase7Acceptance, contract) {
 			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)

@@ -160,13 +160,17 @@ function Wait-BackupAlert([bool]$Firing) {
 }
 
 function Invoke-PrometheusScalar([string]$Expression) {
-    $prometheus = (& kubectl --request-timeout=10s get pod -n monitoring -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $prometheus) { throw 'Prometheus Pod was not found.' }
     $encoded = [Uri]::EscapeDataString($Expression)
-    $raw = @(& kubectl --request-timeout=20s exec -n monitoring $prometheus -c prometheus -- wget -qO- "http://127.0.0.1:9090/api/v1/query?query=$encoded")
-    if ($LASTEXITCODE -ne 0 -or -not $raw) { throw 'Prometheus resource query failed.' }
-    $result = (($raw -join [Environment]::NewLine) | ConvertFrom-Json).data.result
-    if (@($result).Count -ne 1) { throw "Prometheus query returned $(@($result).Count) results." }
+    try {
+        $response = (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 "/api/v1/query?query=$encoded") | ConvertFrom-Json
+    } catch {
+        throw "Prometheus resource query failed: $($_.Exception.Message)"
+    }
+    if ($response.status -ne 'success') {
+        throw "Prometheus resource query returned status '$($response.status)'."
+    }
+    $result = @($response.data.result)
+    if ($result.Count -ne 1) { throw "Prometheus query returned $($result.Count) results." }
     return [double]$result[0].value[1]
 }
 
