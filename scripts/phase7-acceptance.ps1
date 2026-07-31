@@ -201,16 +201,16 @@ function Capture([string]$Prefix) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & kubectl get databases.platform.steadystate.dev,applications.platform.steadystate.dev -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-platform.yaml")
-        & kubectl get cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-data.yaml")
-        & kubectl get applications.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")
-        & kubectl get pod,pvc,service,networkpolicy -n $Namespace -o wide *> (Join-Path $ArtifactRoot "snapshots/$Prefix-workloads.txt")
-        & kubectl get prometheusrule -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-alert-rules.yaml")
-        & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-operator.log")
-        & kubectl logs -n cnpg-system deployment/cloudnative-pg --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-cnpg.log")
-        & kubectl logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-barman.log")
-        & kubectl logs -n $Namespace -l "app.kubernetes.io/instance=$ApplicationName" --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-application.log")
-        & kubectl logs -n argocd statefulset/argocd-application-controller --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-argo.log")
+        & kubectl --request-timeout=5s get databases.platform.steadystate.dev,applications.platform.steadystate.dev -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-platform.yaml")
+        & kubectl --request-timeout=5s get cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-data.yaml")
+        & kubectl --request-timeout=5s get applications.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")
+        & kubectl --request-timeout=5s get pod,pvc,service,networkpolicy -n $Namespace -o wide *> (Join-Path $ArtifactRoot "snapshots/$Prefix-workloads.txt")
+        & kubectl --request-timeout=5s get prometheusrule -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-alert-rules.yaml")
+        & kubectl --request-timeout=5s logs -n steadystate-system deployment/steadystate-controller-manager --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-operator.log")
+        & kubectl --request-timeout=5s logs -n cnpg-system deployment/cloudnative-pg --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-cnpg.log")
+        & kubectl --request-timeout=5s logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-barman.log")
+        & kubectl --request-timeout=5s logs -n $Namespace -l "app.kubernetes.io/instance=$ApplicationName" --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-application.log")
+        & kubectl --request-timeout=5s logs -n argocd statefulset/argocd-application-controller --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-argo.log")
         & docker logs steadystate-seaweedfs --tail 1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-seaweedfs.log")
         & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactRoot "snapshots/$Prefix-object-inventory.txt")
     } finally {
@@ -272,16 +272,15 @@ switch ($Stage) {
     'Test' {
         $state = Get-State
         try {
-        Set-Stage $state 'initial-readiness'
-        $started = Get-Date
-        $database = Wait-Ready 'database' $DatabaseName $Namespace
-        $application = Wait-Ready 'application' $ApplicationName $Namespace
-        Add-Check $state 'database-application-argo-healthy' $started 'Database and signed database-bound Application agree on current-generation readiness.'
-
+        Set-Stage $state 'initial-gitops-readiness'
         $started = Get-Date
         foreach ($argoApplication in @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator','payments')) {
             $null = Wait-ArgoHealthy $argoApplication
         }
+        Set-Stage $state 'initial-readiness'
+        $database = Wait-Ready 'database' $DatabaseName $Namespace
+        $application = Wait-Ready 'application' $ApplicationName $Namespace
+        Add-Check $state 'database-application-argo-healthy' $started 'Database and signed database-bound Application agree on current-generation readiness.'
         $databaseStatus = $database.status | ConvertTo-Json -Depth 10
         if ($databaseStatus -match 'postgresql://' -or $databaseStatus -match 'ACCESS_SECRET_KEY') {
             throw 'Database status exposed secret material.'
@@ -486,6 +485,7 @@ resources: []
             $failureState.failedAt = (Get-Date).ToUniversalTime().ToString('o')
             $failureState.lastError = (([string]$_.Exception.Message) -replace 'postgresql://\S+', 'postgresql://[REDACTED]') -replace '(?i)(token|password|secret)=\S+', '$1=[REDACTED]'
             Save-State $failureState
+            Capture 'failure'
             Write-Host "PHASE7_ACCEPTANCE_RESULT_FAILED stage=$($failureState.currentStage)"
             throw
         }

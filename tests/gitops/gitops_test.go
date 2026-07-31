@@ -901,6 +901,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"PHASE7_ACCEPTANCE_RESULT_FAILED stage=",
 		"return $sha.Trim()",
 		"Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090",
+		"initial-gitops-readiness",
+		"Capture 'failure'",
 	} {
 		if !strings.Contains(phase7Acceptance, contract) {
 			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)
@@ -911,7 +913,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"Phase 7 failed before the disposable cluster was created.",
 		`$branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"`,
 		"Cluster 'steadystate' is already absent; GitOps cleanup is complete.",
-		"timeout-minutes: 75",
+		"timeout-minutes: 65",
 		"timeout --signal=TERM --kill-after=30s 40m vhs docs/demonstrations/phase7-disaster-recovery.tape",
 		"id: recovery-token",
 		"id: cleanup-token",

@@ -16,7 +16,7 @@ jobs:
   acceptance:
     name: database-disaster-recovery
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 65
     env:
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
     steps:
@@ -152,7 +152,13 @@ jobs:
           CI: ""
           COLORTERM: truecolor
           GH_TOKEN: ${{ steps.recovery-token.outputs.token }}
-        run: timeout --signal=TERM --kill-after=30s 40m vhs docs/demonstrations/phase7-disaster-recovery.tape
+        run: |
+          timeout --signal=TERM --kill-after=30s 40m vhs docs/demonstrations/phase7-disaster-recovery.tape
+          result="$(jq -r '.result' .artifacts/phase7/acceptance/state.json)"
+          if [ "$result" != "passed" ]; then
+            jq -r '"Phase 7 acceptance failed at stage \(.currentStage): \(.lastError)"' .artifacts/phase7/acceptance/state.json
+            exit 1
+          fi
 
       - name: Finalize evidence
         id: finalize
@@ -163,7 +169,7 @@ jobs:
       - name: Capture success or failure diagnostics
         if: always()
         continue-on-error: true
-        timeout-minutes: 5
+        timeout-minutes: 2
         shell: pwsh
         run: |
           $clusters = @(& kind get clusters 2>$null)
@@ -179,7 +185,7 @@ jobs:
       - name: Capture failure evidence
         if: always() && steps.prepare.outcome != 'skipped' && steps.finalize.outcome != 'success'
         continue-on-error: true
-        timeout-minutes: 4
+        timeout-minutes: 2
         shell: pwsh
         env:
           PHASE7_FAILURE_MESSAGE: prepare=${{ steps.prepare.outcome }}, recovery=${{ steps.recovery.outcome }}, finalize=${{ steps.finalize.outcome }}
