@@ -14,6 +14,8 @@ spec:
       control-plane: controller-manager
   endpoints:
     - port: metrics
-      path: /database-metrics
+      # The exported Database metric carries the tenant namespace. Preserve it
+      # instead of replacing it with the operator scrape-target namespace.
+      honorLabels: true
       interval: 15s
       scrapeTimeout: 10s

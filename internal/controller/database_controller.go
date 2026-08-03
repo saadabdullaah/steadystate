@@ -3,13 +3,11 @@ package controller
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -26,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	controllermetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
@@ -41,7 +40,6 @@ const (
 )
 
 var (
-	databaseMetricsRegistry = prometheus.NewRegistry()
 	databaseBackupHealthyMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "steadystate_database_backup_healthy",
 		Help: "Database backup health observed by the controller (1 healthy, 0 unhealthy, -1 unknown).",
@@ -53,12 +51,7 @@ var (
 )
 
 func init() {
-	databaseMetricsRegistry.MustRegister(databaseBackupHealthyMetric, databaseLastSuccessfulBackupMetric)
-}
-
-// DatabaseMetricsHandler exposes only SteadyState Database health metrics.
-func DatabaseMetricsHandler() http.Handler {
-	return promhttp.HandlerFor(databaseMetricsRegistry, promhttp.HandlerOpts{ErrorHandling: promhttp.HTTPErrorOnError})
+	controllermetrics.Registry.MustRegister(databaseBackupHealthyMetric, databaseLastSuccessfulBackupMetric)
 }
 
 // DatabaseReconciler manages CNPG and Barman resources without importing their Go modules.

@@ -2,8 +2,6 @@ package controller
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -19,32 +17,6 @@ import (
 	platformv1alpha1 "github.com/saadabdullaah/steadystate/api/v1alpha1"
 	"github.com/saadabdullaah/steadystate/internal/resources"
 )
-
-func TestDatabaseMetricsHandlerExposesBackupHealth(t *testing.T) {
-	database := databaseStatusFixture()
-	database.Namespace = "metrics-team"
-	database.Name = "metrics-orders"
-	completedAt := metav1.NewTime(time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC))
-	status := databaseStatusFromCluster(database, readyDatabaseCluster(), databaseBackupState{
-		lastSuccessful: &completedAt,
-		latestPhase:    "completed",
-	})
-	updateDatabaseBackupMetrics(database, status)
-
-	recorder := httptest.NewRecorder()
-	DatabaseMetricsHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/database-metrics", nil))
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("database metrics status = %d, want 200", recorder.Code)
-	}
-	for _, expected := range []string{
-		`steadystate_database_backup_healthy{database="metrics-orders",namespace="metrics-team"} 1`,
-		`steadystate_database_last_successful_backup_timestamp_seconds{database="metrics-orders",namespace="metrics-team"}`,
-	} {
-		if !strings.Contains(recorder.Body.String(), expected) {
-			t.Fatalf("database metrics response is missing %q:\n%s", expected, recorder.Body.String())
-		}
-	}
-}
 
 func TestDatabaseStatusRequiresRealBackupEvidence(t *testing.T) {
 	database := databaseStatusFixture()
