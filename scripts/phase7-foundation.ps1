@@ -104,6 +104,23 @@ function Wait-DatabaseHealthy([int]$TimeoutSeconds = 900) {
     throw "Database $Namespace/$DatabaseName did not become Healthy within $TimeoutSeconds seconds."
 }
 
+function Wait-TeamHealthy([int]$TimeoutSeconds = 180) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $raw = @(& kubectl --request-timeout=10s get teams.platform.steadystate.dev payments -o json 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $raw) {
+            $team = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
+            $ready = @($team.status.conditions | Where-Object {
+                $_.type -eq 'Ready' -and $_.status -eq 'True' -and
+                [int64]$_.observedGeneration -eq [int64]$team.metadata.generation
+            })
+            if ($ready.Count -eq 1) { return }
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw 'Compatibility Team payments did not become current-generation Ready.'
+}
+
 function Wait-DatabaseAbsent([int]$TimeoutSeconds = 900) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -201,6 +218,11 @@ Add-Check $checks 'seaweedfs-exact-store-healthy' $started 'The exact pinned Sea
 $started = Get-Date
 Wait-ArgoApplicationsHealthy @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')
 Add-Check $checks 'pinned-data-stack-ready' $started 'StorageClass, cert-manager, CloudNativePG, Barman, and the SteadyState operator are Healthy.'
+
+# The compatibility gate intentionally creates one tenant and one Database.
+# The normal payments workload is disabled in the root chart for this workflow.
+Invoke-Kubectl apply -k (Join-Path $Root 'gitops/teams/payments')
+Wait-TeamHealthy
 
 Invoke-Kubectl delete database $DatabaseName -n $Namespace --ignore-not-found=true --wait=false
 Wait-DatabaseAbsent 120

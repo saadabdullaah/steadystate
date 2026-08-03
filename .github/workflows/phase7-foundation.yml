@@ -71,7 +71,7 @@ jobs:
         # Phase 5 acceptance validates Loki, Tempo, Alloy, and OTel separately.
         # Keep Prometheus and Kyverno active here while reserving runner
         # capacity for CNPG, Barman, PostgreSQL, and the external backup store.
-        run: ./scripts/dev.ps1 deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline
+        run: ./scripts/dev.ps1 deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline -DisableTenantWorkloads
 
       - name: Prove backup, WAL archive, and restore compatibility
         id: compatibility

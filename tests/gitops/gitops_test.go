@@ -665,7 +665,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 5 {
+	if len(parameters) != 6 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
@@ -673,6 +673,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 		"enableTelemetryPipeline": "true",
 		"enableSecurity":          "true",
 		"enableDataFoundation":    "false",
+		"enableTenantWorkloads":   "true",
 		"backupStoreEndpoint":     "http://172.30.240.10:8333",
 	}
 	for _, raw := range parameters {
@@ -722,6 +723,24 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 	objects := decodeManifests(t, rendered)
 	if len(objects) != 19 {
 		t.Fatalf("full data foundation rendered %d objects, want 19", len(objects))
+	}
+	isolated := decodeManifests(t, run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--namespace", "argocd",
+		"--set-string", "gitRevision="+testRevision,
+		"--set", "enableDataFoundation=true",
+		"--set", "enableTenantWorkloads=false",
+	))
+	if len(isolated) != 18 {
+		t.Fatalf("isolated data foundation rendered %d objects, want 18", len(isolated))
+	}
+	for _, object := range isolated {
+		if objectString(object, "kind") == "Application" && objectString(object, "metadata", "name") == "payments" {
+			t.Fatal("isolated data foundation must not render the normal payments tenant workload")
+		}
+	}
+	for _, required := range []string{"steadystate-operator", "kyverno", "kyverno-policies", "cloudnative-pg", "barman-cloud"} {
+		findObject(t, isolated, "Application", required)
 	}
 	expectedWaves := map[string]string{
 		"data-namespaces":    "-10",
@@ -853,15 +872,24 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"[uint64]2147483648",
 		"$fullPath.Substring($bucketRoot.Length + 1)",
 		"$global:LASTEXITCODE = 0",
+		"--memory \"$MemoryLimitMiB`m\"",
+		"--memory-swap \"$MemoryLimitMiB`m\"",
+		"--env \"GOMEMLIMIT=$($goMemoryLimitMiB)MiB\"",
+		"SeaweedFS memory is not capped",
 	} {
 		if !strings.Contains(backupStore, contract) {
 			t.Fatalf("SeaweedFS logical inventory is missing %q", contract)
 		}
 	}
 	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
-	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline") ||
+	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline -DisableTenantWorkloads") ||
 		strings.Contains(phase7Workflow, "-DisableSecurity") {
-		t.Fatal("Phase 7 compatibility must isolate the data stack while retaining monitoring and Kyverno")
+		t.Fatal("Phase 7 compatibility must isolate one data fixture while retaining monitoring and Kyverno")
+	}
+	for _, contract := range []string{"Invoke-Kubectl apply -k (Join-Path $Root 'gitops/teams/payments')", "Wait-TeamHealthy"} {
+		if !strings.Contains(phase7Foundation, contract) {
+			t.Fatalf("Phase 7 single-database foundation setup is missing %q", contract)
+		}
 	}
 	for _, contract := range []string{"success-cnpg-job-pods.yaml", "success-cnpg-job-pods.log"} {
 		if !strings.Contains(phase7Workflow, contract) {

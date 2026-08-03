@@ -7,6 +7,8 @@ param(
     [int]$HostPort = 8333,
     [string]$Subnet = '172.30.240.0/24',
     [string]$ContainerIP = '172.30.240.10',
+    [ValidateRange(128, 400)]
+    [int]$MemoryLimitMiB = 384,
     [switch]$PurgeData
 )
 
@@ -162,14 +164,18 @@ switch ($Action) {
             Invoke-Docker rm --force $ContainerName
         }
         $credentials = Get-Credentials
+        $goMemoryLimitMiB = [Math]::Floor($MemoryLimitMiB * 0.8)
         Invoke-Docker run --detach --name $ContainerName --network $NetworkName `
             --ip $ContainerIP `
             --restart unless-stopped `
+            --memory "$MemoryLimitMiB`m" `
+            --memory-swap "$MemoryLimitMiB`m" `
             --publish "127.0.0.1:$HostPort`:8333" `
             --volume "$VolumeName`:/data" `
             --env "AWS_ACCESS_KEY_ID=$($credentials.AccessKey)" `
             --env "AWS_SECRET_ACCESS_KEY=$($credentials.SecretKey)" `
             --env "S3_BUCKET=$BucketName" `
+            --env "GOMEMLIMIT=$($goMemoryLimitMiB)MiB" `
             --health-cmd 'wget -q -O - http://127.0.0.1:9333/cluster/status >/dev/null || exit 1' `
             --health-interval 5s --health-timeout 3s --health-retries 24 `
             $image mini -dir=/data
@@ -201,6 +207,12 @@ switch ($Action) {
         if ($runningIP -ne $ContainerIP) { throw "SeaweedFS has IP $runningIP instead of $ContainerIP." }
         $mountedVolume = (& docker inspect $ContainerName --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}').Trim()
         if ($mountedVolume -ne $VolumeName) { throw 'SeaweedFS is not using the exact persistent backup volume.' }
+        $expectedMemoryBytes = [int64]$MemoryLimitMiB * 1MB
+        $memoryLimitBytes = [int64]((& docker inspect $ContainerName --format '{{.HostConfig.Memory}}').Trim())
+        $memorySwapBytes = [int64]((& docker inspect $ContainerName --format '{{.HostConfig.MemorySwap}}').Trim())
+        if ($memoryLimitBytes -ne $expectedMemoryBytes -or $memorySwapBytes -ne $expectedMemoryBytes) {
+            throw "SeaweedFS memory is not capped at $MemoryLimitMiB MiB without swap growth."
+        }
         $environmentNames = @(& docker inspect $ContainerName --format '{{range .Config.Env}}{{println .}}{{end}}' |
             ForEach-Object { ($_ -split '=', 2)[0] })
         foreach ($required in @('AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','S3_BUCKET')) {
@@ -208,7 +220,7 @@ switch ($Action) {
         }
         $binding = & docker port $ContainerName 8333/tcp
         if ($binding -notmatch "^127\.0\.0\.1:$HostPort$") { throw "SeaweedFS is not bound only to 127.0.0.1:$HostPort." }
-        Write-Host 'SeaweedFS health, exact identity, persistent volume, and loopback binding verified.'
+        Write-Host "SeaweedFS health, exact identity, persistent volume, loopback binding, and $MemoryLimitMiB MiB memory cap verified."
     }
     'Inventory' {
         if (-not (Get-ExactResource container $ContainerName).Exists) { throw 'SeaweedFS container is absent.' }

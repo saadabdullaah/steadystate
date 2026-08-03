@@ -432,6 +432,7 @@ spec:
     syncOptions:
       - ServerSideApply=true
 {{- end }}
+{{- if .Values.enableTenantWorkloads }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -503,3 +504,4 @@ spec:
       jsonPointers:
         - /metadata/finalizers
         - /status
+{{- end }}
