@@ -151,14 +151,15 @@ function New-Backup([string]$Name, [string]$ClusterName) {
 }
 
 function Wait-BackupAlert([bool]$Firing) {
-    $prometheus = (& kubectl --request-timeout=10s get pod -n monitoring -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $prometheus) { throw 'Prometheus Pod was not found.' }
     $expected = if ($Firing) { 1 } else { 0 }
-    Wait-Until 150 "Database backup-freshness alert did not reach firing=$Firing within 150 seconds." {
-        $raw = @(& kubectl --request-timeout=20s exec -n monitoring $prometheus -c prometheus -- wget -qO- 'http://127.0.0.1:9090/api/v1/query?query=ALERTS%7Balertname%3D%22SteadyStateDatabaseBackupStale%22%2Calertstate%3D%22firing%22%7D' 2>$null)
-        if ($LASTEXITCODE -ne 0 -or -not $raw) { return $false }
-        $query = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
-        return @($query.data.result).Count -eq $expected
+    $expression = [Uri]::EscapeDataString('ALERTS{alertname="SteadyStateDatabaseBackupStale",alertstate="firing"}')
+    Wait-Until 180 "Database backup-freshness alert did not reach firing=$Firing within 180 seconds." {
+        try {
+            $query = (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 "/api/v1/query?query=$expression") | ConvertFrom-Json
+            return $query.status -eq 'success' -and @($query.data.result).Count -eq $expected
+        } catch {
+            return $false
+        }
     }
 }
 

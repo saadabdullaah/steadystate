@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: steadystate-operator
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: steadystate
+spec:
+  namespaceSelector:
+    matchNames:
+      - steadystate-system
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  endpoints:
+    - port: metrics
+      interval: 15s
+      scrapeTimeout: 10s

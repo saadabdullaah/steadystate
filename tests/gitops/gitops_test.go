@@ -910,6 +910,30 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		strings.Contains(phase7Acceptance, "find /data") {
 		t.Fatal("Phase 7 acceptance must verify logical base/WAL object keys for the active backup-server lifetime")
 	}
+	if strings.Contains(phase7Acceptance, "exec -n monitoring") ||
+		!strings.Contains(phase7Acceptance, "ALERTS{alertname=\"SteadyStateDatabaseBackupStale\",alertstate=\"firing\"}") {
+		t.Fatal("Phase 7 alert verification must use the Kubernetes service proxy and query the firing alert exactly")
+	}
+	manager := string(readFile(t, filepath.Join(root, "config", "manager", "manager.yaml")))
+	managerNetworkPolicy := string(readFile(t, filepath.Join(root, "config", "manager", "network_policy.yaml")))
+	operatorServiceMonitor := string(readFile(t, filepath.Join(root, "gitops", "platform", "observability", "operator-servicemonitor.yaml")))
+	for name, contract := range map[string]string{
+		"manager metrics listener": "--metrics-bind-address=:8080",
+		"manager metrics Service":  "name: controller-manager-metrics",
+		"metrics NetworkPolicy":     "kubernetes.io/metadata.name: monitoring",
+		"operator ServiceMonitor":   "name: steadystate-operator",
+	} {
+		content := manager
+		switch name {
+		case "metrics NetworkPolicy":
+			content = managerNetworkPolicy
+		case "operator ServiceMonitor":
+			content = operatorServiceMonitor
+		}
+		if !strings.Contains(content, contract) {
+			t.Fatalf("%s is missing %q", name, contract)
+		}
+	}
 	for _, contract := range []string{
 		"baselineCommit=''",
 		"git commit --allow-empty -m 'test(data): establish Phase 7 recovery baseline'",
