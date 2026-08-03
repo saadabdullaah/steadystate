@@ -14,5 +14,6 @@ spec:
       control-plane: controller-manager
   endpoints:
     - port: metrics
+      path: /database-metrics
       interval: 15s
       scrapeTimeout: 10s

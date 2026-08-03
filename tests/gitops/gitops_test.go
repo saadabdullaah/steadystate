@@ -927,6 +927,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		}
 	}
 	manager := string(readFile(t, filepath.Join(root, "config", "manager", "manager.yaml")))
+	managerMain := string(readFile(t, filepath.Join(root, "cmd", "main.go")))
 	managerNetworkPolicy := string(readFile(t, filepath.Join(root, "config", "manager", "network_policy.yaml")))
 	operatorServiceMonitor := string(readFile(t, filepath.Join(root, "gitops", "platform", "observability", "operator-servicemonitor.yaml")))
 	for _, contract := range []string{"--metrics-bind-address=:8080", "name: controller-manager-metrics"} {
@@ -937,8 +938,12 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	if !strings.Contains(managerNetworkPolicy, "kubernetes.io/metadata.name: monitoring") {
 		t.Fatal("manager metrics NetworkPolicy does not restrict ingress to monitoring")
 	}
-	if !strings.Contains(operatorServiceMonitor, "name: steadystate-operator") {
-		t.Fatal("operator ServiceMonitor is missing")
+	if !strings.Contains(operatorServiceMonitor, "name: steadystate-operator") ||
+		!strings.Contains(operatorServiceMonitor, "path: /database-metrics") {
+		t.Fatal("operator Database metrics ServiceMonitor is missing or uses the wrong endpoint")
+	}
+	if !strings.Contains(managerMain, `"/database-metrics": controller.DatabaseMetricsHandler()`) {
+		t.Fatal("manager does not register the dedicated Database metrics handler")
 	}
 	for _, contract := range []string{
 		"baselineCommit=''",

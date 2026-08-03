@@ -3,6 +3,7 @@ package main
 
 import (
 	"flag"
+	"net/http"
 	"os"
 
 	rolloutsv1alpha1 "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
@@ -44,7 +45,12 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 managerScheme,
-		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		Metrics:                metricsserver.Options{
+			BindAddress:    metricsAddr,
+			ExtraHandlers: map[string]http.Handler{
+				"/database-metrics": controller.DatabaseMetricsHandler(),
+			},
+		},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "manager.steadystate.dev",
