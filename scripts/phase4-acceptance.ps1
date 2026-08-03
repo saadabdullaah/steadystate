@@ -592,8 +592,11 @@ try {
             Set-DemoManifest -Tag $BadTag -Strategy canary -TagOnly -Snapshot bad-candidate
             $state.commits.rejection = New-DeliveryCommit 'test(gitops): deliver Phase 4 failing candidate'
             $state.timestamps.rejectionPushedAt = (Get-Date).ToUniversalTime().ToString('o'); Save-State $state
-            Wait-DesiredApplication $BadTag canary $state.commits.rejection -TimeoutSeconds 900
-            Wait-RouteWeights 90 10
+            # Observe the temporary router state immediately. Waiting for a
+            # separate CR read first can miss 90/10 when the API server is
+            # saturated but Rollouts and its analysis continue progressing.
+            Wait-RouteWeights 90 10 -TimeoutSeconds 900
+            Wait-DesiredApplication $BadTag canary $state.commits.rejection -TimeoutSeconds 120
             $reachedTen = Get-Date; $state.timestamps.badCandidateReachedTenAt = $reachedTen.ToUniversalTime().ToString('o')
             $state.measurements = @($state.measurements) + @((Measure-Traffic $BadTag 10)); Save-State $state
             $alertStarted = Get-Date; Wait-CandidateAlert

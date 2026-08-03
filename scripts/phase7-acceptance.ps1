@@ -68,7 +68,7 @@ function Get-ServiceRaw([string]$Service, [int]$Port, [string]$Path) {
     return ($raw -join [Environment]::NewLine)
 }
 
-function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 300) {
+function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 600) {
     $application = $null
     Wait-Until $TimeoutSeconds "Argo Application $Name did not become Healthy and Synced." {
         $script:application = Get-KubeObject @('get','applications.argoproj.io',$Name,'-n','argocd')

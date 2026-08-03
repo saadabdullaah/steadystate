@@ -917,22 +917,16 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	manager := string(readFile(t, filepath.Join(root, "config", "manager", "manager.yaml")))
 	managerNetworkPolicy := string(readFile(t, filepath.Join(root, "config", "manager", "network_policy.yaml")))
 	operatorServiceMonitor := string(readFile(t, filepath.Join(root, "gitops", "platform", "observability", "operator-servicemonitor.yaml")))
-	for name, contract := range map[string]string{
-		"manager metrics listener": "--metrics-bind-address=:8080",
-		"manager metrics Service":  "name: controller-manager-metrics",
-		"metrics NetworkPolicy":     "kubernetes.io/metadata.name: monitoring",
-		"operator ServiceMonitor":   "name: steadystate-operator",
-	} {
-		content := manager
-		switch name {
-		case "metrics NetworkPolicy":
-			content = managerNetworkPolicy
-		case "operator ServiceMonitor":
-			content = operatorServiceMonitor
+	for _, contract := range []string{"--metrics-bind-address=:8080", "name: controller-manager-metrics"} {
+		if !strings.Contains(manager, contract) {
+			t.Fatalf("manager metrics configuration is missing %q", contract)
 		}
-		if !strings.Contains(content, contract) {
-			t.Fatalf("%s is missing %q", name, contract)
-		}
+	}
+	if !strings.Contains(managerNetworkPolicy, "kubernetes.io/metadata.name: monitoring") {
+		t.Fatal("manager metrics NetworkPolicy does not restrict ingress to monitoring")
+	}
+	if !strings.Contains(operatorServiceMonitor, "name: steadystate-operator") {
+		t.Fatal("operator ServiceMonitor is missing")
 	}
 	for _, contract := range []string{
 		"baselineCommit=''",
@@ -1507,7 +1501,8 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"Wait-DesiredApplication $GoodTag canary $state.commits.promotion -TimeoutSeconds 900",
 		"Wait-DesiredApplication $state.sourceTag canary $state.commits.rollingToCanary -TimeoutSeconds 900",
 		"Rolling-to-canary migration exceeded five minutes.",
-		"Wait-DesiredApplication $BadTag canary $state.commits.rejection -TimeoutSeconds 900",
+		"Wait-RouteWeights 90 10 -TimeoutSeconds 900",
+		"Wait-DesiredApplication $BadTag canary $state.commits.rejection -TimeoutSeconds 120",
 		"Wait-DesiredApplication $GoodTag canary $state.commits.recovery -TimeoutSeconds 900",
 		"Wait-CanaryEndpoint",
 		"-DisableKeepAlive",
