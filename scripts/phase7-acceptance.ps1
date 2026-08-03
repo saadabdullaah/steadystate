@@ -68,6 +68,34 @@ function Get-ServiceRaw([string]$Service, [int]$Port, [string]$Path) {
     return ($raw -join [Environment]::NewLine)
 }
 
+function Get-PrometheusQuery([string]$Expression) {
+    $encoded = [Uri]::EscapeDataString($Expression)
+    $response = (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 "/api/v1/query?query=$encoded") | ConvertFrom-Json
+    if ($response.status -ne 'success') { throw "Prometheus query returned status '$($response.status)'." }
+    return $response
+}
+
+function Wait-OperatorBackupMetric([double]$Expected, [int]$TimeoutSeconds = 120) {
+    $expression = 'steadystate_database_backup_healthy{namespace="team-payments",database="orders"}'
+    $targetPath = '/api/v1/targets?state=active'
+    Wait-Until $TimeoutSeconds "SteadyState operator metrics target was not healthy with backup metric $Expected." {
+        try {
+            $targets = (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 $targetPath) | ConvertFrom-Json
+            $operatorTargets = @($targets.data.activeTargets | Where-Object {
+                [string]$_.scrapePool -eq 'serviceMonitor/monitoring/steadystate-operator/0'
+            })
+            if ($operatorTargets.Count -ne 1 -or [string]$operatorTargets[0].health -ne 'up') { return $false }
+            $query = Get-PrometheusQuery $expression
+            $result = @($query.data.result)
+            return $result.Count -eq 1 -and [double]$result[0].value[1] -eq $Expected
+        } catch {
+            return $false
+        }
+    }
+    Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/prometheus-operator-targets.json') (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 $targetPath)
+    Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/prometheus-database-backup-health.json') ((Get-PrometheusQuery $expression | ConvertTo-Json -Depth 20) + [Environment]::NewLine)
+}
+
 function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 600) {
     $application = $null
     Wait-Until $TimeoutSeconds "Argo Application $Name did not become Healthy and Synced." {
@@ -153,7 +181,7 @@ function New-Backup([string]$Name, [string]$ClusterName) {
 function Wait-BackupAlert([bool]$Firing) {
     $expected = if ($Firing) { 1 } else { 0 }
     $expression = [Uri]::EscapeDataString('ALERTS{alertname="SteadyStateDatabaseBackupStale",alertstate="firing"}')
-    Wait-Until 180 "Database backup-freshness alert did not reach firing=$Firing within 180 seconds." {
+    Wait-Until 120 "Database backup-freshness alert did not reach firing=$Firing within 120 seconds." {
         try {
             $query = (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 "/api/v1/query?query=$expression") | ConvertFrom-Json
             return $query.status -eq 'success' -and @($query.data.result).Count -eq $expected
@@ -210,6 +238,10 @@ function Capture([string]$Prefix) {
         & kubectl --request-timeout=5s get applications.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")
         & kubectl --request-timeout=5s get pod,pvc,service,networkpolicy -n $Namespace -o wide *> (Join-Path $ArtifactRoot "snapshots/$Prefix-workloads.txt")
         & kubectl --request-timeout=5s get prometheusrule -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-alert-rules.yaml")
+        & kubectl --request-timeout=5s get service,endpointslice,networkpolicy -n steadystate-system -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-operator-metrics-routing.yaml")
+        & kubectl --request-timeout=5s get servicemonitor steadystate-operator -n monitoring -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-operator-servicemonitor.yaml")
+        try { Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-prometheus-targets.json") (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 '/api/v1/targets?state=active') } catch {}
+        try { Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-prometheus-backup-health.json") ((Get-PrometheusQuery 'steadystate_database_backup_healthy{namespace="team-payments",database="orders"}' | ConvertTo-Json -Depth 20) + [Environment]::NewLine) } catch {}
         & kubectl --request-timeout=5s logs -n steadystate-system deployment/steadystate-controller-manager --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-operator.log")
         & kubectl --request-timeout=5s logs -n cnpg-system deployment/cloudnative-pg --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-cnpg.log")
         & kubectl --request-timeout=5s logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-barman.log")
@@ -349,6 +381,7 @@ switch ($Stage) {
         $backupName = "phase7-dr-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         New-Backup $backupName $clusterName
         $backup = Wait-Backup $backupName
+        Wait-OperatorBackupMetric 1
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/source-backup.json') (($backup | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
         $sourceBackupServerName = [string]$database.status.backupServerName
         $allSourceObjects = @(& (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory)
@@ -438,6 +471,7 @@ switch ($Stage) {
         New-Backup $failedBackup (([string]$recoveredDatabase.status.connectionSecretName) -replace '-app$','')
         $failed = Wait-Backup $failedBackup 300 -AllowFailure
         if ([string]$failed.status.phase -ne 'failed') { throw 'Backup-store outage did not produce a failed Backup.' }
+        Wait-OperatorBackupMetric 0
         Wait-BackupAlert $true
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/prometheus-backup-alert.json') (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 '/api/v1/query?query=ALERTS%7Balertname%3D%22SteadyStateDatabaseBackupStale%22%7D')
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/alertmanager-backup-outage.json') (Get-ServiceRaw 'monitoring-kube-prometheus-alertmanager' 9093 '/api/v2/alerts')

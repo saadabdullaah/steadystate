@@ -368,7 +368,7 @@ func TestArgoConfigurationContracts(t *testing.T) {
 			"observedGeneration", `condition.status == "True"`, `condition.status == "False"`,
 		},
 		"resource.customizations.health.argoproj.io_Application": {
-			"obj.status.health.status",
+			"obj.status.health.status", "steadystate.dev/transient-degraded-as-progressing", "Waiting for bootstrap health to recover",
 		},
 	}
 	for key, tokens := range healthContracts {
@@ -753,6 +753,7 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 		assertAnnotation(t, findObject(t, objects, "Application", name), "argocd.argoproj.io/sync-wave", wave)
 	}
 	assertAnnotation(t, findObject(t, objects, "Application", "steadystate-operator"), "argocd.argoproj.io/sync-wave", "-5")
+	assertAnnotation(t, findObject(t, objects, "Application", "barman-cloud"), "steadystate.dev/transient-degraded-as-progressing", "true")
 	assertExternalChartApplication(t, objects, "cert-manager", "https://charts.jetstack.io", "cert-manager", "v1.21.0", "gitops/platform/cert-manager/values.yaml", "cert-manager")
 	assertExternalChartApplication(t, objects, "cloudnative-pg", "https://cloudnative-pg.github.io/charts", "cloudnative-pg", "0.29.0", "gitops/platform/cloudnative-pg/values.yaml", "cnpg-system")
 	assertExternalChartApplication(t, objects, "barman-cloud", "https://cloudnative-pg.github.io/charts", "plugin-barman-cloud", "0.7.0", "gitops/platform/barman-cloud/values.yaml", "cnpg-system")
@@ -913,6 +914,17 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	if strings.Contains(phase7Acceptance, "exec -n monitoring") ||
 		!strings.Contains(phase7Acceptance, "ALERTS{alertname=\"SteadyStateDatabaseBackupStale\",alertstate=\"firing\"}") {
 		t.Fatal("Phase 7 alert verification must use the Kubernetes service proxy and query the firing alert exactly")
+	}
+	for _, contract := range []string{
+		"Wait-OperatorBackupMetric 1",
+		"Wait-OperatorBackupMetric 0",
+		"serviceMonitor/monitoring/steadystate-operator/0",
+		"prometheus-operator-targets.json",
+		"operator-metrics-routing.yaml",
+	} {
+		if !strings.Contains(phase7Acceptance, contract) {
+			t.Fatalf("Phase 7 operator-metrics preflight is missing %q", contract)
+		}
 	}
 	manager := string(readFile(t, filepath.Join(root, "config", "manager", "manager.yaml")))
 	managerNetworkPolicy := string(readFile(t, filepath.Join(root, "config", "manager", "network_policy.yaml")))

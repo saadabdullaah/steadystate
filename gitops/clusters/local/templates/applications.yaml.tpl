@@ -307,6 +307,10 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-6"
+    # The plugin can report Degraded briefly while cert-manager issues its
+    # serving certificate. Keep the parent wave pending so automated sync can
+    # recover; the child Application still exposes its exact native health.
+    steadystate.dev/transient-degraded-as-progressing: "true"
 spec:
   project: platform
   sources:
