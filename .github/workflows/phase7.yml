@@ -87,10 +87,10 @@ jobs:
           install_dir="$RUNNER_TEMP/steadystate-recording/bin"
           mkdir -p "$install_dir"
           archive="$RUNNER_TEMP/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
-          curl --fail --location --retry 3 --output "$archive" "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 --output "$archive" "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
           echo "${VHS_LINUX_X86_64_SHA256}  ${archive}" | sha256sum --check --strict
           tar --extract --gzip --strip-components=1 --file "$archive" --directory "$install_dir"
-          curl --fail --location --retry 3 --output "$install_dir/ttyd" "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 --output "$install_dir/ttyd" "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
           echo "${TTYD_LINUX_X86_64_SHA256}  ${install_dir}/ttyd" | sha256sum --check --strict
           chmod 0755 "$install_dir/vhs" "$install_dir/ttyd"
           echo "$install_dir" >> "$GITHUB_PATH"

@@ -943,6 +943,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"Cluster 'steadystate' is already absent; GitOps cleanup is complete.",
 		"timeout-minutes: 65",
 		"timeout --signal=TERM --kill-after=30s 40m vhs docs/demonstrations/phase7-disaster-recovery.tape",
+		"curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30",
 		"id: recovery-token",
 		"id: cleanup-token",
 		"GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}",
