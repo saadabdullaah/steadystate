@@ -135,7 +135,7 @@ function Wait-Backup([string]$Name, [int]$TimeoutSeconds = 420, [switch]$AllowFa
 }
 
 function New-Backup([string]$Name, [string]$ClusterName) {
-    [ordered]@{
+    $output = @([ordered]@{
         apiVersion='postgresql.cnpg.io/v1';kind='Backup'
         metadata=[ordered]@{name=$Name;namespace=$Namespace}
         spec=[ordered]@{
@@ -143,8 +143,11 @@ function New-Backup([string]$Name, [string]$ClusterName) {
             method='plugin'
             pluginConfiguration=[ordered]@{name='barman-cloud.cloudnative-pg.io'}
         }
-    } | ConvertTo-Json -Depth 15 | & kubectl --request-timeout=20s apply -f - *> $null
-    if ($LASTEXITCODE -ne 0) { throw "Could not create Backup $Name." }
+    } | ConvertTo-Json -Depth 15 | & kubectl --request-timeout=20s apply -f - 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $detail = (($output -join ' ') -replace '(?i)(token|password|secret)=\S+', '$1=[REDACTED]')
+        throw "Could not create Backup ${Name}: $detail"
+    }
 }
 
 function Wait-BackupAlert([bool]$Firing) {
@@ -428,7 +431,7 @@ switch ($Stage) {
 
         Set-Stage $state 'backup-outage-and-recovery'
         $started = Get-Date
-        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Stop
+        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Stop -PreserveNetwork
         if ($LASTEXITCODE -ne 0) { throw 'Stopping the external backup store failed.' }
         $failedBackup = "phase7-outage-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         New-Backup $failedBackup (([string]$recoveredDatabase.status.connectionSecretName) -replace '-app$','')

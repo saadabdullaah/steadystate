@@ -876,6 +876,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"--memory-swap \"$MemoryLimitMiB`m\"",
 		"--env \"GOMEMLIMIT=$($goMemoryLimitMiB)MiB\"",
 		"Invoke-Docker network disconnect --force",
+		"-not $PreserveNetwork",
 		"SeaweedFS memory is not capped",
 	} {
 		if !strings.Contains(backupStore, contract) {
@@ -932,6 +933,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090",
 		"initial-gitops-readiness",
 		"Capture 'failure'",
+		"-Action Stop -PreserveNetwork",
+		"Could not create Backup ${Name}: $detail",
 	} {
 		if !strings.Contains(phase7Acceptance, contract) {
 			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)

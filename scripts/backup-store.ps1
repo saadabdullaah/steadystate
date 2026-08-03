@@ -9,6 +9,7 @@ param(
     [string]$ContainerIP = '172.30.240.10',
     [ValidateRange(128, 400)]
     [int]$MemoryLimitMiB = 384,
+    [switch]$PreserveNetwork,
     [switch]$PurgeData
 )
 
@@ -202,7 +203,7 @@ switch ($Action) {
         if ((Get-ExactResource container $ContainerName).Exists) {
             Invoke-Docker rm --force $ContainerName
         }
-        if ((Get-ExactResource network $NetworkName).Exists) {
+        if (-not $PreserveNetwork -and (Get-ExactResource network $NetworkName).Exists) {
             Disconnect-ClusterNodes
             Invoke-Docker network rm $NetworkName
         }
@@ -210,7 +211,8 @@ switch ($Action) {
             Invoke-Docker volume rm $VolumeName
         }
         $retention = if ($PurgeData) { 'purged by explicit request' } else { 'preserved' }
-        Write-Host "Stopped the exact SteadyState backup-store resources; backup volume $retention."
+        $networkState = if ($PreserveNetwork) { 'preserved for a temporary outage' } else { 'removed' }
+        Write-Host "Stopped the exact SteadyState backup-store resources; backup volume $retention; backup network $networkState."
     }
     'Verify' {
         if (-not (Get-ExactResource container $ContainerName).Exists) { throw 'SeaweedFS container is absent.' }
