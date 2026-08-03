@@ -115,14 +115,14 @@ jobs:
 
       - name: Record automatic good-canary promotion
         id: promotion
-        timeout-minutes: 15
+        timeout-minutes: 18
         shell: bash
         env:
           CI: ""
           COLORTERM: truecolor
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PHASE4_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-        run: timeout --signal=TERM --kill-after=30s 14m vhs docs/demonstrations/phase4-canary-promotion.tape
+        run: timeout --signal=TERM --kill-after=30s 17m vhs docs/demonstrations/phase4-canary-promotion.tape
 
       - name: Verify promotion recording result
         id: promotion-verification

@@ -875,6 +875,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"--memory \"$MemoryLimitMiB`m\"",
 		"--memory-swap \"$MemoryLimitMiB`m\"",
 		"--env \"GOMEMLIMIT=$($goMemoryLimitMiB)MiB\"",
+		"Invoke-Docker network disconnect --force",
 		"SeaweedFS memory is not capped",
 	} {
 		if !strings.Contains(backupStore, contract) {
@@ -941,8 +942,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"Phase 7 failed before the disposable cluster was created.",
 		`$branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"`,
 		"Cluster 'steadystate' is already absent; GitOps cleanup is complete.",
-		"timeout-minutes: 65",
-		"timeout --signal=TERM --kill-after=30s 40m vhs docs/demonstrations/phase7-disaster-recovery.tape",
+		"timeout-minutes: 75",
+		"timeout --signal=TERM --kill-after=30s 50m vhs docs/demonstrations/phase7-disaster-recovery.tape",
 		"curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30",
 		"id: recovery-token",
 		"id: cleanup-token",
@@ -1443,7 +1444,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, token := range []string{
 		"name: Phase 4 acceptance",
 		"timeout-minutes: 60",
-		"timeout --signal=TERM --kill-after=30s 14m vhs docs/demonstrations/phase4-canary-promotion.tape",
+		"timeout --signal=TERM --kill-after=30s 17m vhs docs/demonstrations/phase4-canary-promotion.tape",
 		"timeout --signal=TERM --kill-after=30s 17m vhs docs/demonstrations/phase4-automatic-rollback.tape",
 		"cancel-in-progress: false",
 		"phase4-acceptance-${{ github.sha }}",

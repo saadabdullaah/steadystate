@@ -86,9 +86,24 @@ function Connect-ClusterNodes {
         if ($node -notmatch "^$([regex]::Escape($ClusterName))-(control-plane|worker[0-9]*)$") {
             throw "Refusing to connect unexpected container '$node' to the backup network."
         }
-        $attached = & docker inspect $node --format "{{json .NetworkSettings.Networks.$NetworkName}}" 2>$null
+        $attached = & docker inspect $node --format "{{json (index .NetworkSettings.Networks `"$NetworkName`")}}" 2>$null
         if ($LASTEXITCODE -ne 0 -or $attached -eq 'null') {
             Invoke-Docker network connect $NetworkName $node
+        }
+    }
+}
+
+function Disconnect-ClusterNodes {
+    if (-not (Get-Command kind -ErrorAction SilentlyContinue)) { return }
+    $nodes = @(& kind get nodes --name $ClusterName 2>$null)
+    if ($LASTEXITCODE -ne 0) { return }
+    foreach ($node in $nodes) {
+        if ($node -notmatch "^$([regex]::Escape($ClusterName))-(control-plane|worker[0-9]*)$") {
+            throw "Refusing to disconnect unexpected container '$node' from the backup network."
+        }
+        $attached = & docker inspect $node --format "{{json (index .NetworkSettings.Networks `"$NetworkName`")}}" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $attached -ne 'null') {
+            Invoke-Docker network disconnect --force $NetworkName $node
         }
     }
 }
@@ -188,6 +203,7 @@ switch ($Action) {
             Invoke-Docker rm --force $ContainerName
         }
         if ((Get-ExactResource network $NetworkName).Exists) {
+            Disconnect-ClusterNodes
             Invoke-Docker network rm $NetworkName
         }
         if ($PurgeData -and (Get-ExactResource volume $VolumeName).Exists) {
