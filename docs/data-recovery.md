@@ -80,6 +80,11 @@ branch; the hosted `Phase 7 acceptance` workflow is the supported unattended
 entry point. Its gates are RTO at most 30 minutes, an archive boundary no more
 than five minutes before failure, exact order checksum, a firing-and-clearing
 backup-freshness alert, and retained external objects after final deletion.
+The retirement stage first waits for the tenant Argo Application's desired,
+compared, and successful-operation revisions to match the exact commit that
+removes Database intent. Tenant pruning remains disabled, so the Application
+is expected to remain OutOfSync until the drill then requests finalizer-driven
+deletion. This prevents an older desired revision from recreating the Database.
 
 ## Safe stop, cleanup, and emergencies
 

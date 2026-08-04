@@ -582,3 +582,18 @@
   processors, adds reconciliation jitter, deterministically restarts the
   configured application controller before root sync, and captures
   control-plane/Kyverno current and previous state before slower diagnostics.
+- Head `acf366e` passed the complete whole-cluster recovery path in Phase 7
+  acceptance run
+  [30898749390](https://github.com/saadabdullaah/steadystate/actions/runs/30898749390):
+  100 orders restored with the exact checksum, RTO 14.162 minutes, RPO 0,
+  backup outage alerting recovered, and the full profile measured 6656.418
+  MiB. The deterministic final backup also completed, but the tenant Argo
+  Application briefly remained on recovery commit `553bb5a` and recreated the
+  deleted Database before receiving retirement commit `f82ae1e`. Artifact
+  `8889359549` (GitHub SHA-256
+  `ee24b6842f5efbee5899e33f168879b2916e9f494db4a908fcda0e73f4bc9da1`)
+  proves the recreated UID and completed `orders-final` event. The acceptance
+  runner now waits for every tenant target, compared revision, and successful
+  operation revision to equal the retirement commit before requesting
+  finalizer-driven deletion; the expected no-prune OutOfSync state is not
+  treated as a blocker.

@@ -114,6 +114,33 @@ function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 600) {
     return $script:application
 }
 
+function Wait-ArgoRevision([string]$Name, [string]$Revision, [int]$TimeoutSeconds = 300) {
+    Wait-Until $TimeoutSeconds "Argo Application $Name did not adopt and finish its sync operation for revision $Revision." {
+        $argoApplication = Get-KubeObject @('get','applications.argoproj.io',$Name,'-n','argocd')
+        if (-not $argoApplication -or $argoApplication.status.operationState.phase -ne 'Succeeded') { return $false }
+
+        $targetRevisions = if ($argoApplication.spec.sources) {
+            @($argoApplication.spec.sources | ForEach-Object { [string]$_.targetRevision })
+        } else {
+            @([string]$argoApplication.spec.source.targetRevision)
+        }
+        $syncedRevisions = if ($argoApplication.status.sync.revisions) {
+            @($argoApplication.status.sync.revisions | ForEach-Object { [string]$_ })
+        } else {
+            @([string]$argoApplication.status.sync.revision)
+        }
+        $operationRevisions = if ($argoApplication.status.operationState.syncResult.revisions) {
+            @($argoApplication.status.operationState.syncResult.revisions | ForEach-Object { [string]$_ })
+        } else {
+            @([string]$argoApplication.status.operationState.syncResult.revision)
+        }
+        return $targetRevisions.Count -gt 0 -and $syncedRevisions.Count -gt 0 -and $operationRevisions.Count -gt 0 -and
+            @($targetRevisions | Where-Object { $_ -ne $Revision }).Count -eq 0 -and
+            @($syncedRevisions | Where-Object { $_ -ne $Revision }).Count -eq 0 -and
+            @($operationRevisions | Where-Object { $_ -ne $Revision }).Count -eq 0
+    }
+}
+
 function Wait-Ready([string]$Kind, [string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 600) {
     $result = $null
     Wait-Until $TimeoutSeconds "$Kind $Namespace/$Name did not become current-generation Ready." {
@@ -526,8 +553,12 @@ resources: []
 "@
         $state.retirementCommit = Git-CommitAndPush 'test(data): retire recovered orders database'
         Save-State $state
-        Start-Sleep -Seconds 15
-        & kubectl --request-timeout=20s delete databases.platform.steadystate.dev $DatabaseName -n $Namespace --wait=false *> $null
+        # Tenant pruning is deliberately disabled, so removal leaves Argo OutOfSync
+        # until the live Database is deleted. Wait for the exact desired/compared
+        # revisions and successful sync operation before requesting finalizer-driven
+        # deletion, otherwise Argo can recreate the old revision.
+        Wait-ArgoRevision 'payments' $state.retirementCommit
+        & kubectl --request-timeout=20s delete databases.platform.steadystate.dev $DatabaseName -n $Namespace --wait=false --ignore-not-found=true *> $null
         if ($LASTEXITCODE -ne 0) { throw 'Could not request Database deletion.' }
         Wait-Until 480 'Database final backup deletion did not complete.' {
             $remaining = @(& kubectl --request-timeout=10s get databases.platform.steadystate.dev $DatabaseName -n $Namespace --ignore-not-found -o name 2>$null)
