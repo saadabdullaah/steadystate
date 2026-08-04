@@ -90,12 +90,12 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"argocd-configuration": "-20",
 		"monitoring":           "-18",
 		"argo-rollouts":        "-17",
-		"loki":                 "-16",
-		"tempo":                "-15",
-		"otel-collector":       "-14",
-		"alloy":                "-13",
-		"kyverno":              "-12",
-		"kyverno-policies":     "-11",
+		"kyverno":              "-16",
+		"kyverno-policies":     "-15",
+		"loki":                 "-14",
+		"tempo":                "-13",
+		"otel-collector":       "-12",
+		"alloy":                "-11",
 		"steadystate-operator": "-10",
 		"payments":             "0",
 	}
@@ -368,7 +368,7 @@ func TestArgoConfigurationContracts(t *testing.T) {
 			"observedGeneration", `condition.status == "True"`, `condition.status == "False"`,
 		},
 		"resource.customizations.health.argoproj.io_Application": {
-			"obj.status.health.status",
+			"obj.status.health.status", "steadystate.dev/transient-degraded-as-progressing", "Waiting for bootstrap health to recover",
 		},
 	}
 	for key, tokens := range healthContracts {
@@ -381,12 +381,29 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	if data["application.resourceTrackingMethod"] != "annotation" {
 		t.Fatal("Argo resource tracking must be annotation-based")
 	}
-	if data["timeout.reconciliation"] != "30s" || data["timeout.reconciliation.jitter"] != "0s" {
-		t.Fatal("Argo Git reconciliation must be pinned to 30 seconds without jitter")
+	if data["timeout.reconciliation"] != "30s" || data["timeout.reconciliation.jitter"] != "15s" {
+		t.Fatal("Argo Git reconciliation must be pinned to 30 seconds with bounded jitter")
 	}
 
 	parameters := findObject(t, objects, "ConfigMap", "argocd-cmd-params-cm")
 	assertString(t, parameters, "true", "data", "server.insecure")
+	assertString(t, parameters, "5", "data", "controller.status.processors")
+	assertString(t, parameters, "3", "data", "controller.operation.processors")
+	gitopsScript := string(readFile(t, filepath.Join(root, "scripts", "gitops.ps1")))
+	for _, token := range []string{
+		"kubectl rollout restart statefulset/argocd-application-controller -n argocd",
+		"Wait-ArgoApplication -Name 'data-namespaces' -TimeoutSeconds 900",
+		"kubectl --request-timeout=10s get application.argoproj.io",
+	} {
+		if !strings.Contains(gitopsScript, token) {
+			t.Errorf("GitOps bootstrap is missing bounded full-profile contract %q", token)
+		}
+	}
+	controllerRestart := strings.Index(gitopsScript, "kubectl rollout restart statefulset/argocd-application-controller -n argocd")
+	rootApply := strings.Index(gitopsScript, "Invoke-External kubectl apply -f $rootApplication")
+	if controllerRestart < 0 || rootApply < 0 || controllerRestart > rootApply {
+		t.Fatal("Argo application controller bounds must be activated before root sync")
+	}
 
 	route := findObject(t, objects, "HTTPRoute", "argocd")
 	hostnames, found, err := unstructured.NestedStringSlice(route, "spec", "hostnames")
@@ -665,15 +682,17 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 5 {
+	if len(parameters) != 7 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
-		"gitRevision":             "$ARGOCD_APP_REVISION",
-		"enableTelemetryPipeline": "true",
-		"enableSecurity":          "true",
-		"enableDataFoundation":    "false",
-		"backupStoreEndpoint":     "http://172.30.240.10:8333",
+		"gitRevision":                       "$ARGOCD_APP_REVISION",
+		"enableTelemetryPipeline":           "true",
+		"enableSecurity":                    "true",
+		"enableDataFoundation":              "false",
+		"enableTenantWorkloads":             "true",
+		"monitoringKubeStateMetricsEnabled": "true",
+		"backupStoreEndpoint":               "http://172.30.240.10:8333",
 	}
 	for _, raw := range parameters {
 		parameter := raw.(map[string]any)
@@ -689,6 +708,16 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 		t.Fatalf("root application is missing Helm parameters: %v", expected)
 	}
 	assertAutomated(t, rootApplication, true)
+	limit, found, err := unstructured.NestedFloat64(rootApplication, "spec", "syncPolicy", "retry", "limit")
+	if err != nil || !found || limit != 12 {
+		t.Fatalf("root application retry limit = %g, found=%v err=%v", limit, found, err)
+	}
+	factor, found, err := unstructured.NestedFloat64(rootApplication, "spec", "syncPolicy", "retry", "backoff", "factor")
+	if err != nil || !found || factor != 2 {
+		t.Fatalf("root application retry factor = %g, found=%v err=%v", factor, found, err)
+	}
+	assertString(t, rootApplication, "5s", "spec", "syncPolicy", "retry", "backoff", "duration")
+	assertString(t, rootApplication, "30s", "spec", "syncPolicy", "retry", "backoff", "maxDuration")
 }
 
 func TestGitOpsCommandsAreMirrored(t *testing.T) {
@@ -723,6 +752,45 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 	if len(objects) != 19 {
 		t.Fatalf("full data foundation rendered %d objects, want 19", len(objects))
 	}
+	isolated := decodeManifests(t, run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--namespace", "argocd",
+		"--set-string", "gitRevision="+testRevision,
+		"--set", "enableDataFoundation=true",
+		"--set", "enableTenantWorkloads=false",
+	))
+	if len(isolated) != 18 {
+		t.Fatalf("isolated data foundation rendered %d objects, want 18", len(isolated))
+	}
+	for _, object := range isolated {
+		if objectString(object, "kind") == "Application" && objectString(object, "metadata", "name") == "payments" {
+			t.Fatal("isolated data foundation must not render the normal payments tenant workload")
+		}
+	}
+	for _, required := range []string{"steadystate-operator", "kyverno", "kyverno-policies", "cloudnative-pg", "barman-cloud"} {
+		findObject(t, isolated, "Application", required)
+	}
+	lean := decodeManifests(t, run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--namespace", "argocd",
+		"--set-string", "gitRevision="+testRevision,
+		"--set", "enableDataFoundation=true",
+		"--set", "monitoringKubeStateMetricsEnabled=false",
+	))
+	monitoring := findObject(t, lean, "Application", "monitoring")
+	monitoringSource := nestedSlice(t, monitoring, "spec", "sources")[0].(map[string]any)
+	monitoringParameters := nestedSlice(t, monitoringSource, "helm", "parameters")
+	disabledMonitoringComponents := 0
+	for _, parameter := range monitoringParameters {
+		item := parameter.(map[string]any)
+		if name := objectString(item, "name"); name == "kubeStateMetrics.enabled" {
+			assertString(t, item, "false", "value")
+			disabledMonitoringComponents++
+		}
+	}
+	if disabledMonitoringComponents != 1 {
+		t.Fatalf("lean Phase 7 monitoring disabled %d components, want 1", disabledMonitoringComponents)
+	}
 	expectedWaves := map[string]string{
 		"data-namespaces":    "-10",
 		"local-path-storage": "-9",
@@ -734,6 +802,7 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 		assertAnnotation(t, findObject(t, objects, "Application", name), "argocd.argoproj.io/sync-wave", wave)
 	}
 	assertAnnotation(t, findObject(t, objects, "Application", "steadystate-operator"), "argocd.argoproj.io/sync-wave", "-5")
+	assertAnnotation(t, findObject(t, objects, "Application", "barman-cloud"), "steadystate.dev/transient-degraded-as-progressing", "true")
 	assertExternalChartApplication(t, objects, "cert-manager", "https://charts.jetstack.io", "cert-manager", "v1.21.0", "gitops/platform/cert-manager/values.yaml", "cert-manager")
 	assertExternalChartApplication(t, objects, "cloudnative-pg", "https://cloudnative-pg.github.io/charts", "cloudnative-pg", "0.29.0", "gitops/platform/cloudnative-pg/values.yaml", "cnpg-system")
 	assertExternalChartApplication(t, objects, "barman-cloud", "https://cloudnative-pg.github.io/charts", "plugin-barman-cloud", "0.7.0", "gitops/platform/barman-cloud/values.yaml", "cnpg-system")
@@ -826,7 +895,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	for _, contract := range []string{
 		"-U postgres -d app -qAtc \"SET ROLE app; $SQL\"",
 		"Invoke-AdminPsql $clusterName 'SELECT pg_switch_wal();'",
-		"PostgreSQL administrative compatibility command failed.",
+		"PostgreSQL administrative command did not recover from Kubernetes API errors within 120 seconds.",
+		"kubectl --request-timeout=20s exec",
 		"-Action Inventory",
 		"$serverInventory",
 		"$baseInventory",
@@ -852,15 +922,27 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"http://127.0.0.1:8888$Path/?pretty=y",
 		"[uint64]2147483648",
 		"$fullPath.Substring($bucketRoot.Length + 1)",
+		"$global:LASTEXITCODE = 0",
+		"--memory \"$MemoryLimitMiB`m\"",
+		"--memory-swap \"$MemoryLimitMiB`m\"",
+		"--env \"GOMEMLIMIT=$($goMemoryLimitMiB)MiB\"",
+		"Invoke-Docker network disconnect --force",
+		"-not $PreserveNetwork",
+		"SeaweedFS memory is not capped",
 	} {
 		if !strings.Contains(backupStore, contract) {
 			t.Fatalf("SeaweedFS logical inventory is missing %q", contract)
 		}
 	}
 	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
-	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline") ||
+	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline -DisableTenantWorkloads -DisableMonitoringStateMetrics") ||
 		strings.Contains(phase7Workflow, "-DisableSecurity") {
-		t.Fatal("Phase 7 compatibility must isolate the data stack while retaining monitoring and Kyverno")
+		t.Fatal("Phase 7 compatibility must isolate one data fixture and nonessential state metrics while retaining Grafana, Prometheus, and Kyverno")
+	}
+	for _, contract := range []string{"Invoke-Kubectl apply -k (Join-Path $Root 'gitops/teams/payments')", "Wait-TeamHealthy"} {
+		if !strings.Contains(phase7Foundation, contract) {
+			t.Fatalf("Phase 7 single-database foundation setup is missing %q", contract)
+		}
 	}
 	for _, contract := range []string{"success-cnpg-job-pods.yaml", "success-cnpg-job-pods.log"} {
 		if !strings.Contains(phase7Workflow, contract) {
@@ -878,6 +960,98 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		!strings.Contains(phase7Acceptance, "$recoveryRetainedObjects") ||
 		strings.Contains(phase7Acceptance, "find /data") {
 		t.Fatal("Phase 7 acceptance must verify logical base/WAL object keys for the active backup-server lifetime")
+	}
+	if strings.Contains(phase7Acceptance, "exec -n monitoring") ||
+		!strings.Contains(phase7Acceptance, "ALERTS{alertname=\"SteadyStateDatabaseBackupStale\",alertstate=\"firing\"}") {
+		t.Fatal("Phase 7 alert verification must use the Kubernetes service proxy and query the firing alert exactly")
+	}
+	for _, contract := range []string{
+		"Wait-OperatorBackupMetric 1",
+		"Wait-OperatorBackupMetric 0",
+		"serviceMonitor/monitoring/steadystate-operator/0",
+		"prometheus-operator-targets.json",
+		"operator-metrics-routing.yaml",
+	} {
+		if !strings.Contains(phase7Acceptance, contract) {
+			t.Fatalf("Phase 7 operator-metrics preflight is missing %q", contract)
+		}
+	}
+	manager := string(readFile(t, filepath.Join(root, "config", "manager", "manager.yaml")))
+	managerNetworkPolicy := string(readFile(t, filepath.Join(root, "config", "manager", "network_policy.yaml")))
+	operatorServiceMonitor := string(readFile(t, filepath.Join(root, "gitops", "platform", "observability", "operator-servicemonitor.yaml")))
+	for _, contract := range []string{"--metrics-bind-address=:8080", "name: controller-manager-metrics"} {
+		if !strings.Contains(manager, contract) {
+			t.Fatalf("manager metrics configuration is missing %q", contract)
+		}
+	}
+	if !strings.Contains(managerNetworkPolicy, "kubernetes.io/metadata.name: monitoring") {
+		t.Fatal("manager metrics NetworkPolicy does not restrict ingress to monitoring")
+	}
+	if !strings.Contains(operatorServiceMonitor, "name: steadystate-operator") ||
+		!strings.Contains(operatorServiceMonitor, "honorLabels: true") {
+		t.Fatal("operator ServiceMonitor must preserve the tenant namespace carried by Database metrics")
+	}
+	for _, contract := range []string{
+		"baselineCommit=''",
+		"git commit --allow-empty -m 'test(data): establish Phase 7 recovery baseline'",
+		"$global:LASTEXITCODE = 0",
+		"kubectl --request-timeout=10s @Arguments",
+		"'application' { 'applications.platform.steadystate.dev' }",
+		"'database' { 'databases.platform.steadystate.dev' }",
+		"databases.platform.steadystate.dev,applications.platform.steadystate.dev",
+		"$postgresInitImages['plugin-barman-cloud']",
+		"snapshots/pinned-data-images.json",
+		"sourceBackupServerName=$null",
+		"recoveryBackupServerName=$null",
+		"rtoMinutes=$null;rpoMinutes=$null;memoryMiB=$null",
+		"databases.platform.steadystate.dev $DatabaseName",
+		"--ignore-not-found -o name",
+		"Stopping the external backup store failed.",
+		"Restarting the external backup store failed.",
+		"PHASE7_STAGE",
+		"PHASE7_ACCEPTANCE_RESULT_FAILED stage=",
+		"return $sha.Trim()",
+		"Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090",
+		"initial-gitops-readiness",
+		"Wait-ArgoRevision 'payments' $state.retirementCommit",
+		"$argoApplication.status.sync.revisions",
+		"$argoApplication.status.operationState.syncResult.revisions",
+		"--ignore-not-found=true",
+		"transcript.txt",
+		"Capture 'failure'",
+		"$Prefix-control-plane-pods.yaml",
+		"$Prefix-kyverno-pods-describe.txt",
+		"$Prefix-$component-previous.log",
+		"-Action Stop -PreserveNetwork",
+		"Could not create Backup ${Name}: $detail",
+	} {
+		if !strings.Contains(phase7Acceptance, contract) {
+			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)
+		}
+	}
+	acceptanceWorkflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7.yml")))
+	for _, contract := range []string{
+		"Phase 7 failed before the disposable cluster was created.",
+		`$branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"`,
+		"Cluster 'steadystate' is already absent; GitOps cleanup is complete.",
+		"timeout-minutes: 75",
+		"run: ./scripts/phase7-acceptance.ps1 -Stage Test",
+		"timeout --signal=TERM --kill-after=15s 4m vhs docs/demonstrations/phase7-disaster-recovery.tape",
+		"curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30",
+		"id: recovery-token",
+		"id: cleanup-token",
+		"GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}",
+		"client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}",
+		".artifacts/phase7/acceptance/snapshots/pinned-data-images.json",
+	} {
+		if !strings.Contains(acceptanceWorkflow, contract) {
+			t.Fatalf("Phase 7 workflow cleanup is missing %q", contract)
+		}
+	}
+	failureCapture := strings.Index(acceptanceWorkflow, "name: Capture failure evidence")
+	broadDiagnostics := strings.Index(acceptanceWorkflow, "name: Capture success or failure diagnostics")
+	if failureCapture < 0 || broadDiagnostics < 0 || failureCapture > broadDiagnostics {
+		t.Fatal("Phase 7 must preserve focused failure evidence before broader diagnostics")
 	}
 	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
 	for _, contract := range []string{
@@ -1083,17 +1257,19 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	for _, token := range []string{
 		"name: Phase 5 acceptance",
 		"timeout-minutes: 40",
-		"timeout-minutes: 9",
+		"timeout-minutes: 15",
 		"cancel-in-progress: false",
 		"./scripts/dev.ps1 verify-observability",
 		"./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -DisableSecurity",
 		"./scripts/dev.ps1 test-gitops -Profile standard -DisableSecurity",
 		"./scripts/phase5-acceptance.ps1 -Stage Prepare",
-		"timeout --signal=TERM --kill-after=30s 8m vhs docs/demonstrations/phase5-request-telemetry.tape",
+		"./scripts/phase5-acceptance.ps1 -Stage Test",
+		"timeout --signal=TERM --kill-after=15s 4m vhs docs/demonstrations/phase5-request-telemetry.tape",
 		"./scripts/phase5-acceptance.ps1 -Stage Finalize",
 		"./scripts/phase5-acceptance.ps1 -Stage CaptureFailure",
 		"phase5-acceptance-${{ github.sha }}",
 		".artifacts/phase5/acceptance/phase5-request-telemetry.gif",
+		".artifacts/phase5/acceptance/transcript.txt",
 		".artifacts/diagnostics/",
 		"if-no-files-found: error",
 	} {
@@ -1133,6 +1309,8 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 		"kubectl patch applications.platform.steadystate.dev telemetry",
 		"PHASE5_ACCEPTANCE_RESULT_PASSED",
 		"PHASE5_ACCEPTANCE_RESULT_FAILED",
+		"Write-TranscriptLine",
+		"RESULT $($state.completedAt) PASSED",
 	} {
 		if !strings.Contains(script, token) {
 			t.Errorf("Phase 5 acceptance script is missing %q", token)
@@ -1142,11 +1320,11 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	tape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase5-request-telemetry.tape")))
 	for _, token := range []string{
 		"Output .artifacts/phase5/acceptance/phase5-request-telemetry.gif",
-		"pwsh -NoProfile -File scripts/phase5-acceptance.ps1 -Stage Test",
-		"Set WaitTimeout 7m",
+		"cat .artifacts/phase5/acceptance/transcript.txt",
+		"Set WaitTimeout 1m",
 		"Set Framerate 2",
-		"Set PlaybackSpeed 8.0",
-		"Wait+Screen /PHASE5_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
+		"Set PlaybackSpeed 1.0",
+		"Wait+Screen /RESULT .* PASSED/",
 	} {
 		if !strings.Contains(tape, token) {
 			t.Errorf("Phase 5 tape is missing %q", token)
@@ -1368,7 +1546,7 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	for _, token := range []string{
 		"name: Phase 4 acceptance",
 		"timeout-minutes: 60",
-		"timeout --signal=TERM --kill-after=30s 14m vhs docs/demonstrations/phase4-canary-promotion.tape",
+		"timeout --signal=TERM --kill-after=30s 17m vhs docs/demonstrations/phase4-canary-promotion.tape",
 		"timeout --signal=TERM --kill-after=30s 17m vhs docs/demonstrations/phase4-automatic-rollback.tape",
 		"cancel-in-progress: false",
 		"phase4-acceptance-${{ github.sha }}",
@@ -1404,7 +1582,8 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 		"Wait-DesiredApplication $GoodTag canary $state.commits.promotion -TimeoutSeconds 900",
 		"Wait-DesiredApplication $state.sourceTag canary $state.commits.rollingToCanary -TimeoutSeconds 900",
 		"Rolling-to-canary migration exceeded five minutes.",
-		"Wait-DesiredApplication $BadTag canary $state.commits.rejection -TimeoutSeconds 900",
+		"Wait-RouteWeights 90 10 -TimeoutSeconds 900",
+		"Wait-DesiredApplication $BadTag canary $state.commits.rejection -TimeoutSeconds 120",
 		"Wait-DesiredApplication $GoodTag canary $state.commits.recovery -TimeoutSeconds 900",
 		"Wait-CanaryEndpoint",
 		"-DisableKeepAlive",

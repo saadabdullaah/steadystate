@@ -520,3 +520,91 @@
   an existing annotations `PSCustomObject` through assignment. Cleanup now
   uses explicit `kubectl annotate --overwrite`, leaving the successful path
   and evidence contract unchanged.
+
+### Hosted full-profile resource-pressure correction
+
+- Head `5494807` passed all five CI jobs plus Phase 4, Phase 5, and Phase 6.
+  Phase 7 acceptance run
+  [30854678892](https://github.com/saadabdullaah/steadystate/actions/runs/30854678892)
+  failed before data assertions when the live VHS/Chromium process competed
+  with the full profile: etcd and the API server missed probes, many add-ons
+  restarted, Kubernetes requests returned `EOF`, and `local-path-storage`
+  could no longer report Argo Healthy/Synced. Artifact `8872925925` has GitHub
+  SHA-256 `7231303e2dd99e44974073c8d883047c00a363d54cc7b4efda730008e823ea85`
+  and retains the failed stage, real GIF, component logs, and partial
+  diagnostics.
+- Foundation run
+  [30854669462](https://github.com/saadabdullaah/steadystate/actions/runs/30854669462)
+  restored PostgreSQL, reached `Database Healthy`, completed base/final
+  backups, and retained WAL objects, but its 25-minute outer step expired
+  during the final checksum/snapshot boundary while the API was recovering.
+  Artifact `8872932550` has GitHub SHA-256
+  `0373ed20a827656abd0c7393e39379960f3bd66c7fd62afe2a0cc8daecda6b63`.
+- The correction runs the real drill without Chromium and renders its
+  timestamped transcript afterward. The focused foundation gate disables the
+  telemetry pipeline, tenant workloads, and kube-state-metrics while retaining
+  the Grafana route, Prometheus, Alertmanager, and Kyverno; bounded Kubernetes
+  request/retry envelopes protect the two backup lifetimes and restore.
+- Phase 5 run
+  [30885150066](https://github.com/saadabdullaah/steadystate/actions/runs/30885150066)
+  passed all six functional checks through the fast-burn proof, then VHS
+  terminated the still-running five-minute memory-stabilization stage at its
+  seven-minute screen limit. Artifact `8883275157` retained the correlated
+  Prometheus/Loki/Tempo evidence, alert proof, state, and diagnostics. Phase 5
+  now follows the same isolation contract as Phase 7: the real test runs
+  directly, writes a timestamped transcript, and VHS records only after every
+  functional and resource assertion passes.
+- At head `540b978`, CI, Phase 4, and Phase 6 passed. Phase 7 foundation run
+  [30885149877](https://github.com/saadabdullaah/steadystate/actions/runs/30885149877)
+  exposed a configuration error in the new lean gate: disabling Grafana left
+  its managed HTTPRoute without a backend, so `monitoring` became Degraded and
+  the parent sync never created `data-namespaces`; artifact `8883203415`
+  retained Argo state, exact kind container state/resources, controller logs,
+  and diagnostics. The gate now disables only kube-state-metrics and keeps the
+  Grafana route healthy. Phase 7 run
+  [30885160497](https://github.com/saadabdullaah/steadystate/actions/runs/30885160497)
+  stopped at the initial `local-path-storage` wave after the parent exhausted
+  its short bootstrap retry window; artifact `8883603914` retained the named
+  stage and original error. The root Application now uses an explicit bounded
+  retry policy, and failure capture tolerates an empty pre-backup inventory so
+  diagnostics cannot replace the primary failure.
+- At head `d12e8ad`, CI, Phase 4 acceptance, Phase 5 acceptance, Phase 6
+  foundation, and Phase 7 foundation all passed. Phase 7 acceptance run
+  [30893474923](https://github.com/saadabdullaah/steadystate/actions/runs/30893474923)
+  failed before the recovery drill because the full combined stack
+  destabilized the Kubernetes API while Kyverno was initializing. The
+  retained snapshot showed `steadystate-root` waiting for `kyverno`, no data
+  Applications yet, API/controller/scheduler and several add-on restarts, all
+  three kind containers alive with `oomKilled=false`, and about 6.5 GiB across
+  the nodes—below the 8 GiB contract. Artifact `8886715016` has GitHub digest
+  `sha256:b11d9eb37478362ce18b6b14987878c11530a15cf1e91bc767442dc9e9886e8d`.
+  The correction starts fail-closed security before telemetry, bounds Argo
+  processors, adds reconciliation jitter, deterministically restarts the
+  configured application controller before root sync, and captures
+  control-plane/Kyverno current and previous state before slower diagnostics.
+- Head `acf366e` passed the complete whole-cluster recovery path in Phase 7
+  acceptance run
+  [30898749390](https://github.com/saadabdullaah/steadystate/actions/runs/30898749390):
+  100 orders restored with the exact checksum, RTO 14.162 minutes, RPO 0,
+  backup outage alerting recovered, and the full profile measured 6656.418
+  MiB. The deterministic final backup also completed, but the tenant Argo
+  Application briefly remained on recovery commit `553bb5a` and recreated the
+  deleted Database before receiving retirement commit `f82ae1e`. Artifact
+  `8889359549` (GitHub SHA-256
+  `ee24b6842f5efbee5899e33f168879b2916e9f494db4a908fcda0e73f4bc9da1`)
+  proves the recreated UID and completed `orders-final` event. The acceptance
+  runner now waits for every tenant target, compared revision, and successful
+  operation revision to equal the retirement commit before requesting
+  finalizer-driven deletion; the expected no-prune OutOfSync state is not
+  treated as a blocker.
+- Phase 7 acceptance run
+  [30903568810](https://github.com/saadabdullaah/steadystate/actions/runs/30903568810)
+  passed all ten checks on head `6d71076`. It restored the exact 100-order
+  checksum after complete kind destruction, measured RTO 11.173 minutes and
+  RPO boundary 0 minutes, retained eight WAL and 31 total objects, fired and
+  cleared the backup-age alert, completed the final backup/deletion in
+  104.959 seconds, and stayed within every resource budget. Artifact
+  `8890983887` has GitHub SHA-256
+  `815f86dba99c641612c9e9c3ada4a6882bde16ba91b75a60e31f8903100624fa`;
+  the committed successful GIF has SHA-256
+  `a92d1ba110973bdf72af29456176e7a0d407765f2f1b73312b1d9525a1963898`.

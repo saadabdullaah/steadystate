@@ -37,6 +37,9 @@ spec:
         releaseName: monitoring
         valueFiles:
           - $values/gitops/platform/monitoring/values.yaml
+        parameters:
+          - name: kubeStateMetrics.enabled
+            value: {{ .Values.monitoringKubeStateMetricsEnabled | quote }}
     - repoURL: {{ .Values.repoURL | quote }}
       targetRevision: {{ .Values.gitRevision | quote }}
       ref: values
@@ -88,7 +91,7 @@ metadata:
   name: loki
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-16"
+    argocd.argoproj.io/sync-wave: "-14"
 spec:
   project: platform
   sources:
@@ -116,7 +119,7 @@ metadata:
   name: tempo
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-15"
+    argocd.argoproj.io/sync-wave: "-13"
 spec:
   project: platform
   sources:
@@ -144,7 +147,7 @@ metadata:
   name: otel-collector
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-14"
+    argocd.argoproj.io/sync-wave: "-12"
 spec:
   project: platform
   sources:
@@ -172,7 +175,7 @@ metadata:
   name: alloy
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-13"
+    argocd.argoproj.io/sync-wave: "-11"
 spec:
   project: platform
   sources:
@@ -237,6 +240,8 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -305,6 +310,10 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-6"
+    # The plugin can report Degraded briefly while cert-manager issues its
+    # serving certificate. Keep the parent wave pending so automated sync can
+    # recover; the child Application still exposes its exact native health.
+    steadystate.dev/transient-degraded-as-progressing: "true"
 spec:
   project: platform
   sources:
@@ -374,7 +383,10 @@ metadata:
   name: kyverno
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-12"
+    # Admission must become available before the optional telemetry pipeline.
+    # This prevents a full-profile telemetry startup burst from delaying the
+    # fail-closed webhook and every later data-foundation wave.
+    argocd.argoproj.io/sync-wave: "-16"
     argocd.argoproj.io/compare-options: ServerSideDiff=true,IncludeMutationWebhook=true
 spec:
   project: platform
@@ -415,7 +427,7 @@ metadata:
   name: kyverno-policies
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-11"
+    argocd.argoproj.io/sync-wave: "-15"
 spec:
   project: platform
   source:
@@ -432,6 +444,7 @@ spec:
     syncOptions:
       - ServerSideApply=true
 {{- end }}
+{{- if .Values.enableTenantWorkloads }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -503,3 +516,4 @@ spec:
       jsonPointers:
         - /metadata/finalizers
         - /status
+{{- end }}

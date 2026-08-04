@@ -19,7 +19,9 @@ param(
     [string]$Phase7AcceptanceStage = $(if ($env:PHASE7_ACCEPTANCE_STAGE) { $env:PHASE7_ACCEPTANCE_STAGE } else { 'Test' }),
     [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' }),
     [switch]$DisableTelemetryPipeline,
-    [switch]$DisableSecurity
+    [switch]$DisableSecurity,
+    [switch]$DisableTenantWorkloads,
+    [switch]$DisableMonitoringStateMetrics
 )
 
 $ErrorActionPreference = 'Stop'
@@ -258,6 +260,8 @@ function Invoke-GitOpsCommand {
         -EvidencePath $EvidencePath `
         -DisableTelemetryPipeline:$DisableTelemetryPipeline `
         -DisableSecurity:$DisableSecurity `
+        -DisableTenantWorkloads:$DisableTenantWorkloads `
+        -DisableMonitoringStateMetrics:$DisableMonitoringStateMetrics `
         -BackupStoreEndpoint $(if ($env:BACKUP_STORE_ENDPOINT) { $env:BACKUP_STORE_ENDPOINT } else { 'http://172.30.240.10:8333' }) `
         -Profile $Profile
 }

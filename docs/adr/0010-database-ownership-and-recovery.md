@@ -34,12 +34,35 @@ Assertions are scoped to the Database lifetime's UID-derived Barman server
 prefix and require both base-backup and WAL keys. The filer port remains
 unpublished, and this read-only inventory uses no S3 credential.
 
-The focused foundation gate keeps Prometheus and Kyverno enabled but omits
-Loki, Tempo, Alloy, and OTel, which Phase 5 acceptance validates separately.
-This reserves the hosted runner for the storage controllers, PostgreSQL, and
+The focused foundation gate keeps Grafana, Prometheus, Alertmanager, and
+Kyverno enabled but omits Loki, Tempo, Alloy, OTel, and kube-state-metrics,
+which Phase 5 acceptance validates separately. Keeping Grafana preserves the
+health of its managed HTTPRoute. Phase 7 acceptance still runs
+the complete full profile for its final resource-budget measurement. This
+reserves the foundation runner for the storage controllers, PostgreSQL, and
 external backup service without weakening admission enforcement. Exact kind
 container OOM state, working set, and Docker disk use are captured if the
 Kubernetes API becomes unavailable.
+
+The disaster-recovery assertions run directly on the hosted runner. Only
+after they pass does pinned VHS render their timestamped stage/check
+transcript. Keeping Chromium and GIF encoding out of the live full-profile
+interval prevents evidence generation from starving etcd or the API server;
+the transcript, JSON, snapshots, and workflow log remain tied to the same run.
+The app-of-apps root also carries a bounded retry policy for transient child
+health during first installation. It does not hide the child Application's
+native health or bypass sync waves; it prevents a recovered bootstrap
+dependency from leaving all later data children permanently uncreated.
+
+The combined full profile initializes Kyverno and its policies at waves
+`-16/-15`, before Loki, Tempo, OTel Collector, and Alloy at `-14..-11`.
+Monitoring CRDs and Rollouts remain at `-18/-17`; the data foundation remains
+at `-10..-6`. This supersedes the cross-phase ordering only for the current
+combined platform: security is fail-closed before optional telemetry load can
+delay the API server. Argo reconciliation stays at 30 seconds but uses 15
+seconds of jitter, five status processors, and three operation processors.
+The application controller is restarted once before root creation so these
+ConfigMap-backed bounds cannot depend on Pod/configuration creation order.
 
 Team default-deny applies to CNPG. Database networking adds only application
 and Prometheus ingress plus four egress paths: SeaweedFS S3, the Kubernetes

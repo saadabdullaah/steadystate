@@ -3,12 +3,12 @@ Set Shell "bash"
 Set FontSize 16
 Set Width 1200
 Set Height 720
-Set TypingSpeed 15ms
+Set TypingSpeed 10ms
 Set Framerate 2
-Set PlaybackSpeed 12.0
-Set WaitTimeout 55m
+Set PlaybackSpeed 1.0
+Set WaitTimeout 1m
 
-Type "pwsh -NoProfile -File scripts/phase7-acceptance.ps1 -Stage Test || (echo PHASE7_ACCEPTANCE_RESULT_FAILED; exit 1)"
+Type "cat .artifacts/phase7/acceptance/transcript.txt"
 Enter
-Wait+Screen /PHASE7_ACCEPTANCE_RESULT_(PASSED|FAILED)/
+Wait+Screen /RESULT .* PASSED/
 Sleep 3s

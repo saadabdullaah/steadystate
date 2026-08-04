@@ -20,6 +20,10 @@ spec:
           value: {{ .Values.enableSecurity | quote }}
         - name: enableDataFoundation
           value: {{ .Values.enableDataFoundation | quote }}
+        - name: enableTenantWorkloads
+          value: {{ .Values.enableTenantWorkloads | quote }}
+        - name: monitoringKubeStateMetricsEnabled
+          value: {{ .Values.monitoringKubeStateMetricsEnabled | quote }}
         - name: backupStoreEndpoint
           value: {{ .Values.backupStoreEndpoint | quote }}
   destination:
@@ -29,6 +33,12 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    retry:
+      limit: 12
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 30s
     syncOptions:
       - RespectIgnoreDifferences=true
   ignoreDifferences:

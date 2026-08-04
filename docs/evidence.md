@@ -4,7 +4,7 @@ Every hosted acceptance artifact is revision-bound and must contain schema-versi
 
 Phase 5 uploads `phase5-acceptance-<commit>` with:
 
-- `phase5-request-telemetry.gif` and its tracked tape;
+- `phase5-request-telemetry.gif`, its tracked tape, and the timestamped transcript rendered by VHS;
 - `evidence.json` and the incremental `state.json`;
 - Grafana Prometheus/Loki/Tempo datasource health responses;
 - correlated Prometheus, Loki, and Tempo query results for one request/trace identity;
@@ -14,7 +14,7 @@ Phase 5 uploads `phase5-acceptance-<commit>` with:
 - operator, Grafana, Alloy, OTel Collector, Loki, and Tempo logs;
 - cluster diagnostics from the common diagnostics contract.
 
-The Phase 5 schema is version `1`. It records the exact source SHA, profile, result/failure, timestamps, the current named stage, named elapsed checks, request/trace identity, and memory values. Memory passes only after three consecutive samples, 15 seconds apart, remain within both budgets; the raw samples and final per-container breakdown are retained in `metrics/memory.json`. The functional proof has a seven-minute screen bound and is rendered at two frames per second with 8x playback, inside eight-minute process and nine-minute step bounds. This preserves the complete terminal proof while leaving the 40-minute job envelope available for failure evidence, Grafana startup logs, diagnostics, artifact upload, and unconditional cleanup.
+The Phase 5 schema is version `1`. It records the exact source SHA, profile, result/failure, timestamps, the current named stage, named elapsed checks, request/trace identity, and memory values. Memory passes only after three consecutive samples, 15 seconds apart, remain within both budgets; the raw samples and final per-container breakdown are retained in `metrics/memory.json`. The functional proof runs directly under a 15-minute step bound and writes a timestamped stage/check transcript. Only after success does pinned VHS render that transcript at two frames per second inside a four-minute process bound. Browser and GIF encoding therefore cannot terminate a valid proof or consume its five-minute memory-stabilization window, while the 40-minute job envelope still retains failure evidence, diagnostics, upload, and cleanup time.
 
 Phase 6 uploads `phase6-acceptance-<commit>` with:
 
@@ -30,8 +30,9 @@ Phase 6 uploads `phase6-acceptance-<commit>` with:
 The Phase 6 schema is version `1`. Evidence never contains credentials, decrypted Secret values, private age material, GitHub tokens, or request authorization. Success requires every named check, a non-empty recording, Cosign/SBOM evidence, security snapshots, logs, and common diagnostics. Failure capture runs before bounded cleanup and remains uploadable.
 
 Phase 7 uploads a compatibility artifact and
-`phase7-acceptance-<commit>`. The latter contains the disaster-recovery GIF
-and tape, schema-versioned evidence, RTO/RPO report, Git revisions, canonical
+`phase7-acceptance-<commit>`. The latter contains the disaster-recovery GIF,
+tape, and timestamped transcript from the real hosted drill, schema-versioned
+evidence, RTO/RPO report, Git revisions, canonical
 source/recovery checksums, backup/WAL metadata, sanitized object inventory,
 CNPG/Barman/Argo/platform snapshots, anonymous signature/attestation proof,
 resource measurements, component logs, and common diagnostics.
@@ -42,3 +43,6 @@ named checks require exact pinned data/security state, a value-free database
 span in Tempo, checksum equality, RTO `<=30m`, confirmed archive RPO boundary
 `<=5m`, a backup-freshness alert that fires and clears, final-backup deletion
 with retained objects, all memory budgets, and a non-empty recording.
+The full drill runs before VHS so a browser and GIF encoder cannot compete
+with the disposable full-profile control plane. VHS records the concise real
+stage/check transcript only after every functional assertion passes.

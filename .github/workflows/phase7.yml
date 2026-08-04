@@ -16,7 +16,7 @@ jobs:
   acceptance:
     name: database-disaster-recovery
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 75
     env:
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
     steps:
@@ -30,7 +30,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
-          app-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
           private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: steadystate
@@ -87,10 +87,10 @@ jobs:
           install_dir="$RUNNER_TEMP/steadystate-recording/bin"
           mkdir -p "$install_dir"
           archive="$RUNNER_TEMP/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
-          curl --fail --location --retry 3 --output "$archive" "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 --output "$archive" "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
           echo "${VHS_LINUX_X86_64_SHA256}  ${archive}" | sha256sum --check --strict
           tar --extract --gzip --strip-components=1 --file "$archive" --directory "$install_dir"
-          curl --fail --location --retry 3 --output "$install_dir/ttyd" "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 --output "$install_dir/ttyd" "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
           echo "${TTYD_LINUX_X86_64_SHA256}  ${install_dir}/ttyd" | sha256sum --check --strict
           chmod 0755 "$install_dir/vhs" "$install_dir/ttyd"
           echo "$install_dir" >> "$GITHUB_PATH"
@@ -127,15 +127,38 @@ jobs:
           $state = Get-Content -Raw .artifacts/phase7/acceptance/state.json | ConvertFrom-Json
           ./scripts/dev.ps1 deploy-gitops -Profile full -GitRevision $state.branch
 
-      - name: Record whole-cluster disaster recovery
+      - name: Refresh repository-scoped recovery token
+        id: recovery-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: steadystate
+
+      - name: Refresh recovery Git authentication
+        shell: pwsh
+        env:
+          APP_TOKEN: ${{ steps.recovery-token.outputs.token }}
+        run: |
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$env:APP_TOKEN"))
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $encoded"
+
+      - name: Run whole-cluster disaster recovery
         id: recovery
-        timeout-minutes: 56
+        timeout-minutes: 50
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.recovery-token.outputs.token }}
+        run: ./scripts/phase7-acceptance.ps1 -Stage Test
+
+      - name: Record verified disaster-recovery transcript
+        timeout-minutes: 5
         shell: bash
         env:
           CI: ""
           COLORTERM: truecolor
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: timeout --signal=TERM --kill-after=30s 55m vhs docs/demonstrations/phase7-disaster-recovery.tape
+        run: timeout --signal=TERM --kill-after=15s 4m vhs docs/demonstrations/phase7-disaster-recovery.tape
 
       - name: Finalize evidence
         id: finalize
@@ -143,21 +166,30 @@ jobs:
         shell: pwsh
         run: ./scripts/phase7-acceptance.ps1 -Stage Finalize
 
-      - name: Capture success or failure diagnostics
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 5
-        shell: pwsh
-        run: ./scripts/dev.ps1 diagnostics
-
       - name: Capture failure evidence
         if: always() && steps.prepare.outcome != 'skipped' && steps.finalize.outcome != 'success'
         continue-on-error: true
-        timeout-minutes: 4
+        timeout-minutes: 2
         shell: pwsh
         env:
           PHASE7_FAILURE_MESSAGE: prepare=${{ steps.prepare.outcome }}, recovery=${{ steps.recovery.outcome }}, finalize=${{ steps.finalize.outcome }}
         run: ./scripts/phase7-acceptance.ps1 -Stage CaptureFailure
+
+      - name: Capture success or failure diagnostics
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $clusters = @(& kind get clusters 2>$null)
+          if ($LASTEXITCODE -eq 0 -and $clusters -contains 'steadystate') {
+            ./scripts/dev.ps1 diagnostics
+          } else {
+            New-Item -ItemType Directory -Force .artifacts/diagnostics | Out-Null
+            'Phase 7 failed before the disposable cluster was created.' |
+              Set-Content -Encoding utf8 .artifacts/diagnostics/pre-cluster-failure.txt
+            $global:LASTEXITCODE = 0
+          }
 
       - name: Verify artifact completeness
         if: always() && steps.finalize.outcome == 'success'
@@ -167,6 +199,7 @@ jobs:
           $required = @(
             'docs/demonstrations/phase7-disaster-recovery.tape',
             '.artifacts/phase7/acceptance/phase7-disaster-recovery.gif',
+            '.artifacts/phase7/acceptance/transcript.txt',
             '.artifacts/phase7/acceptance/evidence.json',
             '.artifacts/phase7/acceptance/rto-rpo-report.json',
             '.artifacts/phase7/acceptance/registry/signature.json',
@@ -174,6 +207,7 @@ jobs:
             '.artifacts/phase7/acceptance/registry/manifest.json',
             '.artifacts/phase7/acceptance/snapshots/source-backup.json',
             '.artifacts/phase7/acceptance/snapshots/source-object-inventory.txt',
+            '.artifacts/phase7/acceptance/snapshots/pinned-data-images.json',
             '.artifacts/phase7/acceptance/snapshots/recovered-data.yaml',
             '.artifacts/phase7/acceptance/snapshots/success-data.yaml',
             '.artifacts/phase7/acceptance/snapshots/success-object-inventory.txt',
@@ -212,23 +246,44 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
 
+      - name: Create repository-scoped cleanup token
+        if: always() && steps.prepare.outcome != 'skipped'
+        id: cleanup-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: steadystate
+
       - name: Delete ephemeral Git branch
         if: always() && steps.prepare.outcome != 'skipped'
         continue-on-error: true
         timeout-minutes: 2
         shell: pwsh
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}
         run: |
-          $state = Get-Content -Raw .artifacts/phase7/acceptance/state.json | ConvertFrom-Json
-          gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/$($state.branch)"
+          $branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path -LiteralPath .artifacts/phase7/acceptance/state.json) {
+            $state = Get-Content -Raw -LiteralPath .artifacts/phase7/acceptance/state.json | ConvertFrom-Json
+            if ($state.branch) { $branch = [string]$state.branch }
+          }
+          gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/$branch"
 
       - name: Undeploy GitOps
         if: always()
         continue-on-error: true
         timeout-minutes: 8
         shell: pwsh
-        run: ./scripts/dev.ps1 undeploy-gitops
+        run: |
+          $clusters = @(& kind get clusters 2>$null)
+          if ($LASTEXITCODE -eq 0 -and $clusters -contains 'steadystate') {
+            ./scripts/dev.ps1 undeploy-gitops
+          } else {
+            Write-Host "Cluster 'steadystate' is already absent; GitOps cleanup is complete."
+            $global:LASTEXITCODE = 0
+          }
 
       - name: Destroy disposable cluster
         if: always()

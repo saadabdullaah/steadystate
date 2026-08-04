@@ -11,6 +11,7 @@ $Root = Split-Path -Parent $PSScriptRoot
 $ArtifactRoot = Join-Path $Root '.artifacts/phase7/acceptance'
 $StatePath = Join-Path $ArtifactRoot 'state.json'
 $EvidencePath = Join-Path $ArtifactRoot 'evidence.json'
+$TranscriptPath = Join-Path $ArtifactRoot 'transcript.txt'
 $Namespace = 'team-payments'
 $DatabaseName = 'orders'
 $ApplicationName = 'demo'
@@ -19,6 +20,11 @@ $ImageTag = 'v0.7.0'
 function Write-Utf8([string]$Path, [string]$Value) {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
     [IO.File]::WriteAllText($Path, $Value, [Text.UTF8Encoding]::new($false))
+}
+
+function Write-TranscriptLine([string]$Value) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TranscriptPath) | Out-Null
+    [IO.File]::AppendAllText($TranscriptPath, "$Value$([Environment]::NewLine)", [Text.UTF8Encoding]::new($false))
 }
 
 function Get-State {
@@ -31,13 +37,23 @@ function Save-State($State) {
 }
 
 function Add-Check($State, [string]$Name, [datetime]$Started, [string]$Details) {
+    $elapsed = [Math]::Round(((Get-Date) - $Started).TotalSeconds, 3)
     $State.checks += [pscustomobject]@{
         name = $Name
         status = 'passed'
-        elapsedSeconds = [Math]::Round(((Get-Date) - $Started).TotalSeconds, 3)
+        elapsedSeconds = $elapsed
         details = $Details
     }
     Save-State $State
+    Write-TranscriptLine "PASS $Name elapsedSeconds=$elapsed"
+}
+
+function Set-Stage($State, [string]$Name) {
+    $State.currentStage = $Name
+    $State.stageStartedAt = (Get-Date).ToUniversalTime().ToString('o')
+    Save-State $State
+    Write-Host "PHASE7_STAGE $Name"
+    Write-TranscriptLine "STAGE $((Get-Date).ToUniversalTime().ToString('o')) $Name"
 }
 
 function Wait-Until([int]$TimeoutSeconds, [string]$Failure, [scriptblock]$Condition) {
@@ -50,7 +66,7 @@ function Wait-Until([int]$TimeoutSeconds, [string]$Failure, [scriptblock]$Condit
 }
 
 function Get-KubeObject([string[]]$Arguments) {
-    $raw = @(& kubectl @Arguments -o json 2>$null)
+    $raw = @(& kubectl --request-timeout=10s @Arguments -o json 2>$null)
     if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
     return ($raw -join [Environment]::NewLine) | ConvertFrom-Json
 }
@@ -61,19 +77,79 @@ function Get-ServiceRaw([string]$Service, [int]$Port, [string]$Path) {
     return ($raw -join [Environment]::NewLine)
 }
 
-function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 900) {
+function Get-PrometheusQuery([string]$Expression) {
+    $encoded = [Uri]::EscapeDataString($Expression)
+    $response = (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 "/api/v1/query?query=$encoded") | ConvertFrom-Json
+    if ($response.status -ne 'success') { throw "Prometheus query returned status '$($response.status)'." }
+    return $response
+}
+
+function Wait-OperatorBackupMetric([double]$Expected, [int]$TimeoutSeconds = 120) {
+    $expression = 'steadystate_database_backup_healthy{namespace="team-payments",database="orders"}'
+    $targetPath = '/api/v1/targets?state=active'
+    Wait-Until $TimeoutSeconds "SteadyState operator metrics target was not healthy with backup metric $Expected." {
+        try {
+            $targets = (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 $targetPath) | ConvertFrom-Json
+            $operatorTargets = @($targets.data.activeTargets | Where-Object {
+                [string]$_.scrapePool -eq 'serviceMonitor/monitoring/steadystate-operator/0'
+            })
+            if ($operatorTargets.Count -ne 1 -or [string]$operatorTargets[0].health -ne 'up') { return $false }
+            $query = Get-PrometheusQuery $expression
+            $result = @($query.data.result)
+            return $result.Count -eq 1 -and [double]$result[0].value[1] -eq $Expected
+        } catch {
+            return $false
+        }
+    }
+    Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/prometheus-operator-targets.json') (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 $targetPath)
+    Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/prometheus-database-backup-health.json') ((Get-PrometheusQuery $expression | ConvertTo-Json -Depth 20) + [Environment]::NewLine)
+}
+
+function Wait-ArgoHealthy([string]$Name, [int]$TimeoutSeconds = 600) {
     $application = $null
     Wait-Until $TimeoutSeconds "Argo Application $Name did not become Healthy and Synced." {
-        $script:application = Get-KubeObject @('get','application.argoproj.io',$Name,'-n','argocd')
+        $script:application = Get-KubeObject @('get','applications.argoproj.io',$Name,'-n','argocd')
         return $script:application -and $script:application.status.health.status -eq 'Healthy' -and $script:application.status.sync.status -eq 'Synced'
     }
     return $script:application
 }
 
-function Wait-Ready([string]$Kind, [string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 900) {
+function Wait-ArgoRevision([string]$Name, [string]$Revision, [int]$TimeoutSeconds = 300) {
+    Wait-Until $TimeoutSeconds "Argo Application $Name did not adopt and finish its sync operation for revision $Revision." {
+        $argoApplication = Get-KubeObject @('get','applications.argoproj.io',$Name,'-n','argocd')
+        if (-not $argoApplication -or $argoApplication.status.operationState.phase -ne 'Succeeded') { return $false }
+
+        $targetRevisions = if ($argoApplication.spec.sources) {
+            @($argoApplication.spec.sources | ForEach-Object { [string]$_.targetRevision })
+        } else {
+            @([string]$argoApplication.spec.source.targetRevision)
+        }
+        $syncedRevisions = if ($argoApplication.status.sync.revisions) {
+            @($argoApplication.status.sync.revisions | ForEach-Object { [string]$_ })
+        } else {
+            @([string]$argoApplication.status.sync.revision)
+        }
+        $operationRevisions = if ($argoApplication.status.operationState.syncResult.revisions) {
+            @($argoApplication.status.operationState.syncResult.revisions | ForEach-Object { [string]$_ })
+        } else {
+            @([string]$argoApplication.status.operationState.syncResult.revision)
+        }
+        return $targetRevisions.Count -gt 0 -and $syncedRevisions.Count -gt 0 -and $operationRevisions.Count -gt 0 -and
+            @($targetRevisions | Where-Object { $_ -ne $Revision }).Count -eq 0 -and
+            @($syncedRevisions | Where-Object { $_ -ne $Revision }).Count -eq 0 -and
+            @($operationRevisions | Where-Object { $_ -ne $Revision }).Count -eq 0
+    }
+}
+
+function Wait-Ready([string]$Kind, [string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 600) {
     $result = $null
     Wait-Until $TimeoutSeconds "$Kind $Namespace/$Name did not become current-generation Ready." {
-        $arguments = @('get',$Kind,$Name)
+        $resource = switch ($Kind) {
+            'application' { 'applications.platform.steadystate.dev' }
+            'database' { 'databases.platform.steadystate.dev' }
+            default { $Kind }
+        }
+        $arguments = @('get',$resource,$Name)
         if ($Namespace) { $arguments += @('-n',$Namespace) }
         $script:result = Get-KubeObject $arguments
         if (-not $script:result) { return $false }
@@ -104,14 +180,14 @@ function Get-CanonicalOrders {
 
 function Get-PrimaryPod([string]$ClusterName) {
     $pod = $null
-    Wait-Until 600 "Primary Pod for $ClusterName was not found." {
-        $script:pod = (& kubectl get pod -n $Namespace -l "cnpg.io/cluster=$ClusterName,cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}' 2>$null)
+    Wait-Until 180 "Primary Pod for $ClusterName was not found." {
+        $script:pod = (& kubectl --request-timeout=10s get pod -n $Namespace -l "cnpg.io/cluster=$ClusterName,cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}' 2>$null)
         return $LASTEXITCODE -eq 0 -and [bool]$script:pod
     }
     return $script:pod
 }
 
-function Wait-Backup([string]$Name, [int]$TimeoutSeconds = 900, [switch]$AllowFailure) {
+function Wait-Backup([string]$Name, [int]$TimeoutSeconds = 420, [switch]$AllowFailure) {
     $backup = $null
     Wait-Until $TimeoutSeconds "Backup $Namespace/$Name did not finish." {
         $script:backup = Get-KubeObject @('get','backup.postgresql.cnpg.io',$Name,'-n',$Namespace)
@@ -123,7 +199,7 @@ function Wait-Backup([string]$Name, [int]$TimeoutSeconds = 900, [switch]$AllowFa
 }
 
 function New-Backup([string]$Name, [string]$ClusterName) {
-    [ordered]@{
+    $output = @([ordered]@{
         apiVersion='postgresql.cnpg.io/v1';kind='Backup'
         metadata=[ordered]@{name=$Name;namespace=$Namespace}
         spec=[ordered]@{
@@ -131,30 +207,38 @@ function New-Backup([string]$Name, [string]$ClusterName) {
             method='plugin'
             pluginConfiguration=[ordered]@{name='barman-cloud.cloudnative-pg.io'}
         }
-    } | ConvertTo-Json -Depth 15 | & kubectl apply -f - *> $null
-    if ($LASTEXITCODE -ne 0) { throw "Could not create Backup $Name." }
+    } | ConvertTo-Json -Depth 15 | & kubectl --request-timeout=20s apply -f - 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $detail = (($output -join ' ') -replace '(?i)(token|password|secret)=\S+', '$1=[REDACTED]')
+        throw "Could not create Backup ${Name}: $detail"
+    }
 }
 
 function Wait-BackupAlert([bool]$Firing) {
-    $prometheus = (& kubectl get pod -n monitoring -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $prometheus) { throw 'Prometheus Pod was not found.' }
     $expected = if ($Firing) { 1 } else { 0 }
-    Wait-Until 150 "Database backup-freshness alert did not reach firing=$Firing within 150 seconds." {
-        $raw = @(& kubectl exec -n monitoring $prometheus -c prometheus -- wget -qO- 'http://127.0.0.1:9090/api/v1/query?query=ALERTS%7Balertname%3D%22SteadyStateDatabaseBackupStale%22%2Calertstate%3D%22firing%22%7D' 2>$null)
-        if ($LASTEXITCODE -ne 0 -or -not $raw) { return $false }
-        $query = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
-        return @($query.data.result).Count -eq $expected
+    $expression = [Uri]::EscapeDataString('ALERTS{alertname="SteadyStateDatabaseBackupStale",alertstate="firing"}')
+    Wait-Until 120 "Database backup-freshness alert did not reach firing=$Firing within 120 seconds." {
+        try {
+            $query = (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 "/api/v1/query?query=$expression") | ConvertFrom-Json
+            return $query.status -eq 'success' -and @($query.data.result).Count -eq $expected
+        } catch {
+            return $false
+        }
     }
 }
 
 function Invoke-PrometheusScalar([string]$Expression) {
-    $prometheus = (& kubectl get pod -n monitoring -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $prometheus) { throw 'Prometheus Pod was not found.' }
     $encoded = [Uri]::EscapeDataString($Expression)
-    $raw = @(& kubectl exec -n monitoring $prometheus -c prometheus -- wget -qO- "http://127.0.0.1:9090/api/v1/query?query=$encoded")
-    if ($LASTEXITCODE -ne 0 -or -not $raw) { throw 'Prometheus resource query failed.' }
-    $result = (($raw -join [Environment]::NewLine) | ConvertFrom-Json).data.result
-    if (@($result).Count -ne 1) { throw "Prometheus query returned $(@($result).Count) results." }
+    try {
+        $response = (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 "/api/v1/query?query=$encoded") | ConvertFrom-Json
+    } catch {
+        throw "Prometheus resource query failed: $($_.Exception.Message)"
+    }
+    if ($response.status -ne 'success') {
+        throw "Prometheus resource query returned status '$($response.status)'."
+    }
+    $result = @($response.data.result)
+    if ($result.Count -ne 1) { throw "Prometheus query returned $($result.Count) results." }
     return [double]$result[0].value[1]
 }
 
@@ -169,12 +253,15 @@ function Convert-MemoryToMiB([string]$Value) {
 }
 
 function Git-CommitAndPush([string]$Message) {
-    git add -- gitops/applications/demo/application.yaml gitops/databases/orders/database.yaml gitops/databases/orders/kustomization.yaml
-    git commit -m $Message
+    git add -- gitops/applications/demo/application.yaml gitops/databases/orders/database.yaml gitops/databases/orders/kustomization.yaml | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Acceptance Git staging failed.' }
+    git commit -m $Message | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Acceptance Git commit failed.' }
-    git push origin "HEAD:$((Get-State).branch)"
+    git push origin "HEAD:$((Get-State).branch)" | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Acceptance Git push failed.' }
-    return (& git rev-parse HEAD).Trim()
+    $sha = [string](& git rev-parse HEAD)
+    if ($LASTEXITCODE -ne 0 -or -not $sha) { throw 'Could not resolve the acceptance commit SHA.' }
+    return $sha.Trim()
 }
 
 function Capture([string]$Prefix) {
@@ -182,18 +269,45 @@ function Capture([string]$Prefix) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & kubectl get database,application -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-platform.yaml")
-        & kubectl get cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-data.yaml")
-        & kubectl get application.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")
-        & kubectl get pod,pvc,service,networkpolicy -n $Namespace -o wide *> (Join-Path $ArtifactRoot "snapshots/$Prefix-workloads.txt")
-        & kubectl get prometheusrule -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-alert-rules.yaml")
-        & kubectl logs -n steadystate-system deployment/steadystate-controller-manager --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-operator.log")
-        & kubectl logs -n cnpg-system deployment/cloudnative-pg --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-cnpg.log")
-        & kubectl logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-barman.log")
-        & kubectl logs -n $Namespace -l "app.kubernetes.io/instance=$ApplicationName" --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-application.log")
-        & kubectl logs -n argocd statefulset/argocd-application-controller --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-argo.log")
+        $kindContainerIDs = @(& docker ps -a --filter 'label=io.x-k8s.kind.cluster=steadystate' --format '{{.ID}}')
+        if ($kindContainerIDs.Count -gt 0) {
+            & docker inspect --format '{{.Name}} status={{.State.Status}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}}' @kindContainerIDs *> (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-state.txt")
+            & docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' @kindContainerIDs *> (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-resources.txt")
+        } else {
+            Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-state.txt") "No kind containers were discoverable.$([Environment]::NewLine)"
+            Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-resources.txt") "No kind container resource measurements were available.$([Environment]::NewLine)"
+        }
+        & kubectl --request-timeout=5s get pod -n kube-system -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-control-plane-pods.yaml")
+        & kubectl --request-timeout=5s get pod -n kyverno -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-kyverno-pods.yaml")
+        & kubectl --request-timeout=5s describe pod -n kyverno *> (Join-Path $ArtifactRoot "snapshots/$Prefix-kyverno-pods-describe.txt")
+        foreach ($component in @('kube-apiserver','kube-controller-manager','kube-scheduler','etcd')) {
+            $podName = "$component-steadystate-control-plane"
+            & kubectl --request-timeout=5s logs -n kube-system $podName --tail=500 *> (Join-Path $ArtifactRoot "logs/$Prefix-$component.log")
+            & kubectl --request-timeout=5s logs -n kube-system $podName --previous --tail=500 *> (Join-Path $ArtifactRoot "logs/$Prefix-$component-previous.log")
+        }
+        & kubectl --request-timeout=5s logs -n kyverno -l app.kubernetes.io/component=admission-controller --all-containers --tail=500 --prefix=true *> (Join-Path $ArtifactRoot "logs/$Prefix-kyverno-admission.log")
+        & kubectl --request-timeout=5s logs -n kyverno -l app.kubernetes.io/component=reports-controller --all-containers --tail=500 --prefix=true *> (Join-Path $ArtifactRoot "logs/$Prefix-kyverno-reports.log")
+        & kubectl --request-timeout=5s get databases.platform.steadystate.dev,applications.platform.steadystate.dev -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-platform.yaml")
+        & kubectl --request-timeout=5s get cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-data.yaml")
+        & kubectl --request-timeout=5s get applications.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")
+        & kubectl --request-timeout=5s get pod,pvc,service,networkpolicy -n $Namespace -o wide *> (Join-Path $ArtifactRoot "snapshots/$Prefix-workloads.txt")
+        & kubectl --request-timeout=5s get prometheusrule -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-alert-rules.yaml")
+        & kubectl --request-timeout=5s get service,endpointslice,networkpolicy -n steadystate-system -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-operator-metrics-routing.yaml")
+        & kubectl --request-timeout=5s get servicemonitor steadystate-operator -n monitoring -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-operator-servicemonitor.yaml")
+        try { Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-prometheus-targets.json") (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 '/api/v1/targets?state=active') } catch {}
+        try { Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-prometheus-backup-health.json") ((Get-PrometheusQuery 'steadystate_database_backup_healthy{namespace="team-payments",database="orders"}' | ConvertTo-Json -Depth 20) + [Environment]::NewLine) } catch {}
+        & kubectl --request-timeout=5s logs -n steadystate-system deployment/steadystate-controller-manager --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-operator.log")
+        & kubectl --request-timeout=5s logs -n cnpg-system deployment/cloudnative-pg --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-cnpg.log")
+        & kubectl --request-timeout=5s logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-barman.log")
+        & kubectl --request-timeout=5s logs -n $Namespace -l "app.kubernetes.io/instance=$ApplicationName" --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-application.log")
+        & kubectl --request-timeout=5s logs -n argocd statefulset/argocd-application-controller --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-argo.log")
         & docker logs steadystate-seaweedfs --tail 1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-seaweedfs.log")
-        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactRoot "snapshots/$Prefix-object-inventory.txt")
+        try {
+            & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactRoot "snapshots/$Prefix-object-inventory.txt")
+        } catch {
+            Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-object-inventory.txt") "Object inventory unavailable during ${Prefix} capture: $($_.Exception.Message)$([Environment]::NewLine)"
+            $global:LASTEXITCODE = 0
+        }
     } finally {
         $ErrorActionPreference = $previous
     }
@@ -214,11 +328,25 @@ switch ($Stage) {
     'Prepare' {
         if (-not $env:GH_TOKEN) { throw 'GH_TOKEN from the repository-scoped GitHub App is required.' }
         New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
+        Write-Utf8 $TranscriptPath "SteadyState Phase 7 hosted disaster-recovery transcript$([Environment]::NewLine)"
         $branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         git config user.name 'steadystate-delivery[bot]'
         $botID = gh api '/users/steadystate-delivery[bot]' --jq .id
         if ($LASTEXITCODE -ne 0 -or -not $botID) { throw 'Could not resolve the GitHub App bot identity.' }
         git config user.email "$botID+steadystate-delivery[bot]@users.noreply.github.com"
+        $state = [ordered]@{
+            schemaVersion=1;result='running';sourceSHA=$env:GITHUB_SHA;branch=$branch
+            startedAt=(Get-Date).ToUniversalTime().ToString('o')
+            baselineCommit='';recoveryCommit=$null;retirementCommit=$null
+            sourceBackupServerName=$null;recoveryBackupServerName=$null;backupName=$null
+            archiveConfirmedAt=$null;failureStartedAt=$null;completedAt=$null
+            sourceChecksum=$null;recoveredChecksum=$null
+            rtoMinutes=$null;rpoMinutes=$null;memoryMiB=$null
+            walObjectCount=$null;objectCount=$null
+            currentStage='prepared';stageStartedAt=$null;failedAt=$null;lastError=$null
+            checks=@()
+        }
+        Save-State $state
         git switch --create $branch $env:GITHUB_SHA
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the ephemeral acceptance branch.' }
         $manifest = Join-Path $Root 'gitops/applications/demo/application.yaml'
@@ -229,30 +357,26 @@ switch ($Stage) {
         }
         Write-Utf8 $manifest $updated
         git add -- gitops/applications/demo/application.yaml
-        git commit -m 'test(data): establish Phase 7 recovery baseline'
+        git commit --allow-empty -m 'test(data): establish Phase 7 recovery baseline'
         if ($LASTEXITCODE -ne 0) { throw 'Could not commit the baseline.' }
         git push --set-upstream origin $branch
         if ($LASTEXITCODE -ne 0) { throw 'Could not push the baseline.' }
-        $state = [ordered]@{
-            schemaVersion=1;result='running';sourceSHA=$env:GITHUB_SHA;branch=$branch
-            startedAt=(Get-Date).ToUniversalTime().ToString('o')
-            baselineCommit=(& git rev-parse HEAD).Trim()
-            checks=@()
-        }
+        $state.baselineCommit = (& git rev-parse HEAD).Trim()
         Save-State $state
         Write-Host "PHASE7_ACCEPTANCE_PREPARED $branch"
     }
     'Test' {
         $state = Get-State
-        $started = Get-Date
-        $database = Wait-Ready 'database' $DatabaseName $Namespace
-        $application = Wait-Ready 'application' $ApplicationName $Namespace
-        Add-Check $state 'database-application-argo-healthy' $started 'Database and signed database-bound Application agree on current-generation readiness.'
-
+        try {
+        Set-Stage $state 'initial-gitops-readiness'
         $started = Get-Date
         foreach ($argoApplication in @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator','payments')) {
             $null = Wait-ArgoHealthy $argoApplication
         }
+        Set-Stage $state 'initial-readiness'
+        $database = Wait-Ready 'database' $DatabaseName $Namespace
+        $application = Wait-Ready 'application' $ApplicationName $Namespace
+        Add-Check $state 'database-application-argo-healthy' $started 'Database and signed database-bound Application agree on current-generation readiness.'
         $databaseStatus = $database.status | ConvertTo-Json -Depth 10
         if ($databaseStatus -match 'postgresql://' -or $databaseStatus -match 'ACCESS_SECRET_KEY') {
             throw 'Database status exposed secret material.'
@@ -263,15 +387,24 @@ switch ($Stage) {
             throw 'The signed Application Pod was not admission-pinned to an immutable digest.'
         }
         $postgresPod = Get-KubeObject @('get','pod','-n',$Namespace,'-l',"cnpg.io/cluster=$(([string]$database.status.connectionSecretName) -replace '-app$','')")
-        $postgresImages = @($postgresPod.items[0].spec.containers | ForEach-Object { [string]$_.image })
-        $postgresInitImages = @($postgresPod.items[0].spec.initContainers | ForEach-Object { [string]$_.image })
-        if ($postgresImages -notcontains 'ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' -or
-            $postgresImages -notcontains 'ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0@sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288' -or
-            $postgresInitImages -notcontains 'ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb') {
+        $postgresImages = @{}
+        @($postgresPod.items[0].spec.containers) | ForEach-Object { $postgresImages[[string]$_.name] = [string]$_.image }
+        $postgresInitImages = @{}
+        @($postgresPod.items[0].spec.initContainers) | ForEach-Object { $postgresInitImages[[string]$_.name] = [string]$_.image }
+        $pinnedDataImages = [ordered]@{
+            postgres = $postgresImages['postgres']
+            bootstrapController = $postgresInitImages['bootstrap-controller']
+            barmanSidecar = $postgresInitImages['plugin-barman-cloud']
+        }
+        Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/pinned-data-images.json') (($pinnedDataImages | ConvertTo-Json) + [Environment]::NewLine)
+        if ($pinnedDataImages.postgres -ne 'ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:1e6adb18ff3d5a538ff8fcc422c47652cc3b2cc133d5c87b6fd306660f36ffe9' -or
+            $pinnedDataImages.barmanSidecar -ne 'ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0@sha256:990361af3319f9e23aafa0f6d7981f99bf1f69b4e6a85cf1bc7d71d6f09bb288' -or
+            $pinnedDataImages.bootstrapController -ne 'ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb') {
             throw 'CNPG, bootstrap-controller, or Barman operand images are not the exact chart-pinned Phase 7 tag-plus-digest references.'
         }
         Add-Check $state 'pinned-data-stack-and-security-enforced' $started 'Pinned data controllers are Argo Healthy; Application and CNPG operand images are immutable; Database status contains no credentials.'
 
+        Set-Stage $state 'source-data-and-backup'
         $started = Get-Date
         $databaseTraceID = '77777777777777777777777777777777'
         for ($index = 1; $index -le 100; $index++) {
@@ -303,11 +436,12 @@ switch ($Stage) {
 
         $clusterName = ([string]$database.status.connectionSecretName) -replace '-app$',''
         $pod = Get-PrimaryPod $clusterName
-        & kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc 'SELECT pg_switch_wal();' *> $null
+        & kubectl --request-timeout=20s exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc 'SELECT pg_switch_wal();' *> $null
         if ($LASTEXITCODE -ne 0) { throw 'WAL switch failed.' }
         $backupName = "phase7-dr-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         New-Backup $backupName $clusterName
         $backup = Wait-Backup $backupName
+        Wait-OperatorBackupMetric 1
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/source-backup.json') (($backup | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
         $sourceBackupServerName = [string]$database.status.backupServerName
         $allSourceObjects = @(& (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory)
@@ -327,6 +461,7 @@ switch ($Stage) {
         Save-State $state
         Add-Check $state 'base-backup-and-wal-archived' $started 'An on-demand plugin backup completed after a forced WAL switch.'
 
+        Set-Stage $state 'cluster-destruction'
         $rtoStarted = (Get-Date).ToUniversalTime()
         $state.failureStartedAt = $rtoStarted.ToString('o')
         Save-State $state
@@ -334,6 +469,7 @@ switch ($Stage) {
         if ($LASTEXITCODE -ne 0) { throw 'Whole-cluster destruction failed.' }
         Add-Check $state 'entire-kind-cluster-destroyed' $rtoStarted 'The kind cluster was destroyed while the named SeaweedFS volume remained intact.'
 
+        Set-Stage $state 'recovery-commit'
         $databaseManifest = Join-Path $Root 'gitops/databases/orders/database.yaml'
         $databaseContent = Get-Content -Raw $databaseManifest
         if ($databaseContent -match '(?m)^  recovery:') { throw 'Baseline Database unexpectedly contains recovery state.' }
@@ -346,16 +482,19 @@ switch ($Stage) {
         $state.recoveryCommit = Git-CommitAndPush 'test(data): restore orders from retained archive'
         Save-State $state
 
+        Set-Stage $state 'recovery-bootstrap'
         & (Join-Path $PSScriptRoot 'dev.ps1') bootstrap -Profile full
         if ($LASTEXITCODE -ne 0) { throw 'Full-profile rebootstrap failed.' }
         & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Start
         if ($LASTEXITCODE -ne 0) { throw 'Reconnecting the retained backup store failed.' }
         & (Join-Path $PSScriptRoot 'dev.ps1') load-images
         if ($LASTEXITCODE -ne 0) { throw 'Branch image load failed.' }
+        Set-Stage $state 'recovery-gitops'
         & (Join-Path $PSScriptRoot 'dev.ps1') deploy-gitops -Profile full -GitRevision $state.branch
         if ($LASTEXITCODE -ne 0) { throw 'Recovery GitOps deployment failed.' }
-        $recoveredDatabase = Wait-Ready 'database' $DatabaseName $Namespace 1200
-        $recoveredApplication = Wait-Ready 'application' $ApplicationName $Namespace 600
+        Set-Stage $state 'recovery-readiness-and-checksum'
+        $recoveredDatabase = Wait-Ready 'database' $DatabaseName $Namespace 600
+        $recoveredApplication = Wait-Ready 'application' $ApplicationName $Namespace 300
         $recovered = Get-CanonicalOrders
         $rto = ((Get-Date).ToUniversalTime() - $rtoStarted).TotalMinutes
         if ($rto -gt 30) { throw "Recovery RTO $([Math]::Round($rto,2)) minutes exceeds 30 minutes." }
@@ -369,6 +508,7 @@ switch ($Stage) {
         Save-State $state
         Add-Check $state 'cluster-recreated-and-checksum-restored' $rtoStarted 'GitOps recreated the full cluster and restored all acknowledged orders within the RTO/RPO objectives.'
 
+        Set-Stage $state 'resource-budgets'
         $started = Get-Date
         $dataMiB = Invoke-PrometheusScalar 'sum(container_memory_working_set_bytes{namespace=~"cnpg-system|cert-manager|local-path-storage|team-payments",container!="",image!=""}) / 1024 / 1024'
         $totalMiB = Invoke-PrometheusScalar 'sum(container_memory_working_set_bytes{container!="",image!=""}) / 1024 / 1024'
@@ -383,16 +523,20 @@ switch ($Stage) {
         Capture-RenderedState
         Capture 'recovered'
 
+        Set-Stage $state 'backup-outage-and-recovery'
         $started = Get-Date
-        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Stop
+        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Stop -PreserveNetwork
+        if ($LASTEXITCODE -ne 0) { throw 'Stopping the external backup store failed.' }
         $failedBackup = "phase7-outage-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         New-Backup $failedBackup (([string]$recoveredDatabase.status.connectionSecretName) -replace '-app$','')
         $failed = Wait-Backup $failedBackup 300 -AllowFailure
         if ([string]$failed.status.phase -ne 'failed') { throw 'Backup-store outage did not produce a failed Backup.' }
+        Wait-OperatorBackupMetric 0
         Wait-BackupAlert $true
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/prometheus-backup-alert.json') (Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090 '/api/v1/query?query=ALERTS%7Balertname%3D%22SteadyStateDatabaseBackupStale%22%7D')
         Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/alertmanager-backup-outage.json') (Get-ServiceRaw 'monitoring-kube-prometheus-alertmanager' 9093 '/api/v2/alerts')
         & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Start
+        if ($LASTEXITCODE -ne 0) { throw 'Restarting the external backup store failed.' }
         $recoveryBackup = "phase7-recovered-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         New-Backup $recoveryBackup (([string]$recoveredDatabase.status.connectionSecretName) -replace '-app$','')
         $null = Wait-Backup $recoveryBackup
@@ -400,6 +544,7 @@ switch ($Stage) {
         Wait-BackupAlert $false
         Add-Check $state 'backup-alert-fired-and-recovered' $started 'A stopped external store made backup freshness unhealthy and fired an alert; restarting it and completing a backup cleared both.'
 
+        Set-Stage $state 'final-backup-and-retention'
         $started = Get-Date
         Write-Utf8 (Join-Path $Root 'gitops/databases/orders/kustomization.yaml') @"
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -408,11 +553,17 @@ resources: []
 "@
         $state.retirementCommit = Git-CommitAndPush 'test(data): retire recovered orders database'
         Save-State $state
-        Start-Sleep -Seconds 15
-        & kubectl delete database $DatabaseName -n $Namespace --wait=false *> $null
-        Wait-Until 900 'Database final backup deletion did not complete.' {
-            & kubectl get database $DatabaseName -n $Namespace *> $null
-            return $LASTEXITCODE -ne 0
+        # Tenant pruning is deliberately disabled, so removal leaves Argo OutOfSync
+        # until the live Database is deleted. Wait for the exact desired/compared
+        # revisions and successful sync operation before requesting finalizer-driven
+        # deletion, otherwise Argo can recreate the old revision.
+        Wait-ArgoRevision 'payments' $state.retirementCommit
+        & kubectl --request-timeout=20s delete databases.platform.steadystate.dev $DatabaseName -n $Namespace --wait=false --ignore-not-found=true *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not request Database deletion.' }
+        Wait-Until 480 'Database final backup deletion did not complete.' {
+            $remaining = @(& kubectl --request-timeout=10s get databases.platform.steadystate.dev $DatabaseName -n $Namespace --ignore-not-found -o name 2>$null)
+            if ($LASTEXITCODE -ne 0) { return $false }
+            return $remaining.Count -eq 0
         }
         $allObjects = @(& (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory)
         $sourceRetainedObjects = @($allObjects | Where-Object { $_.StartsWith("$($state.sourceBackupServerName)/", [StringComparison]::Ordinal) })
@@ -427,8 +578,21 @@ resources: []
         $state.completedAt = (Get-Date).ToUniversalTime().ToString('o')
         $state.result = 'passed'
         $state.objectCount = $objects.Count
+        $state.currentStage = 'completed'
         Save-State $state
+        Write-TranscriptLine "RESULT $((Get-Date).ToUniversalTime().ToString('o')) PASSED"
         Write-Host 'PHASE7_ACCEPTANCE_RESULT_PASSED'
+        } catch {
+            $failureState = Get-State
+            $failureState.result = 'failed'
+            $failureState.failedAt = (Get-Date).ToUniversalTime().ToString('o')
+            $failureState.lastError = (([string]$_.Exception.Message) -replace 'postgresql://\S+', 'postgresql://[REDACTED]') -replace '(?i)(token|password|secret)=\S+', '$1=[REDACTED]'
+            Save-State $failureState
+            Write-TranscriptLine "RESULT $((Get-Date).ToUniversalTime().ToString('o')) FAILED stage=$($failureState.currentStage) error=$($failureState.lastError)"
+            Capture 'failure'
+            Write-Host "PHASE7_ACCEPTANCE_RESULT_FAILED stage=$($failureState.currentStage)"
+            throw
+        }
     }
     'Finalize' {
         $state = Get-State
@@ -443,7 +607,7 @@ resources: []
                 throw "Phase 7 acceptance state is missing $field."
             }
         }
-        if ($state.result -ne 'passed' -or $state.sourceChecksum -ne $state.recoveredChecksum -or
+        if ($state.result -ne 'passed' -or $state.currentStage -ne 'completed' -or $state.sourceChecksum -ne $state.recoveredChecksum -or
             [double]$state.rtoMinutes -le 0 -or [double]$state.rtoMinutes -gt 30 -or
             [double]$state.rpoMinutes -lt 0 -or [double]$state.rpoMinutes -gt 5 -or
             [int]$state.walObjectCount -lt 1 -or
@@ -462,12 +626,16 @@ resources: []
         Write-Host 'Phase 7 acceptance evidence finalized.'
     }
     'CaptureFailure' {
-        try { Capture 'failure' } catch { Write-Warning $_.Exception.Message }
+        $failureSnapshot = Join-Path $ArtifactRoot 'snapshots/failure-argo.yaml'
+        if (-not (Test-Path -LiteralPath $failureSnapshot -PathType Leaf)) {
+            try { Capture 'failure' } catch { Write-Warning $_.Exception.Message }
+        }
         $failure = [ordered]@{
             schemaVersion=1;result='failed';sourceSHA=$env:GITHUB_SHA
             capturedAt=(Get-Date).ToUniversalTime().ToString('o')
             failure=$(if ($env:PHASE7_FAILURE_MESSAGE) { $env:PHASE7_FAILURE_MESSAGE } else { 'Phase 7 acceptance failed before completion.' })
         }
         Write-Utf8 (Join-Path $ArtifactRoot 'failure.json') (($failure | ConvertTo-Json -Depth 10) + [Environment]::NewLine)
+        $global:LASTEXITCODE = 0
     }
 }

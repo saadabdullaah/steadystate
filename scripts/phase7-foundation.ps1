@@ -39,7 +39,7 @@ function Wait-ArgoApplicationsHealthy([string[]]$Names, [int]$TimeoutSeconds = 6
     do {
         $pending = [System.Collections.Generic.List[string]]::new()
         foreach ($name in $Names) {
-            $raw = @(& kubectl get applications.argoproj.io $name -n argocd -o json 2>$null)
+            $raw = @(& kubectl --request-timeout=10s get applications.argoproj.io $name -n argocd -o json 2>$null)
             if ($LASTEXITCODE -ne 0 -or -not $raw) {
                 $pending.Add($name)
                 continue
@@ -81,14 +81,14 @@ function New-DatabaseDocument([string]$RecoverySource = '') {
 }
 
 function Apply-Document([object]$Document) {
-    $Document | ConvertTo-Json -Depth 20 | & kubectl apply -f -
+    $Document | ConvertTo-Json -Depth 20 | & kubectl --request-timeout=20s apply -f -
     if ($LASTEXITCODE -ne 0) { throw 'Applying the compatibility Database failed.' }
 }
 
 function Wait-DatabaseHealthy([int]$TimeoutSeconds = 900) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $raw = @(& kubectl get database $DatabaseName -n $Namespace -o json 2>$null)
+        $raw = @(& kubectl --request-timeout=10s get database $DatabaseName -n $Namespace -o json 2>$null)
         if ($LASTEXITCODE -eq 0 -and $raw) {
             $database = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
             $ready = @($database.status.conditions | Where-Object {
@@ -104,10 +104,27 @@ function Wait-DatabaseHealthy([int]$TimeoutSeconds = 900) {
     throw "Database $Namespace/$DatabaseName did not become Healthy within $TimeoutSeconds seconds."
 }
 
+function Wait-TeamHealthy([int]$TimeoutSeconds = 180) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $raw = @(& kubectl --request-timeout=10s get teams.platform.steadystate.dev payments -o json 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $raw) {
+            $team = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
+            $ready = @($team.status.conditions | Where-Object {
+                $_.type -eq 'Ready' -and $_.status -eq 'True' -and
+                [int64]$_.observedGeneration -eq [int64]$team.metadata.generation
+            })
+            if ($ready.Count -eq 1) { return }
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw 'Compatibility Team payments did not become current-generation Ready.'
+}
+
 function Wait-DatabaseAbsent([int]$TimeoutSeconds = 900) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        & kubectl get database $DatabaseName -n $Namespace *> $null
+        & kubectl --request-timeout=10s get database $DatabaseName -n $Namespace *> $null
         if ($LASTEXITCODE -ne 0) { return }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)
@@ -117,7 +134,7 @@ function Wait-DatabaseAbsent([int]$TimeoutSeconds = 900) {
 function Get-PrimaryPod([string]$ClusterName, [int]$TimeoutSeconds = 600) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $pod = (& kubectl get pod -n $Namespace -l "cnpg.io/cluster=$ClusterName,cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}' 2>$null)
+        $pod = (& kubectl --request-timeout=10s get pod -n $Namespace -l "cnpg.io/cluster=$ClusterName,cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}' 2>$null)
         if ($LASTEXITCODE -eq 0 -and $pod) { return $pod }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)
@@ -126,16 +143,24 @@ function Get-PrimaryPod([string]$ClusterName, [int]$TimeoutSeconds = 600) {
 
 function Invoke-Psql([string]$ClusterName, [string]$SQL) {
     $pod = Get-PrimaryPod $ClusterName
-    $output = @(& kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc "SET ROLE app; $SQL")
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL compatibility command failed.' }
-    return ($output -join "`n").Trim()
+    $deadline = (Get-Date).AddSeconds(120)
+    do {
+        $output = @(& kubectl --request-timeout=20s exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc "SET ROLE app; $SQL" 2>$null)
+        if ($LASTEXITCODE -eq 0) { return ($output -join "`n").Trim() }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw 'PostgreSQL compatibility command did not recover from Kubernetes API errors within 120 seconds.'
 }
 
 function Invoke-AdminPsql([string]$ClusterName, [string]$SQL) {
     $pod = Get-PrimaryPod $ClusterName
-    $output = @(& kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc $SQL)
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL administrative compatibility command failed.' }
-    return ($output -join "`n").Trim()
+    $deadline = (Get-Date).AddSeconds(120)
+    do {
+        $output = @(& kubectl --request-timeout=20s exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc $SQL 2>$null)
+        if ($LASTEXITCODE -eq 0) { return ($output -join "`n").Trim() }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw 'PostgreSQL administrative command did not recover from Kubernetes API errors within 120 seconds.'
 }
 
 function Get-DataChecksum([string]$ClusterName) {
@@ -180,7 +205,13 @@ function Capture-Snapshots([string]$Prefix) {
         & kubectl --request-timeout=10s logs -n cnpg-system deployment/cloudnative-pg --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-cnpg.log")
         & kubectl --request-timeout=10s logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-barman.log")
         & docker logs steadystate-seaweedfs --tail 1000 *> (Join-Path $ArtifactDirectory "$Prefix-seaweedfs.log")
-        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactDirectory "$Prefix-object-inventory.txt")
+        try {
+            & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactDirectory "$Prefix-object-inventory.txt")
+        } catch {
+            "Object inventory unavailable during ${Prefix} capture: $($_.Exception.Message)" |
+                Set-Content -LiteralPath (Join-Path $ArtifactDirectory "$Prefix-object-inventory.txt") -Encoding UTF8
+            $global:LASTEXITCODE = 0
+        }
     } finally {
         $ErrorActionPreference = $previous
     }
@@ -201,6 +232,11 @@ Add-Check $checks 'seaweedfs-exact-store-healthy' $started 'The exact pinned Sea
 $started = Get-Date
 Wait-ArgoApplicationsHealthy @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')
 Add-Check $checks 'pinned-data-stack-ready' $started 'StorageClass, cert-manager, CloudNativePG, Barman, and the SteadyState operator are Healthy.'
+
+# The compatibility gate intentionally creates one tenant and one Database.
+# The normal payments workload is disabled in the root chart for this workflow.
+Invoke-Kubectl apply -k (Join-Path $Root 'gitops/teams/payments')
+Wait-TeamHealthy
 
 Invoke-Kubectl delete database $DatabaseName -n $Namespace --ignore-not-found=true --wait=false
 Wait-DatabaseAbsent 120

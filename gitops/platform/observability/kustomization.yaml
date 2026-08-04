@@ -2,5 +2,6 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - grafana-httproute.yaml
+  - operator-servicemonitor.yaml
   - application-dashboard.yaml
   - platform-dashboard.yaml
