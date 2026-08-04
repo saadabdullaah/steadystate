@@ -597,3 +597,14 @@
   operation revision to equal the retirement commit before requesting
   finalizer-driven deletion; the expected no-prune OutOfSync state is not
   treated as a blocker.
+- Phase 7 acceptance run
+  [30903568810](https://github.com/saadabdullaah/steadystate/actions/runs/30903568810)
+  passed all ten checks on head `6d71076`. It restored the exact 100-order
+  checksum after complete kind destruction, measured RTO 11.173 minutes and
+  RPO boundary 0 minutes, retained eight WAL and 31 total objects, fired and
+  cleared the backup-age alert, completed the final backup/deletion in
+  104.959 seconds, and stayed within every resource budget. Artifact
+  `8890983887` has GitHub SHA-256
+  `815f86dba99c641612c9e9c3ada4a6882bde16ba91b75a60e31f8903100624fa`;
+  the committed successful GIF has SHA-256
+  `a92d1ba110973bdf72af29456176e7a0d407765f2f1b73312b1d9525a1963898`.
