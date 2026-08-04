@@ -1,0 +1,299 @@
+package platformctl
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+type DoctorCheck struct {
+	Name        string `json:"name" yaml:"name"`
+	Status      string `json:"status" yaml:"status"`
+	Details     string `json:"details" yaml:"details"`
+	Remediation string `json:"remediation,omitempty" yaml:"remediation,omitempty"`
+}
+
+func newDoctorCommand(options *Options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "doctor",
+		Short: "Validate local and remote platform prerequisites",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, selected, err := options.loadContext()
+			if err != nil {
+				return err
+			}
+			lifecycleTimeout := options.Timeout
+			if lifecycleTimeout == 30*time.Second {
+				lifecycleTimeout = 30 * time.Minute
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), lifecycleTimeout)
+			defer cancel()
+			checks := runDoctor(ctx, selected)
+			rows := make([][]string, 0, len(checks))
+			failed := false
+			for _, check := range checks {
+				rows = append(rows, []string{check.Status, check.Name, check.Details, check.Remediation})
+				if check.Status == "Fail" {
+					failed = true
+				}
+			}
+			if err := options.printer().Table([]string{"STATUS", "CHECK", "DETAILS", "REMEDIATION"}, rows, checks); err != nil {
+				return err
+			}
+			if failed {
+				return exitError(ExitUnhealthy, "one or more prerequisite checks failed")
+			}
+			return nil
+		},
+	}
+}
+
+func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
+	checks := []DoctorCheck{}
+	add := func(name, status, details, remediation string) {
+		checks = append(checks, DoctorCheck{Name: name, Status: status, Details: Redact(details), Remediation: remediation})
+	}
+	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
+		add("operating-system", "Pass", runtime.GOOS+" supports the full local lifecycle", "")
+	} else {
+		add("operating-system", "Warning", runtime.GOOS+" supports CLI Git/read operations; kind lifecycle is best-effort", "Use Windows or Linux for the supported local lifecycle.")
+	}
+	if info, err := os.Stat(selected.CheckoutPath); err != nil || !info.IsDir() {
+		add("checkout", "Fail", "configured checkout is unavailable", "Run platformctl context set with a valid --checkout path.")
+	} else if _, err := os.Stat(filepath.Join(selected.CheckoutPath, "go.mod")); err != nil {
+		add("checkout", "Fail", "configured directory is not a SteadyState checkout", "Point the context at the SteadyState repository root.")
+	} else {
+		add("checkout", "Pass", selected.CheckoutPath, "")
+	}
+
+	tools := []string{"git", "gh", "docker", "pwsh"}
+	if selected.Profile == "full" {
+		tools = append(tools, "sops", "age")
+	}
+	for _, tool := range tools {
+		if path, err := exec.LookPath(tool); err != nil {
+			add("tool-"+tool, "Fail", tool+" was not found", "Install "+tool+" and ensure it is on PATH.")
+		} else {
+			add("tool-"+tool, "Pass", path, "")
+		}
+	}
+	if _, err := runExternal(ctx, selected.CheckoutPath, "git", "rev-parse", "--show-toplevel"); err != nil {
+		add("git-repository", "Fail", err.Error(), "Restore or re-clone the configured checkout.")
+	} else {
+		add("git-repository", "Pass", "repository metadata is readable", "")
+	}
+	if status, err := runExternal(ctx, selected.CheckoutPath, "git", "status", "--porcelain"); err != nil {
+		add("git-worktree", "Fail", err.Error(), "Repair the Git checkout.")
+	} else if strings.TrimSpace(status) != "" {
+		add("git-worktree", "Warning", "worktree contains local changes", "Commit, stash, or intentionally preserve local files before Git write operations.")
+	} else {
+		add("git-worktree", "Pass", "worktree is clean", "")
+	}
+	if _, err := runExternal(ctx, selected.CheckoutPath, "gh", "auth", "status", "--hostname", "github.com"); err != nil {
+		add("github-auth", "Fail", "GitHub CLI authentication is unavailable", "Run gh auth login and select the intended account.")
+	} else {
+		add("github-auth", "Pass", "GitHub CLI is authenticated", "")
+	}
+	checkGitHubNames := func(check, kind string, required []string) {
+		raw, err := runExternal(ctx, selected.CheckoutPath, "gh", kind, "list", "--repo", selected.Repository, "--json", "name")
+		if err != nil {
+			add(check, "Fail", "GitHub "+kind+" names could not be inspected", "Confirm repository access and gh authentication.")
+			return
+		}
+		names := decodeGitHubNames(raw)
+		missing := []string{}
+		for _, name := range required {
+			if !names[name] {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			add(check, "Fail", "required names are missing: "+strings.Join(missing, ", "), "Configure the documented repository "+kind+" names; values are never read.")
+			return
+		}
+		add(check, "Pass", "required "+kind+" names are present; values were not read", "")
+	}
+	checkGitHubNames("github-app-variable", "variable", []string{"STEADYSTATE_BOT_CLIENT_ID"})
+	requiredSecrets := []string{"STEADYSTATE_BOT_PRIVATE_KEY"}
+	if selected.Profile == "full" {
+		requiredSecrets = append(requiredSecrets, "SOPS_AGE_KEY")
+	}
+	checkGitHubNames("github-secrets", "secret", requiredSecrets)
+	if _, err := runExternal(ctx, selected.CheckoutPath, "docker", "info", "--format", "{{json .ServerVersion}}"); err != nil {
+		add("docker", "Fail", "Docker Engine is not ready", "Start Docker Desktop or Docker Engine.")
+	} else {
+		add("docker", "Pass", "Docker Engine responded", "")
+	}
+	if raw, err := runExternal(ctx, selected.CheckoutPath, "docker", "info", "--format", "{{.MemTotal}}"); err == nil {
+		if available, parseErr := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); parseErr == nil {
+			minimumGiB := map[string]int64{"minimal": 4, "standard": 7, "full": 9}[selected.Profile]
+			availableGiB := float64(available) / float64(1<<30)
+			if available < minimumGiB*(1<<30) {
+				add("resource-budget", "Warning", fmt.Sprintf("Docker has %.1f GiB; %s profile should have at least %d GiB", availableGiB, selected.Profile, minimumGiB), "Increase the Docker VM memory allocation before a full bootstrap.")
+			} else {
+				add("resource-budget", "Pass", fmt.Sprintf("Docker has %.1f GiB for the %s profile", availableGiB, selected.Profile), "")
+			}
+		}
+	}
+	for _, port := range []int{selected.HTTPPort, selected.HTTPSPort} {
+		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			add(fmt.Sprintf("port-%d", port), "Warning", "port is in use", "Confirm the configured cluster owns it or choose another port.")
+			continue
+		}
+		_ = listener.Close()
+		add(fmt.Sprintf("port-%d", port), "Pass", "port is available", "")
+	}
+	if client, err := NewClusterClient(selected); err != nil {
+		add("kubernetes", "Warning", err.Error(), "Create the cluster with platformctl cluster up when cluster reads are required.")
+	} else if version, err := client.core.Discovery().ServerVersion(); err != nil {
+		add("kubernetes", "Warning", err.Error(), "Check the selected kube context.")
+	} else {
+		expected := readVersionPin(filepath.Join(selected.CheckoutPath, "scripts", "versions.env"), "KUBERNETES_VERSION")
+		if expected != "" && strings.TrimPrefix(version.GitVersion, "v") != expected {
+			add("kubernetes", "Fail", fmt.Sprintf("cluster is %s; repository requires v%s", version.GitVersion, expected), "Recreate the configured cluster from the pinned profile.")
+		} else {
+			add("kubernetes", "Pass", version.GitVersion, "")
+		}
+	}
+	if selected.Profile == "full" {
+		for _, relative := range []string{".artifacts/secrets/steadystate.agekey", "gitops/secrets/backup-store.enc.yaml"} {
+			if _, err := os.Stat(filepath.Join(selected.CheckoutPath, filepath.FromSlash(relative))); err != nil {
+				add("full-profile-"+filepath.Base(relative), "Fail", "required ignored secret material is absent", "Restore the documented SOPS/age full-profile prerequisites.")
+			} else {
+				add("full-profile-"+filepath.Base(relative), "Pass", "required ignored file is present", "")
+			}
+		}
+	}
+	sort.SliceStable(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
+	return checks
+}
+
+func decodeGitHubNames(raw string) map[string]bool {
+	var values []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return map[string]bool{}
+	}
+	result := make(map[string]bool, len(values))
+	for _, value := range values {
+		result[value.Name] = true
+	}
+	return result
+}
+
+func readVersionPin(path, key string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	prefix := key + "="
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), prefix))
+		}
+	}
+	return ""
+}
+
+func newClusterCommand(options *Options) *cobra.Command {
+	command := &cobra.Command{Use: "cluster", Short: "Manage the configured local cluster"}
+	command.AddCommand(newClusterLifecycleCommand(options, "up", "bootstrap"))
+	command.AddCommand(newClusterLifecycleCommand(options, "down", "destroy"))
+	command.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Show the configured cluster status",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, selected, err := options.loadContext()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := options.commandContext(cmd.Context())
+			defer cancel()
+			client, err := NewClusterClient(selected)
+			if err != nil {
+				return err
+			}
+			version, err := client.core.Discovery().ServerVersion()
+			if err != nil {
+				return exitError(ExitRemote, "query cluster: %v", err)
+			}
+			nodes, err := client.core.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return exitError(ExitRemote, "list nodes: %v", err)
+			}
+			value := map[string]any{"cluster": selected.ClusterName, "profile": selected.Profile, "version": version.GitVersion, "nodes": len(nodes.Items)}
+			return options.printer().Table([]string{"CLUSTER", "PROFILE", "VERSION", "NODES"}, [][]string{{selected.ClusterName, selected.Profile, version.GitVersion, fmt.Sprint(len(nodes.Items))}}, value)
+		},
+	})
+	return command
+}
+
+func newClusterLifecycleCommand(options *Options, name, scriptCommand string) *cobra.Command {
+	return &cobra.Command{
+		Use:   name,
+		Short: map[string]string{"up": "Reconcile the configured local cluster", "down": "Delete the exact configured local cluster"}[name],
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+				return exitError(ExitUsage, "cluster lifecycle is supported on Windows and Linux in v0.8")
+			}
+			_, selected, err := options.loadContext()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := options.commandContext(cmd.Context())
+			defer cancel()
+			arguments := []string{"-NoProfile", "-File", filepath.Join(selected.CheckoutPath, "scripts", "dev.ps1"), scriptCommand, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort)}
+			process := exec.CommandContext(ctx, "pwsh", arguments...)
+			process.Dir = selected.CheckoutPath
+			process.Stdout = options.Stdout
+			process.Stderr = options.Stderr
+			if err := process.Run(); err != nil {
+				if ctx.Err() != nil {
+					return exitError(ExitTimeout, "cluster %s timed out", name)
+				}
+				return exitError(ExitRemote, "cluster %s failed: %v", name, err)
+			}
+			return nil
+		},
+	}
+}
+
+func runExternal(ctx context.Context, directory, executable string, arguments ...string) (string, error) {
+	switch executable {
+	case "git", "gh", "docker":
+	default:
+		return "", fmt.Errorf("unsupported prerequisite executable %q", executable)
+	}
+	// #nosec G204 -- executable is constrained to the fixed allowlist above.
+	command := exec.CommandContext(ctx, executable, arguments...)
+	command.Dir = directory
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return "", fmt.Errorf("%s", Redact(message))
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}

@@ -445,56 +445,62 @@ spec:
       - ServerSideApply=true
 {{- end }}
 {{- if .Values.enableTenantWorkloads }}
+{{- $catalog := .Files.Get "catalog/tenants.yaml" | fromYaml }}
+{{- range $tenant := $catalog.tenants }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: payments
+  name: {{ $tenant.name }}
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 spec:
   project: tenant
   sources:
-    - repoURL: {{ .Values.repoURL | quote }}
-      targetRevision: {{ .Values.gitRevision | quote }}
-      path: gitops/teams/payments
+    - repoURL: {{ $.Values.repoURL | quote }}
+      targetRevision: {{ $.Values.gitRevision | quote }}
+      path: {{ $tenant.teamPath }}
       kustomize:
         commonAnnotations:
           steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
         commonAnnotationsEnvsubst: true
-{{- if .Values.enableDataFoundation }}
-    - repoURL: {{ .Values.repoURL | quote }}
-      targetRevision: {{ .Values.gitRevision | quote }}
-      path: gitops/databases/orders
+{{- if $.Values.enableDataFoundation }}
+{{- range $database := $tenant.databases }}
+    - repoURL: {{ $.Values.repoURL | quote }}
+      targetRevision: {{ $.Values.gitRevision | quote }}
+      path: {{ $database.path }}
       kustomize:
         commonAnnotations:
           steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
         commonAnnotationsEnvsubst: true
 {{- end }}
-    - repoURL: {{ .Values.repoURL | quote }}
-      targetRevision: {{ .Values.gitRevision | quote }}
-      path: gitops/applications/demo
+{{- end }}
+{{- range $application := $tenant.applications }}
+    - repoURL: {{ $.Values.repoURL | quote }}
+      targetRevision: {{ $.Values.gitRevision | quote }}
+      path: {{ $application.path }}
       kustomize:
         commonAnnotations:
           steadystate.dev/source-revision: "$ARGOCD_APP_REVISION"
         commonAnnotationsEnvsubst: true
-{{- if .Values.enableDataFoundation }}
+{{- if and $.Values.enableDataFoundation $application.databaseRef }}
         patches:
           - target:
               group: platform.steadystate.dev
               version: v1alpha1
               kind: Application
-              name: demo
+              name: {{ $application.name }}
             patch: |-
               - op: add
                 path: /spec/databaseRef
                 value:
-                  name: orders
+                  name: {{ $application.databaseRef }}
+{{- end }}
 {{- end }}
   destination:
     server: https://kubernetes.default.svc
-    namespace: team-payments
+    namespace: team-{{ $tenant.name }}
   syncPolicy:
     automated:
       selfHeal: true
@@ -516,4 +522,5 @@ spec:
       jsonPointers:
         - /metadata/finalizers
         - /status
+{{- end }}
 {{- end }}
