@@ -34,12 +34,20 @@ Assertions are scoped to the Database lifetime's UID-derived Barman server
 prefix and require both base-backup and WAL keys. The filer port remains
 unpublished, and this read-only inventory uses no S3 credential.
 
-The focused foundation gate keeps Prometheus and Kyverno enabled but omits
-Loki, Tempo, Alloy, and OTel, which Phase 5 acceptance validates separately.
-This reserves the hosted runner for the storage controllers, PostgreSQL, and
+The focused foundation gate keeps Prometheus, Alertmanager, and Kyverno
+enabled but omits Loki, Tempo, Alloy, OTel, Grafana, and kube-state-metrics,
+which Phase 5 acceptance validates separately. Phase 7 acceptance still runs
+the complete full profile for its final resource-budget measurement. This
+reserves the foundation runner for the storage controllers, PostgreSQL, and
 external backup service without weakening admission enforcement. Exact kind
 container OOM state, working set, and Docker disk use are captured if the
 Kubernetes API becomes unavailable.
+
+The disaster-recovery assertions run directly on the hosted runner. Only
+after they pass does pinned VHS render their timestamped stage/check
+transcript. Keeping Chromium and GIF encoding out of the live full-profile
+interval prevents evidence generation from starving etcd or the API server;
+the transcript, JSON, snapshots, and workflow log remain tied to the same run.
 
 Team default-deny applies to CNPG. Database networking adds only application
 and Prometheus ingress plus four egress paths: SeaweedFS S3, the Kubernetes

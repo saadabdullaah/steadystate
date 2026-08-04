@@ -11,6 +11,7 @@ $Root = Split-Path -Parent $PSScriptRoot
 $ArtifactRoot = Join-Path $Root '.artifacts/phase7/acceptance'
 $StatePath = Join-Path $ArtifactRoot 'state.json'
 $EvidencePath = Join-Path $ArtifactRoot 'evidence.json'
+$TranscriptPath = Join-Path $ArtifactRoot 'transcript.txt'
 $Namespace = 'team-payments'
 $DatabaseName = 'orders'
 $ApplicationName = 'demo'
@@ -19,6 +20,11 @@ $ImageTag = 'v0.7.0'
 function Write-Utf8([string]$Path, [string]$Value) {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
     [IO.File]::WriteAllText($Path, $Value, [Text.UTF8Encoding]::new($false))
+}
+
+function Write-TranscriptLine([string]$Value) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TranscriptPath) | Out-Null
+    [IO.File]::AppendAllText($TranscriptPath, "$Value$([Environment]::NewLine)", [Text.UTF8Encoding]::new($false))
 }
 
 function Get-State {
@@ -31,13 +37,15 @@ function Save-State($State) {
 }
 
 function Add-Check($State, [string]$Name, [datetime]$Started, [string]$Details) {
+    $elapsed = [Math]::Round(((Get-Date) - $Started).TotalSeconds, 3)
     $State.checks += [pscustomobject]@{
         name = $Name
         status = 'passed'
-        elapsedSeconds = [Math]::Round(((Get-Date) - $Started).TotalSeconds, 3)
+        elapsedSeconds = $elapsed
         details = $Details
     }
     Save-State $State
+    Write-TranscriptLine "PASS $Name elapsedSeconds=$elapsed"
 }
 
 function Set-Stage($State, [string]$Name) {
@@ -45,6 +53,7 @@ function Set-Stage($State, [string]$Name) {
     $State.stageStartedAt = (Get-Date).ToUniversalTime().ToString('o')
     Save-State $State
     Write-Host "PHASE7_STAGE $Name"
+    Write-TranscriptLine "STAGE $((Get-Date).ToUniversalTime().ToString('o')) $Name"
 }
 
 function Wait-Until([int]$TimeoutSeconds, [string]$Failure, [scriptblock]$Condition) {
@@ -269,6 +278,7 @@ switch ($Stage) {
     'Prepare' {
         if (-not $env:GH_TOKEN) { throw 'GH_TOKEN from the repository-scoped GitHub App is required.' }
         New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
+        Write-Utf8 $TranscriptPath "SteadyState Phase 7 hosted disaster-recovery transcript$([Environment]::NewLine)"
         $branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
         git config user.name 'steadystate-delivery[bot]'
         $botID = gh api '/users/steadystate-delivery[bot]' --jq .id
@@ -516,6 +526,7 @@ resources: []
         $state.objectCount = $objects.Count
         $state.currentStage = 'completed'
         Save-State $state
+        Write-TranscriptLine "RESULT $((Get-Date).ToUniversalTime().ToString('o')) PASSED"
         Write-Host 'PHASE7_ACCEPTANCE_RESULT_PASSED'
         } catch {
             $failureState = Get-State
@@ -523,6 +534,7 @@ resources: []
             $failureState.failedAt = (Get-Date).ToUniversalTime().ToString('o')
             $failureState.lastError = (([string]$_.Exception.Message) -replace 'postgresql://\S+', 'postgresql://[REDACTED]') -replace '(?i)(token|password|secret)=\S+', '$1=[REDACTED]'
             Save-State $failureState
+            Write-TranscriptLine "RESULT $((Get-Date).ToUniversalTime().ToString('o')) FAILED stage=$($failureState.currentStage) error=$($failureState.lastError)"
             Capture 'failure'
             Write-Host "PHASE7_ACCEPTANCE_RESULT_FAILED stage=$($failureState.currentStage)"
             throw
@@ -560,7 +572,10 @@ resources: []
         Write-Host 'Phase 7 acceptance evidence finalized.'
     }
     'CaptureFailure' {
-        try { Capture 'failure' } catch { Write-Warning $_.Exception.Message }
+        $failureSnapshot = Join-Path $ArtifactRoot 'snapshots/failure-argo.yaml'
+        if (-not (Test-Path -LiteralPath $failureSnapshot -PathType Leaf)) {
+            try { Capture 'failure' } catch { Write-Warning $_.Exception.Message }
+        }
         $failure = [ordered]@{
             schemaVersion=1;result='failed';sourceSHA=$env:GITHUB_SHA
             capturedAt=(Get-Date).ToUniversalTime().ToString('o')

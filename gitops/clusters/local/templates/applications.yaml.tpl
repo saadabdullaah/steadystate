@@ -37,6 +37,11 @@ spec:
         releaseName: monitoring
         valueFiles:
           - $values/gitops/platform/monitoring/values.yaml
+        parameters:
+          - name: grafana.enabled
+            value: {{ .Values.monitoringGrafanaEnabled | quote }}
+          - name: kubeStateMetrics.enabled
+            value: {{ .Values.monitoringKubeStateMetricsEnabled | quote }}
     - repoURL: {{ .Values.repoURL | quote }}
       targetRevision: {{ .Values.gitRevision | quote }}
       ref: values

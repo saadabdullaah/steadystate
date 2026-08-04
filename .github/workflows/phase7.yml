@@ -144,21 +144,21 @@ jobs:
           $encoded = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$env:APP_TOKEN"))
           git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $encoded"
 
-      - name: Record whole-cluster disaster recovery
+      - name: Run whole-cluster disaster recovery
         id: recovery
-        timeout-minutes: 51
+        timeout-minutes: 50
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.recovery-token.outputs.token }}
+        run: ./scripts/phase7-acceptance.ps1 -Stage Test
+
+      - name: Record verified disaster-recovery transcript
+        timeout-minutes: 5
         shell: bash
         env:
           CI: ""
           COLORTERM: truecolor
-          GH_TOKEN: ${{ steps.recovery-token.outputs.token }}
-        run: |
-          timeout --signal=TERM --kill-after=30s 50m vhs docs/demonstrations/phase7-disaster-recovery.tape
-          result="$(jq -r '.result' .artifacts/phase7/acceptance/state.json)"
-          if [ "$result" != "passed" ]; then
-            jq -r '"Phase 7 acceptance failed at stage \(.currentStage): \(.lastError)"' .artifacts/phase7/acceptance/state.json
-            exit 1
-          fi
+        run: timeout --signal=TERM --kill-after=15s 4m vhs docs/demonstrations/phase7-disaster-recovery.tape
 
       - name: Finalize evidence
         id: finalize
@@ -169,7 +169,7 @@ jobs:
       - name: Capture success or failure diagnostics
         if: always()
         continue-on-error: true
-        timeout-minutes: 2
+        timeout-minutes: 3
         shell: pwsh
         run: |
           $clusters = @(& kind get clusters 2>$null)
@@ -199,6 +199,7 @@ jobs:
           $required = @(
             'docs/demonstrations/phase7-disaster-recovery.tape',
             '.artifacts/phase7/acceptance/phase7-disaster-recovery.gif',
+            '.artifacts/phase7/acceptance/transcript.txt',
             '.artifacts/phase7/acceptance/evidence.json',
             '.artifacts/phase7/acceptance/rto-rpo-report.json',
             '.artifacts/phase7/acceptance/registry/signature.json',

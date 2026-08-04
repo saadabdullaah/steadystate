@@ -39,7 +39,7 @@ function Wait-ArgoApplicationsHealthy([string[]]$Names, [int]$TimeoutSeconds = 6
     do {
         $pending = [System.Collections.Generic.List[string]]::new()
         foreach ($name in $Names) {
-            $raw = @(& kubectl get applications.argoproj.io $name -n argocd -o json 2>$null)
+            $raw = @(& kubectl --request-timeout=10s get applications.argoproj.io $name -n argocd -o json 2>$null)
             if ($LASTEXITCODE -ne 0 -or -not $raw) {
                 $pending.Add($name)
                 continue
@@ -81,14 +81,14 @@ function New-DatabaseDocument([string]$RecoverySource = '') {
 }
 
 function Apply-Document([object]$Document) {
-    $Document | ConvertTo-Json -Depth 20 | & kubectl apply -f -
+    $Document | ConvertTo-Json -Depth 20 | & kubectl --request-timeout=20s apply -f -
     if ($LASTEXITCODE -ne 0) { throw 'Applying the compatibility Database failed.' }
 }
 
 function Wait-DatabaseHealthy([int]$TimeoutSeconds = 900) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $raw = @(& kubectl get database $DatabaseName -n $Namespace -o json 2>$null)
+        $raw = @(& kubectl --request-timeout=10s get database $DatabaseName -n $Namespace -o json 2>$null)
         if ($LASTEXITCODE -eq 0 -and $raw) {
             $database = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
             $ready = @($database.status.conditions | Where-Object {
@@ -124,7 +124,7 @@ function Wait-TeamHealthy([int]$TimeoutSeconds = 180) {
 function Wait-DatabaseAbsent([int]$TimeoutSeconds = 900) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        & kubectl get database $DatabaseName -n $Namespace *> $null
+        & kubectl --request-timeout=10s get database $DatabaseName -n $Namespace *> $null
         if ($LASTEXITCODE -ne 0) { return }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)
@@ -134,7 +134,7 @@ function Wait-DatabaseAbsent([int]$TimeoutSeconds = 900) {
 function Get-PrimaryPod([string]$ClusterName, [int]$TimeoutSeconds = 600) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $pod = (& kubectl get pod -n $Namespace -l "cnpg.io/cluster=$ClusterName,cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}' 2>$null)
+        $pod = (& kubectl --request-timeout=10s get pod -n $Namespace -l "cnpg.io/cluster=$ClusterName,cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}' 2>$null)
         if ($LASTEXITCODE -eq 0 -and $pod) { return $pod }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)
@@ -143,16 +143,24 @@ function Get-PrimaryPod([string]$ClusterName, [int]$TimeoutSeconds = 600) {
 
 function Invoke-Psql([string]$ClusterName, [string]$SQL) {
     $pod = Get-PrimaryPod $ClusterName
-    $output = @(& kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc "SET ROLE app; $SQL")
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL compatibility command failed.' }
-    return ($output -join "`n").Trim()
+    $deadline = (Get-Date).AddSeconds(120)
+    do {
+        $output = @(& kubectl --request-timeout=20s exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc "SET ROLE app; $SQL" 2>$null)
+        if ($LASTEXITCODE -eq 0) { return ($output -join "`n").Trim() }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw 'PostgreSQL compatibility command did not recover from Kubernetes API errors within 120 seconds.'
 }
 
 function Invoke-AdminPsql([string]$ClusterName, [string]$SQL) {
     $pod = Get-PrimaryPod $ClusterName
-    $output = @(& kubectl exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc $SQL)
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL administrative compatibility command failed.' }
-    return ($output -join "`n").Trim()
+    $deadline = (Get-Date).AddSeconds(120)
+    do {
+        $output = @(& kubectl --request-timeout=20s exec -n $Namespace $pod -c postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d app -qAtc $SQL 2>$null)
+        if ($LASTEXITCODE -eq 0) { return ($output -join "`n").Trim() }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw 'PostgreSQL administrative command did not recover from Kubernetes API errors within 120 seconds.'
 }
 
 function Get-DataChecksum([string]$ClusterName) {

@@ -22,6 +22,10 @@ spec:
           value: {{ .Values.enableDataFoundation | quote }}
         - name: enableTenantWorkloads
           value: {{ .Values.enableTenantWorkloads | quote }}
+        - name: monitoringGrafanaEnabled
+          value: {{ .Values.monitoringGrafanaEnabled | quote }}
+        - name: monitoringKubeStateMetricsEnabled
+          value: {{ .Values.monitoringKubeStateMetricsEnabled | quote }}
         - name: backupStoreEndpoint
           value: {{ .Values.backupStoreEndpoint | quote }}
   destination:

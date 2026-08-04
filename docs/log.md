@@ -520,3 +520,28 @@
   an existing annotations `PSCustomObject` through assignment. Cleanup now
   uses explicit `kubectl annotate --overwrite`, leaving the successful path
   and evidence contract unchanged.
+
+### Hosted full-profile resource-pressure correction
+
+- Head `5494807` passed all five CI jobs plus Phase 4, Phase 5, and Phase 6.
+  Phase 7 acceptance run
+  [30854678892](https://github.com/saadabdullaah/steadystate/actions/runs/30854678892)
+  failed before data assertions when the live VHS/Chromium process competed
+  with the full profile: etcd and the API server missed probes, many add-ons
+  restarted, Kubernetes requests returned `EOF`, and `local-path-storage`
+  could no longer report Argo Healthy/Synced. Artifact `8872925925` has GitHub
+  SHA-256 `7231303e2dd99e44974073c8d883047c00a363d54cc7b4efda730008e823ea85`
+  and retains the failed stage, real GIF, component logs, and partial
+  diagnostics.
+- Foundation run
+  [30854669462](https://github.com/saadabdullaah/steadystate/actions/runs/30854669462)
+  restored PostgreSQL, reached `Database Healthy`, completed base/final
+  backups, and retained WAL objects, but its 25-minute outer step expired
+  during the final checksum/snapshot boundary while the API was recovering.
+  Artifact `8872932550` has GitHub SHA-256
+  `0373ed20a827656abd0c7393e39379960f3bd66c7fd62afe2a0cc8daecda6b63`.
+- The correction runs the real drill without Chromium and renders its
+  timestamped transcript afterward, disables only Grafana and
+  kube-state-metrics in the focused foundation gate, retains Prometheus and
+  Kyverno, adds bounded Kubernetes request/retry envelopes, and gives the two
+  real backup lifetimes plus restore a measured 30-minute foundation bound.

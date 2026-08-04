@@ -20,7 +20,8 @@ param(
     [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' }),
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity,
-    [switch]$DisableTenantWorkloads
+    [switch]$DisableTenantWorkloads,
+    [switch]$DisableMonitoringUI
 )
 
 $ErrorActionPreference = 'Stop'
@@ -260,6 +261,7 @@ function Invoke-GitOpsCommand {
         -DisableTelemetryPipeline:$DisableTelemetryPipeline `
         -DisableSecurity:$DisableSecurity `
         -DisableTenantWorkloads:$DisableTenantWorkloads `
+        -DisableMonitoringUI:$DisableMonitoringUI `
         -BackupStoreEndpoint $(if ($env:BACKUP_STORE_ENDPOINT) { $env:BACKUP_STORE_ENDPOINT } else { 'http://172.30.240.10:8333' }) `
         -Profile $Profile
 }

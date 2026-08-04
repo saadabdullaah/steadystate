@@ -665,16 +665,18 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 6 {
+	if len(parameters) != 8 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
-		"gitRevision":             "$ARGOCD_APP_REVISION",
-		"enableTelemetryPipeline": "true",
-		"enableSecurity":          "true",
-		"enableDataFoundation":    "false",
-		"enableTenantWorkloads":   "true",
-		"backupStoreEndpoint":     "http://172.30.240.10:8333",
+		"gitRevision":                       "$ARGOCD_APP_REVISION",
+		"enableTelemetryPipeline":           "true",
+		"enableSecurity":                    "true",
+		"enableDataFoundation":              "false",
+		"enableTenantWorkloads":             "true",
+		"monitoringGrafanaEnabled":          "true",
+		"monitoringKubeStateMetricsEnabled": "true",
+		"backupStoreEndpoint":               "http://172.30.240.10:8333",
 	}
 	for _, raw := range parameters {
 		parameter := raw.(map[string]any)
@@ -741,6 +743,28 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 	}
 	for _, required := range []string{"steadystate-operator", "kyverno", "kyverno-policies", "cloudnative-pg", "barman-cloud"} {
 		findObject(t, isolated, "Application", required)
+	}
+	lean := decodeManifests(t, run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--namespace", "argocd",
+		"--set-string", "gitRevision="+testRevision,
+		"--set", "enableDataFoundation=true",
+		"--set", "monitoringGrafanaEnabled=false",
+		"--set", "monitoringKubeStateMetricsEnabled=false",
+	))
+	monitoring := findObject(t, lean, "Application", "monitoring")
+	monitoringSource := nestedSlice(t, monitoring, "spec", "sources")[0].(map[string]any)
+	monitoringParameters := nestedSlice(t, monitoringSource, "helm", "parameters")
+	disabledMonitoringComponents := 0
+	for _, parameter := range monitoringParameters {
+		item := parameter.(map[string]any)
+		if name := objectString(item, "name"); name == "grafana.enabled" || name == "kubeStateMetrics.enabled" {
+			assertString(t, item, "false", "value")
+			disabledMonitoringComponents++
+		}
+	}
+	if disabledMonitoringComponents != 2 {
+		t.Fatalf("lean Phase 7 monitoring disabled %d components, want 2", disabledMonitoringComponents)
 	}
 	expectedWaves := map[string]string{
 		"data-namespaces":    "-10",
@@ -846,7 +870,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	for _, contract := range []string{
 		"-U postgres -d app -qAtc \"SET ROLE app; $SQL\"",
 		"Invoke-AdminPsql $clusterName 'SELECT pg_switch_wal();'",
-		"PostgreSQL administrative compatibility command failed.",
+		"PostgreSQL administrative command did not recover from Kubernetes API errors within 120 seconds.",
+		"kubectl --request-timeout=20s exec",
 		"-Action Inventory",
 		"$serverInventory",
 		"$baseInventory",
@@ -885,9 +910,9 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		}
 	}
 	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
-	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline -DisableTenantWorkloads") ||
+	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline -DisableTenantWorkloads -DisableMonitoringUI") ||
 		strings.Contains(phase7Workflow, "-DisableSecurity") {
-		t.Fatal("Phase 7 compatibility must isolate one data fixture while retaining monitoring and Kyverno")
+		t.Fatal("Phase 7 compatibility must isolate one data fixture and nonessential monitoring UI while retaining Prometheus and Kyverno")
 	}
 	for _, contract := range []string{"Invoke-Kubectl apply -k (Join-Path $Root 'gitops/teams/payments')", "Wait-TeamHealthy"} {
 		if !strings.Contains(phase7Foundation, contract) {
@@ -963,6 +988,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"return $sha.Trim()",
 		"Get-ServiceRaw 'monitoring-kube-prometheus-prometheus' 9090",
 		"initial-gitops-readiness",
+		"transcript.txt",
 		"Capture 'failure'",
 		"-Action Stop -PreserveNetwork",
 		"Could not create Backup ${Name}: $detail",
@@ -977,7 +1003,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		`$branch = "acceptance/phase7-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"`,
 		"Cluster 'steadystate' is already absent; GitOps cleanup is complete.",
 		"timeout-minutes: 75",
-		"timeout --signal=TERM --kill-after=30s 50m vhs docs/demonstrations/phase7-disaster-recovery.tape",
+		"run: ./scripts/phase7-acceptance.ps1 -Stage Test",
+		"timeout --signal=TERM --kill-after=15s 4m vhs docs/demonstrations/phase7-disaster-recovery.tape",
 		"curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30",
 		"id: recovery-token",
 		"id: cleanup-token",

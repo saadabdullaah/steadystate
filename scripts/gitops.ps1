@@ -9,6 +9,7 @@ param(
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity,
     [switch]$DisableTenantWorkloads,
+    [switch]$DisableMonitoringUI,
     [string]$BackupStoreEndpoint = $(if ($env:BACKUP_STORE_ENDPOINT) { $env:BACKUP_STORE_ENDPOINT } else { 'http://172.30.240.10:8333' }),
     [ValidateSet('minimal','standard','full')][string]$Profile = 'standard'
 )
@@ -174,6 +175,7 @@ function Render-RootTemplate {
     $telemetryPipeline = if ($DisableTelemetryPipeline) { 'false' } else { 'true' }
     $security = if ($DisableSecurity) { 'false' } else { 'true' }
     $tenantWorkloads = if ($DisableTenantWorkloads) { 'false' } else { 'true' }
+    $monitoringUI = if ($DisableMonitoringUI) { 'false' } else { 'true' }
     $dataFoundation = if ($Profile -eq 'full') { 'true' } else { 'false' }
     $arguments = @(
         'template', 'steadystate-root', $ChartPath,
@@ -183,6 +185,8 @@ function Render-RootTemplate {
         '--set', "enableSecurity=$security",
         '--set', "enableDataFoundation=$dataFoundation",
         '--set', "enableTenantWorkloads=$tenantWorkloads",
+        '--set', "monitoringGrafanaEnabled=$monitoringUI",
+        '--set', "monitoringKubeStateMetricsEnabled=$monitoringUI",
         '--set-string', "backupStoreEndpoint=$BackupStoreEndpoint",
         '--show-only', $Template
     )
