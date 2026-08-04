@@ -25,6 +25,7 @@ type Options struct {
 	Timeout     time.Duration
 	NoColor     bool
 	Quiet       bool
+	Stdin       io.Reader
 	Stdout      io.Writer
 	Stderr      io.Writer
 	Build       BuildInfo
@@ -33,6 +34,9 @@ type Options struct {
 func NewRootCommand(options Options) *cobra.Command {
 	if options.Stdout == nil {
 		options.Stdout = os.Stdout
+	}
+	if options.Stdin == nil {
+		options.Stdin = os.Stdin
 	}
 	if options.Stderr == nil {
 		options.Stderr = os.Stderr
@@ -75,6 +79,8 @@ func NewRootCommand(options Options) *cobra.Command {
 		newTeamCommand(&options),
 		newApplicationCommand(&options),
 		newDatabaseCommand(&options),
+		newRequestCommand(&options),
+		newBrokerCommand(&options),
 		newCompletionCommand(root),
 	)
 	return root

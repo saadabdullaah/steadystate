@@ -3,10 +3,15 @@ kind: TenantCatalog
 tenants:
   - name: payments
     teamPath: gitops/teams/payments
+    owners:
+      - payments-owner
+    lifecycle: Active
     applications:
       - name: demo
         path: gitops/applications/demo
         databaseRef: orders
+        lifecycle: Active
     databases:
       - name: orders
         path: gitops/databases/orders
+        lifecycle: Active

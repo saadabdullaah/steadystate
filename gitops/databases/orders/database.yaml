@@ -5,6 +5,7 @@ metadata:
   namespace: team-payments
   annotations:
     argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   engine: postgres
   instances: 1

@@ -13,10 +13,13 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "teamPath", "applications", "databases"],
+        "required": ["name", "teamPath", "owners", "lifecycle", "applications", "databases"],
         "properties": {
           "name": {"$ref": "#/$defs/teamName"},
           "teamPath": {"type": "string", "pattern": "^gitops/teams/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+          "owners": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[^\\s]+$"}},
+          "lifecycle": {"$ref": "#/$defs/lifecycle"},
+          "deletionRequest": {"$ref": "#/$defs/requestID"},
           "applications": {"type": "array", "items": {"$ref": "#/$defs/application"}},
           "databases": {"type": "array", "items": {"$ref": "#/$defs/database"}}
         }
@@ -27,20 +30,24 @@
     "application": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "path"],
+      "required": ["name", "path", "lifecycle"],
       "properties": {
         "name": {"$ref": "#/$defs/name"},
         "path": {"type": "string", "pattern": "^gitops/applications/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
-        "databaseRef": {"$ref": "#/$defs/name"}
+        "databaseRef": {"$ref": "#/$defs/name"},
+        "lifecycle": {"$ref": "#/$defs/lifecycle"},
+        "deletionRequest": {"$ref": "#/$defs/requestID"}
       }
     },
     "database": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "path"],
+      "required": ["name", "path", "lifecycle"],
       "properties": {
         "name": {"$ref": "#/$defs/name"},
-        "path": {"type": "string", "pattern": "^gitops/databases/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"}
+        "path": {"type": "string", "pattern": "^gitops/databases/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+        "lifecycle": {"$ref": "#/$defs/lifecycle"},
+        "deletionRequest": {"$ref": "#/$defs/requestID"}
       }
     },
     "teamName": {
@@ -52,6 +59,11 @@
       "type": "string",
       "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
       "maxLength": 63
+    },
+    "lifecycle": {"enum": ["Active", "Retiring"]},
+    "requestID": {
+      "type": "string",
+      "format": "uuid"
     }
   }
 }

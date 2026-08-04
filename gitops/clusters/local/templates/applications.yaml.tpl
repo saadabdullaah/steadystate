@@ -453,6 +453,10 @@ kind: Application
 metadata:
   name: {{ $tenant.name }}
   namespace: argocd
+{{- if eq $tenant.lifecycle "Retiring" }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+{{- end }}
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 spec:
@@ -503,6 +507,7 @@ spec:
     namespace: team-{{ $tenant.name }}
   syncPolicy:
     automated:
+      prune: true
       selfHeal: true
     syncOptions:
       - RespectIgnoreDifferences=true

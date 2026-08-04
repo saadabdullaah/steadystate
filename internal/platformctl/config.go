@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -31,6 +32,8 @@ type Context struct {
 	HTTPPort      int    `json:"httpPort" yaml:"httpPort"`
 	HTTPSPort     int    `json:"httpsPort" yaml:"httpsPort"`
 }
+
+var gitBranchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 
 func defaultContext(checkout string) Context {
 	return Context{
@@ -145,7 +148,7 @@ func (c Config) Validate() error {
 		if context.Repository == "" || strings.Count(context.Repository, "/") != 1 {
 			return fmt.Errorf("context %q repository must be OWNER/REPO", name)
 		}
-		if context.DefaultBranch == "" || context.CheckoutPath == "" || context.ClusterName == "" {
+		if !validGitBranch(context.DefaultBranch) || context.CheckoutPath == "" || context.ClusterName == "" {
 			return fmt.Errorf("context %q is missing repository, checkout, branch, or cluster configuration", name)
 		}
 		if context.Profile != "minimal" && context.Profile != "standard" && context.Profile != "full" {
@@ -156,6 +159,10 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func validGitBranch(value string) bool {
+	return gitBranchPattern.MatchString(value) && !strings.Contains(value, "..") && !strings.Contains(value, "//") && !strings.HasSuffix(value, "/") && !strings.HasSuffix(value, ".") && !strings.HasSuffix(value, ".lock")
 }
 
 func (c Config) Context(name string) (Context, error) {

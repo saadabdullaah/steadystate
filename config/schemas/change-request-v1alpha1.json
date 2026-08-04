@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://steadystate.dev/schemas/change-request-v1alpha1.json",
+  "title": "SteadyState typed change request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "schemaVersion", "requestID", "baseSHA", "rendererVersion", "operation", "parameters"],
+  "properties": {
+    "apiVersion": {"const": "cli.steadystate.dev/v1alpha1"},
+    "kind": {"const": "ChangeRequest"},
+    "schemaVersion": {"const": "v1alpha1"},
+    "requestID": {"type": "string", "format": "uuid"},
+    "baseSHA": {"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"},
+    "rendererVersion": {"const": "v0.8.0"},
+    "operation": {
+      "enum": [
+        "team.create", "team.update", "team.delete", "team.finalize",
+        "app.create", "app.update", "app.delete", "app.finalize",
+        "database.create", "database.update", "database.restore", "database.delete", "database.finalize"
+      ]
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "team": {"$ref": "tenant-catalog-v1alpha1.json#/$defs/teamName"},
+        "name": {"$ref": "tenant-catalog-v1alpha1.json#/$defs/name"},
+        "owners": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 253}},
+        "allowedRepositories": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+        "cpuQuota": {"type": "string"},
+        "memoryQuota": {"type": "string"},
+        "owner": {"type": "string"},
+        "imageRepository": {"type": "string", "pattern": "^[^@\\s]+$"},
+        "imageTag": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "minReplicas": {"type": "integer", "minimum": 1, "maximum": 100},
+        "maxReplicas": {"type": "integer", "minimum": 1, "maximum": 100},
+        "databaseRef": {"$ref": "tenant-catalog-v1alpha1.json#/$defs/name"},
+        "instances": {"type": "integer", "minimum": 1, "maximum": 3},
+        "storageSize": {"type": "string"},
+        "backupSchedule": {"type": "string"},
+        "backupRetention": {"type": "string", "pattern": "^[1-9][0-9]*[dwm]$"},
+        "sourceServerName": {"type": "string"},
+        "targetTime": {"type": "string", "format": "date-time"},
+        "deletionRequest": {"type": "string", "format": "uuid"},
+        "approvalRevision": {"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"},
+        "force": {"type": "boolean"},
+        "acknowledgeDataLoss": {"type": "boolean"}
+      }
+    }
+  }
+}
