@@ -1,9 +1,6 @@
 name: Phase 5 acceptance
 
 on:
-  pull_request:
-    branches:
-      - main
   schedule:
     - cron: "31 3 * * *"
   workflow_dispatch:
