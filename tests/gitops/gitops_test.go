@@ -665,7 +665,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 8 {
+	if len(parameters) != 7 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
@@ -674,7 +674,6 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 		"enableSecurity":                    "true",
 		"enableDataFoundation":              "false",
 		"enableTenantWorkloads":             "true",
-		"monitoringGrafanaEnabled":          "true",
 		"monitoringKubeStateMetricsEnabled": "true",
 		"backupStoreEndpoint":               "http://172.30.240.10:8333",
 	}
@@ -692,6 +691,16 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 		t.Fatalf("root application is missing Helm parameters: %v", expected)
 	}
 	assertAutomated(t, rootApplication, true)
+	limit, found, err := unstructured.NestedFloat64(rootApplication, "spec", "syncPolicy", "retry", "limit")
+	if err != nil || !found || limit != 12 {
+		t.Fatalf("root application retry limit = %g, found=%v err=%v", limit, found, err)
+	}
+	factor, found, err := unstructured.NestedFloat64(rootApplication, "spec", "syncPolicy", "retry", "backoff", "factor")
+	if err != nil || !found || factor != 2 {
+		t.Fatalf("root application retry factor = %g, found=%v err=%v", factor, found, err)
+	}
+	assertString(t, rootApplication, "5s", "spec", "syncPolicy", "retry", "backoff", "duration")
+	assertString(t, rootApplication, "30s", "spec", "syncPolicy", "retry", "backoff", "maxDuration")
 }
 
 func TestGitOpsCommandsAreMirrored(t *testing.T) {
@@ -749,7 +758,6 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 		"--namespace", "argocd",
 		"--set-string", "gitRevision="+testRevision,
 		"--set", "enableDataFoundation=true",
-		"--set", "monitoringGrafanaEnabled=false",
 		"--set", "monitoringKubeStateMetricsEnabled=false",
 	))
 	monitoring := findObject(t, lean, "Application", "monitoring")
@@ -758,13 +766,13 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 	disabledMonitoringComponents := 0
 	for _, parameter := range monitoringParameters {
 		item := parameter.(map[string]any)
-		if name := objectString(item, "name"); name == "grafana.enabled" || name == "kubeStateMetrics.enabled" {
+		if name := objectString(item, "name"); name == "kubeStateMetrics.enabled" {
 			assertString(t, item, "false", "value")
 			disabledMonitoringComponents++
 		}
 	}
-	if disabledMonitoringComponents != 2 {
-		t.Fatalf("lean Phase 7 monitoring disabled %d components, want 2", disabledMonitoringComponents)
+	if disabledMonitoringComponents != 1 {
+		t.Fatalf("lean Phase 7 monitoring disabled %d components, want 1", disabledMonitoringComponents)
 	}
 	expectedWaves := map[string]string{
 		"data-namespaces":    "-10",
@@ -910,9 +918,9 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		}
 	}
 	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
-	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline -DisableTenantWorkloads -DisableMonitoringUI") ||
+	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline -DisableTenantWorkloads -DisableMonitoringStateMetrics") ||
 		strings.Contains(phase7Workflow, "-DisableSecurity") {
-		t.Fatal("Phase 7 compatibility must isolate one data fixture and nonessential monitoring UI while retaining Prometheus and Kyverno")
+		t.Fatal("Phase 7 compatibility must isolate one data fixture and nonessential state metrics while retaining Grafana, Prometheus, and Kyverno")
 	}
 	for _, contract := range []string{"Invoke-Kubectl apply -k (Join-Path $Root 'gitops/teams/payments')", "Wait-TeamHealthy"} {
 		if !strings.Contains(phase7Foundation, contract) {
@@ -1220,17 +1228,19 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	for _, token := range []string{
 		"name: Phase 5 acceptance",
 		"timeout-minutes: 40",
-		"timeout-minutes: 9",
+		"timeout-minutes: 15",
 		"cancel-in-progress: false",
 		"./scripts/dev.ps1 verify-observability",
 		"./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -DisableSecurity",
 		"./scripts/dev.ps1 test-gitops -Profile standard -DisableSecurity",
 		"./scripts/phase5-acceptance.ps1 -Stage Prepare",
-		"timeout --signal=TERM --kill-after=30s 8m vhs docs/demonstrations/phase5-request-telemetry.tape",
+		"./scripts/phase5-acceptance.ps1 -Stage Test",
+		"timeout --signal=TERM --kill-after=15s 4m vhs docs/demonstrations/phase5-request-telemetry.tape",
 		"./scripts/phase5-acceptance.ps1 -Stage Finalize",
 		"./scripts/phase5-acceptance.ps1 -Stage CaptureFailure",
 		"phase5-acceptance-${{ github.sha }}",
 		".artifacts/phase5/acceptance/phase5-request-telemetry.gif",
+		".artifacts/phase5/acceptance/transcript.txt",
 		".artifacts/diagnostics/",
 		"if-no-files-found: error",
 	} {
@@ -1270,6 +1280,8 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 		"kubectl patch applications.platform.steadystate.dev telemetry",
 		"PHASE5_ACCEPTANCE_RESULT_PASSED",
 		"PHASE5_ACCEPTANCE_RESULT_FAILED",
+		"Write-TranscriptLine",
+		"RESULT $($state.completedAt) PASSED",
 	} {
 		if !strings.Contains(script, token) {
 			t.Errorf("Phase 5 acceptance script is missing %q", token)
@@ -1279,11 +1291,11 @@ func TestPhase5AcceptanceWorkflowAndEvidenceContracts(t *testing.T) {
 	tape := string(readFile(t, filepath.Join(root, "docs", "demonstrations", "phase5-request-telemetry.tape")))
 	for _, token := range []string{
 		"Output .artifacts/phase5/acceptance/phase5-request-telemetry.gif",
-		"pwsh -NoProfile -File scripts/phase5-acceptance.ps1 -Stage Test",
-		"Set WaitTimeout 7m",
+		"cat .artifacts/phase5/acceptance/transcript.txt",
+		"Set WaitTimeout 1m",
 		"Set Framerate 2",
-		"Set PlaybackSpeed 8.0",
-		"Wait+Screen /PHASE5_ACCEPTANCE_RESULT_(PASSED|FAILED)/",
+		"Set PlaybackSpeed 1.0",
+		"Wait+Screen /RESULT .* PASSED/",
 	} {
 		if !strings.Contains(tape, token) {
 			t.Errorf("Phase 5 tape is missing %q", token)

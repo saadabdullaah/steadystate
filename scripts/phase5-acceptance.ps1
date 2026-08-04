@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $ArtifactRoot = Join-Path $Root '.artifacts/phase5/acceptance'
 $StatePath = Join-Path $ArtifactRoot 'state.json'
+$TranscriptPath = Join-Path $ArtifactRoot 'transcript.txt'
 $Namespace = 'team-payments'
 $GoodImage = 'ghcr.io/saadabdullaah/steadystate-demo-app:v0.1.0'
 $BadImage = 'ghcr.io/saadabdullaah/steadystate-demo-app:v0.1.0-bad'
@@ -18,6 +19,11 @@ function Write-Utf8 {
     $directory = Split-Path -Parent $Path
     if ($directory) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
     [IO.File]::WriteAllText($Path, $Content, [Text.UTF8Encoding]::new($false))
+}
+
+function Write-TranscriptLine([string]$Value) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TranscriptPath) | Out-Null
+    [IO.File]::AppendAllText($TranscriptPath, "$Value$([Environment]::NewLine)", [Text.UTF8Encoding]::new($false))
 }
 
 function Invoke-ExternalText {
@@ -59,13 +65,16 @@ function Set-AcceptanceStage {
     $State.stageStartedAt = (Get-Date).ToUniversalTime().ToString('o')
     Save-State $State
     Write-Host "[STAGE] $Name at $($State.stageStartedAt)" -ForegroundColor Cyan
+    Write-TranscriptLine "STAGE $($State.stageStartedAt) $Name"
 }
 
 function Add-Check {
     param($State, [string]$Name, [datetime]$Started, [string]$Details)
-    $State.checks = @($State.checks) + @([ordered]@{name=$Name;status='passed';elapsedSeconds=[Math]::Round(((Get-Date)-$Started).TotalSeconds,3);details=$Details})
+    $elapsed = [Math]::Round(((Get-Date)-$Started).TotalSeconds,3)
+    $State.checks = @($State.checks) + @([ordered]@{name=$Name;status='passed';elapsedSeconds=$elapsed;details=$Details})
     Save-State $State
     Write-Host "[PASS] $Name" -ForegroundColor Green
+    Write-TranscriptLine "PASS $Name elapsedSeconds=$elapsed"
 }
 
 function Wait-Until {
@@ -275,6 +284,7 @@ function Remove-TestApplications {
 switch ($Stage) {
     'Prepare' {
         New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
+        Write-Utf8 $TranscriptPath "SteadyState Phase 5 hosted observability transcript$([Environment]::NewLine)"
         $state = [ordered]@{schemaVersion=1;sourceSHA=[string]$env:GITHUB_SHA;profile='standard';startedAt=(Get-Date).ToUniversalTime().ToString('o');currentStage='prepare';stageStartedAt=(Get-Date).ToUniversalTime().ToString('o');checks=@();result='running';failure=$null}
         Save-State $state
         $started = Get-Date
@@ -387,11 +397,13 @@ switch ($Stage) {
             Save-ClusterEvidence
             $state.result='passed'; $state.completedAt=(Get-Date).ToUniversalTime().ToString('o'); Save-State $state
             Write-Utf8 (Join-Path $Root $EvidencePath) (($state | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
+            Write-TranscriptLine "RESULT $($state.completedAt) PASSED"
             Write-Host 'PHASE5_ACCEPTANCE_RESULT_PASSED' -ForegroundColor Cyan
         } catch {
             $state.failure = "stage=$($state.currentStage): $($_.Exception.Message)"; $state.result='failed'; $state.completedAt=(Get-Date).ToUniversalTime().ToString('o'); Save-State $state
             try { Save-ClusterEvidence } catch {}
             Write-Utf8 (Join-Path $Root $EvidencePath) (($state | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
+            Write-TranscriptLine "RESULT $($state.completedAt) FAILED $($state.failure)"
             Write-Host 'PHASE5_ACCEPTANCE_RESULT_FAILED' -ForegroundColor Red
             throw
         }

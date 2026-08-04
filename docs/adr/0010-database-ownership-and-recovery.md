@@ -34,9 +34,10 @@ Assertions are scoped to the Database lifetime's UID-derived Barman server
 prefix and require both base-backup and WAL keys. The filer port remains
 unpublished, and this read-only inventory uses no S3 credential.
 
-The focused foundation gate keeps Prometheus, Alertmanager, and Kyverno
-enabled but omits Loki, Tempo, Alloy, OTel, Grafana, and kube-state-metrics,
-which Phase 5 acceptance validates separately. Phase 7 acceptance still runs
+The focused foundation gate keeps Grafana, Prometheus, Alertmanager, and
+Kyverno enabled but omits Loki, Tempo, Alloy, OTel, and kube-state-metrics,
+which Phase 5 acceptance validates separately. Keeping Grafana preserves the
+health of its managed HTTPRoute. Phase 7 acceptance still runs
 the complete full profile for its final resource-budget measurement. This
 reserves the foundation runner for the storage controllers, PostgreSQL, and
 external backup service without weakening admission enforcement. Exact kind
@@ -48,6 +49,10 @@ after they pass does pinned VHS render their timestamped stage/check
 transcript. Keeping Chromium and GIF encoding out of the live full-profile
 interval prevents evidence generation from starving etcd or the API server;
 the transcript, JSON, snapshots, and workflow log remain tied to the same run.
+The app-of-apps root also carries a bounded retry policy for transient child
+health during first installation. It does not hide the child Application's
+native health or bypass sync waves; it prevents a recovered bootstrap
+dependency from leaving all later data children permanently uncreated.
 
 Team default-deny applies to CNPG. Database networking adds only application
 and Prometheus ingress plus four egress paths: SeaweedFS S3, the Kubernetes

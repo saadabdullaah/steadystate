@@ -541,7 +541,30 @@
   Artifact `8872932550` has GitHub SHA-256
   `0373ed20a827656abd0c7393e39379960f3bd66c7fd62afe2a0cc8daecda6b63`.
 - The correction runs the real drill without Chromium and renders its
-  timestamped transcript afterward, disables only Grafana and
-  kube-state-metrics in the focused foundation gate, retains Prometheus and
-  Kyverno, adds bounded Kubernetes request/retry envelopes, and gives the two
-  real backup lifetimes plus restore a measured 30-minute foundation bound.
+  timestamped transcript afterward. The focused foundation gate disables the
+  telemetry pipeline, tenant workloads, and kube-state-metrics while retaining
+  the Grafana route, Prometheus, Alertmanager, and Kyverno; bounded Kubernetes
+  request/retry envelopes protect the two backup lifetimes and restore.
+- Phase 5 run
+  [30885150066](https://github.com/saadabdullaah/steadystate/actions/runs/30885150066)
+  passed all six functional checks through the fast-burn proof, then VHS
+  terminated the still-running five-minute memory-stabilization stage at its
+  seven-minute screen limit. Artifact `8883275157` retained the correlated
+  Prometheus/Loki/Tempo evidence, alert proof, state, and diagnostics. Phase 5
+  now follows the same isolation contract as Phase 7: the real test runs
+  directly, writes a timestamped transcript, and VHS records only after every
+  functional and resource assertion passes.
+- At head `540b978`, CI, Phase 4, and Phase 6 passed. Phase 7 foundation run
+  [30885149877](https://github.com/saadabdullaah/steadystate/actions/runs/30885149877)
+  exposed a configuration error in the new lean gate: disabling Grafana left
+  its managed HTTPRoute without a backend, so `monitoring` became Degraded and
+  the parent sync never created `data-namespaces`; artifact `8883203415`
+  retained Argo state, exact kind container state/resources, controller logs,
+  and diagnostics. The gate now disables only kube-state-metrics and keeps the
+  Grafana route healthy. Phase 7 run
+  [30885160497](https://github.com/saadabdullaah/steadystate/actions/runs/30885160497)
+  stopped at the initial `local-path-storage` wave after the parent exhausted
+  its short bootstrap retry window; artifact `8883603914` retained the named
+  stage and original error. The root Application now uses an explicit bounded
+  retry policy, and failure capture tolerates an empty pre-backup inventory so
+  diagnostics cannot replace the primary failure.

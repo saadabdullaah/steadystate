@@ -21,7 +21,7 @@ param(
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity,
     [switch]$DisableTenantWorkloads,
-    [switch]$DisableMonitoringUI
+    [switch]$DisableMonitoringStateMetrics
 )
 
 $ErrorActionPreference = 'Stop'
@@ -261,7 +261,7 @@ function Invoke-GitOpsCommand {
         -DisableTelemetryPipeline:$DisableTelemetryPipeline `
         -DisableSecurity:$DisableSecurity `
         -DisableTenantWorkloads:$DisableTenantWorkloads `
-        -DisableMonitoringUI:$DisableMonitoringUI `
+        -DisableMonitoringStateMetrics:$DisableMonitoringStateMetrics `
         -BackupStoreEndpoint $(if ($env:BACKUP_STORE_ENDPOINT) { $env:BACKUP_STORE_ENDPOINT } else { 'http://172.30.240.10:8333' }) `
         -Profile $Profile
 }

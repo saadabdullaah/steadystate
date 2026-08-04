@@ -38,8 +38,6 @@ spec:
         valueFiles:
           - $values/gitops/platform/monitoring/values.yaml
         parameters:
-          - name: grafana.enabled
-            value: {{ .Values.monitoringGrafanaEnabled | quote }}
           - name: kubeStateMetrics.enabled
             value: {{ .Values.monitoringKubeStateMetricsEnabled | quote }}
     - repoURL: {{ .Values.repoURL | quote }}

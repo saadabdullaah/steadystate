@@ -5,10 +5,10 @@ Set Width 1200
 Set Height 720
 Set TypingSpeed 15ms
 Set Framerate 2
-Set PlaybackSpeed 8.0
-Set WaitTimeout 7m
+Set PlaybackSpeed 1.0
+Set WaitTimeout 1m
 
-Type "pwsh -NoProfile -File scripts/phase5-acceptance.ps1 -Stage Test"
+Type "cat .artifacts/phase5/acceptance/transcript.txt"
 Enter
-Wait+Screen /PHASE5_ACCEPTANCE_RESULT_(PASSED|FAILED)/
+Wait+Screen /RESULT .* PASSED/
 Sleep 3s

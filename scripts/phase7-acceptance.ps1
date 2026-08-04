@@ -242,6 +242,15 @@ function Capture([string]$Prefix) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        $kindContainerIDs = @(& docker ps -a --filter 'label=io.x-k8s.kind.cluster=steadystate' --format '{{.ID}}')
+        if ($kindContainerIDs.Count -gt 0) {
+            & docker inspect --format '{{.Name}} status={{.State.Status}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}}' @kindContainerIDs *> (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-state.txt")
+            & docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' @kindContainerIDs *> (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-resources.txt")
+        } else {
+            Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-state.txt") "No kind containers were discoverable.$([Environment]::NewLine)"
+            Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-resources.txt") "No kind container resource measurements were available.$([Environment]::NewLine)"
+        }
+        & docker system df *> (Join-Path $ArtifactRoot "snapshots/$Prefix-docker-disk.txt")
         & kubectl --request-timeout=5s get databases.platform.steadystate.dev,applications.platform.steadystate.dev -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-platform.yaml")
         & kubectl --request-timeout=5s get cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-data.yaml")
         & kubectl --request-timeout=5s get applications.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")
@@ -257,7 +266,12 @@ function Capture([string]$Prefix) {
         & kubectl --request-timeout=5s logs -n $Namespace -l "app.kubernetes.io/instance=$ApplicationName" --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-application.log")
         & kubectl --request-timeout=5s logs -n argocd statefulset/argocd-application-controller --all-containers --tail=1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-argo.log")
         & docker logs steadystate-seaweedfs --tail 1000 *> (Join-Path $ArtifactRoot "logs/$Prefix-seaweedfs.log")
-        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactRoot "snapshots/$Prefix-object-inventory.txt")
+        try {
+            & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactRoot "snapshots/$Prefix-object-inventory.txt")
+        } catch {
+            Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-object-inventory.txt") "Object inventory unavailable during ${Prefix} capture: $($_.Exception.Message)$([Environment]::NewLine)"
+            $global:LASTEXITCODE = 0
+        }
     } finally {
         $ErrorActionPreference = $previous
     }

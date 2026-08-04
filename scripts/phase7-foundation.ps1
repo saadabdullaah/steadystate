@@ -205,7 +205,13 @@ function Capture-Snapshots([string]$Prefix) {
         & kubectl --request-timeout=10s logs -n cnpg-system deployment/cloudnative-pg --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-cnpg.log")
         & kubectl --request-timeout=10s logs -n cnpg-system deployment/barman-cloud-plugin-barman-cloud --all-containers --tail=1000 *> (Join-Path $ArtifactDirectory "$Prefix-barman.log")
         & docker logs steadystate-seaweedfs --tail 1000 *> (Join-Path $ArtifactDirectory "$Prefix-seaweedfs.log")
-        & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactDirectory "$Prefix-object-inventory.txt")
+        try {
+            & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Inventory *> (Join-Path $ArtifactDirectory "$Prefix-object-inventory.txt")
+        } catch {
+            "Object inventory unavailable during ${Prefix} capture: $($_.Exception.Message)" |
+                Set-Content -LiteralPath (Join-Path $ArtifactDirectory "$Prefix-object-inventory.txt") -Encoding UTF8
+            $global:LASTEXITCODE = 0
+        }
     } finally {
         $ErrorActionPreference = $previous
     }

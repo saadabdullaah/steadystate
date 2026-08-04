@@ -22,8 +22,6 @@ spec:
           value: {{ .Values.enableDataFoundation | quote }}
         - name: enableTenantWorkloads
           value: {{ .Values.enableTenantWorkloads | quote }}
-        - name: monitoringGrafanaEnabled
-          value: {{ .Values.monitoringGrafanaEnabled | quote }}
         - name: monitoringKubeStateMetricsEnabled
           value: {{ .Values.monitoringKubeStateMetricsEnabled | quote }}
         - name: backupStoreEndpoint
@@ -35,6 +33,12 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    retry:
+      limit: 12
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 30s
     syncOptions:
       - RespectIgnoreDifferences=true
   ignoreDifferences:

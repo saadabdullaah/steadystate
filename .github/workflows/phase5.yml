@@ -95,14 +95,20 @@ jobs:
         shell: pwsh
         run: ./scripts/phase5-acceptance.ps1 -Stage Prepare
 
-      - name: Record correlated request and SLO proof
+      - name: Run correlated request and SLO proof
+        id: acceptance
+        timeout-minutes: 15
+        shell: pwsh
+        run: ./scripts/phase5-acceptance.ps1 -Stage Test
+
+      - name: Record verified observability transcript
         id: recording
-        timeout-minutes: 9
+        timeout-minutes: 5
         shell: bash
         env:
           CI: ""
           COLORTERM: truecolor
-        run: timeout --signal=TERM --kill-after=30s 8m vhs docs/demonstrations/phase5-request-telemetry.tape
+        run: timeout --signal=TERM --kill-after=15s 4m vhs docs/demonstrations/phase5-request-telemetry.tape
 
       - name: Finalize acceptance evidence
         id: finalize
@@ -126,7 +132,7 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         env:
-          PHASE5_FAILURE_MESSAGE: prepare=${{ steps.prepare.outcome }}, recording=${{ steps.recording.outcome }}, finalize=${{ steps.finalize.outcome }}
+          PHASE5_FAILURE_MESSAGE: prepare=${{ steps.prepare.outcome }}, acceptance=${{ steps.acceptance.outcome }}, recording=${{ steps.recording.outcome }}, finalize=${{ steps.finalize.outcome }}
         run: ./scripts/phase5-acceptance.ps1 -Stage CaptureFailure
 
       - name: Verify artifact completeness
@@ -138,6 +144,7 @@ jobs:
             'docs/demonstrations/phase5-request-telemetry.tape',
             '.artifacts/phase5/acceptance/state.json',
             '.artifacts/phase5/acceptance/evidence.json',
+            '.artifacts/phase5/acceptance/transcript.txt',
             '.artifacts/phase5/acceptance/rendered/gitops-platform.yaml',
             '.artifacts/phase5/acceptance/snapshots/observability.yaml',
             '.artifacts/phase5/acceptance/logs/operator.log',
