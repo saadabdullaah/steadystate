@@ -113,6 +113,8 @@ func SaveConfig(path string, config Config) error {
 		return err
 	}
 	if previous, readErr := os.ReadFile(path); readErr == nil {
+		// #nosec G703 -- path is the platform-native config location or a
+		// package-test override; it is not accepted from the CLI command line.
 		if err := os.WriteFile(path+".bak", previous, 0o600); err != nil {
 			return fmt.Errorf("back up config: %w", err)
 		}

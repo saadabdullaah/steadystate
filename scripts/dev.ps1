@@ -569,7 +569,8 @@ try {
             Assert-Tools
             New-Item -ItemType Directory -Force -Path (Join-Path $Root 'bin') | Out-Null
             $output = Join-Path $Root "bin/platformctl$Exe"
-            Invoke-External go build -trimpath -o $output ./cmd/platformctl
+            $buildArguments = @('build','-trimpath','-o',$output,'./cmd/platformctl')
+            Invoke-External -Executable go -Arguments $buildArguments
             Write-Host "Built $output"
         }
         'build-images' { Invoke-BuildImages }

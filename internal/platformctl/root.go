@@ -59,7 +59,6 @@ func NewRootCommand(options Options) *cobra.Command {
 	}
 	root.SetOut(options.Stdout)
 	root.SetErr(options.Stderr)
-	root.PersistentFlags().StringVar(&options.ConfigPath, "config", options.ConfigPath, "configuration file path")
 	root.PersistentFlags().StringVar(&options.ContextName, "context", "", "configuration context")
 	root.PersistentFlags().StringVarP(&options.Format, "output", "o", options.Format, "output format: table, json, or yaml")
 	root.PersistentFlags().DurationVar(&options.Timeout, "timeout", options.Timeout, "command timeout")
