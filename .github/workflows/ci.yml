@@ -47,6 +47,9 @@ jobs:
       - name: Demo race tests
         shell: pwsh
         run: go test -race ./apps/demo-app/...
+      - name: platformctl race tests
+        shell: pwsh
+        run: go test -race ./internal/platformctl/...
       - name: Workflow, YAML, Markdown, and shell lint
         shell: bash
         run: |
@@ -75,6 +78,9 @@ jobs:
           git diff --exit-code -- api config/crd config/rbac
           ./scripts/dev.ps1 verify-gitops
           ./scripts/dev.ps1 test
+          ./scripts/dev.ps1 platformctl
+          ./bin/platformctl.exe --output json version
+          ./bin/platformctl.exe --output json profile list
 
   envtest:
     name: envtest
