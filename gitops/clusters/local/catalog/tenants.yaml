@@ -1,0 +1,12 @@
+apiVersion: cli.steadystate.dev/v1alpha1
+kind: TenantCatalog
+tenants:
+  - name: payments
+    teamPath: gitops/teams/payments
+    applications:
+      - name: demo
+        path: gitops/applications/demo
+        databaseRef: orders
+    databases:
+      - name: orders
+        path: gitops/databases/orders

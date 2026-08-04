@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://steadystate.dev/schemas/tenant-catalog-v1alpha1.json",
+  "title": "SteadyState Tenant Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "tenants"],
+  "properties": {
+    "apiVersion": {"const": "cli.steadystate.dev/v1alpha1"},
+    "kind": {"const": "TenantCatalog"},
+    "tenants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "teamPath", "applications", "databases"],
+        "properties": {
+          "name": {"$ref": "#/$defs/teamName"},
+          "teamPath": {"type": "string", "pattern": "^gitops/teams/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+          "applications": {"type": "array", "items": {"$ref": "#/$defs/application"}},
+          "databases": {"type": "array", "items": {"$ref": "#/$defs/database"}}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "path": {"type": "string", "pattern": "^gitops/applications/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+        "databaseRef": {"$ref": "#/$defs/name"}
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "path": {"type": "string", "pattern": "^gitops/databases/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"}
+      }
+    },
+    "teamName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 58
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 63
+    }
+  }
+}

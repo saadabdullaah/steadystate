@@ -1,17 +1,6 @@
 name: Phase 6 foundation
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/phase6-foundation.yml"
-      - "gitops/**"
-      - "scripts/gitops.ps1"
-      - "scripts/phase6-foundation.ps1"
-      - "scripts/versions.env"
-      - "tests/gitops/**"
-      - "tests/config/**"
   workflow_dispatch:
 
 permissions:

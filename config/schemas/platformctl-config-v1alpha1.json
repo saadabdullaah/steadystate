@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://steadystate.dev/schemas/platformctl-config-v1alpha1.json",
+  "title": "SteadyState platformctl configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "currentContext", "contexts"],
+  "properties": {
+    "apiVersion": {"const": "cli.steadystate.dev/v1alpha1"},
+    "kind": {"const": "Config"},
+    "currentContext": {"type": "string", "minLength": 1},
+    "contexts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/context"}
+    }
+  },
+  "$defs": {
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "defaultBranch", "checkoutPath", "clusterName", "profile", "httpPort", "httpsPort"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+        "defaultBranch": {"type": "string", "minLength": 1},
+        "checkoutPath": {"type": "string", "minLength": 1},
+        "kubeconfig": {"type": "string"},
+        "kubeContext": {"type": "string"},
+        "clusterName": {"type": "string", "minLength": 1},
+        "profile": {"enum": ["minimal", "standard", "full"]},
+        "httpPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "httpsPort": {"type": "integer", "minimum": 1, "maximum": 65535}
+      }
+    }
+  }
+}

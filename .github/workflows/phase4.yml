@@ -1,9 +1,6 @@
 name: Phase 4 acceptance
 
 on:
-  pull_request:
-    branches:
-      - main
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
