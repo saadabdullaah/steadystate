@@ -90,12 +90,12 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"argocd-configuration": "-20",
 		"monitoring":           "-18",
 		"argo-rollouts":        "-17",
-		"loki":                 "-16",
-		"tempo":                "-15",
-		"otel-collector":       "-14",
-		"alloy":                "-13",
-		"kyverno":              "-12",
-		"kyverno-policies":     "-11",
+		"kyverno":              "-16",
+		"kyverno-policies":     "-15",
+		"loki":                 "-14",
+		"tempo":                "-13",
+		"otel-collector":       "-12",
+		"alloy":                "-11",
 		"steadystate-operator": "-10",
 		"payments":             "0",
 	}
@@ -381,12 +381,29 @@ func TestArgoConfigurationContracts(t *testing.T) {
 	if data["application.resourceTrackingMethod"] != "annotation" {
 		t.Fatal("Argo resource tracking must be annotation-based")
 	}
-	if data["timeout.reconciliation"] != "30s" || data["timeout.reconciliation.jitter"] != "0s" {
-		t.Fatal("Argo Git reconciliation must be pinned to 30 seconds without jitter")
+	if data["timeout.reconciliation"] != "30s" || data["timeout.reconciliation.jitter"] != "15s" {
+		t.Fatal("Argo Git reconciliation must be pinned to 30 seconds with bounded jitter")
 	}
 
 	parameters := findObject(t, objects, "ConfigMap", "argocd-cmd-params-cm")
 	assertString(t, parameters, "true", "data", "server.insecure")
+	assertString(t, parameters, "5", "data", "controller.status.processors")
+	assertString(t, parameters, "3", "data", "controller.operation.processors")
+	gitopsScript := string(readFile(t, filepath.Join(root, "scripts", "gitops.ps1")))
+	for _, token := range []string{
+		"kubectl rollout restart statefulset/argocd-application-controller -n argocd",
+		"Wait-ArgoApplication -Name 'data-namespaces' -TimeoutSeconds 900",
+		"kubectl --request-timeout=10s get application.argoproj.io",
+	} {
+		if !strings.Contains(gitopsScript, token) {
+			t.Errorf("GitOps bootstrap is missing bounded full-profile contract %q", token)
+		}
+	}
+	controllerRestart := strings.Index(gitopsScript, "kubectl rollout restart statefulset/argocd-application-controller -n argocd")
+	rootApply := strings.Index(gitopsScript, "Invoke-External kubectl apply -f $rootApplication")
+	if controllerRestart < 0 || rootApply < 0 || controllerRestart > rootApply {
+		t.Fatal("Argo application controller bounds must be activated before root sync")
+	}
 
 	route := findObject(t, objects, "HTTPRoute", "argocd")
 	hostnames, found, err := unstructured.NestedStringSlice(route, "spec", "hostnames")
@@ -998,6 +1015,9 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"initial-gitops-readiness",
 		"transcript.txt",
 		"Capture 'failure'",
+		"$Prefix-control-plane-pods.yaml",
+		"$Prefix-kyverno-pods-describe.txt",
+		"$Prefix-$component-previous.log",
 		"-Action Stop -PreserveNetwork",
 		"Could not create Backup ${Name}: $detail",
 	} {
@@ -1023,6 +1043,11 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		if !strings.Contains(acceptanceWorkflow, contract) {
 			t.Fatalf("Phase 7 workflow cleanup is missing %q", contract)
 		}
+	}
+	failureCapture := strings.Index(acceptanceWorkflow, "name: Capture failure evidence")
+	broadDiagnostics := strings.Index(acceptanceWorkflow, "name: Capture success or failure diagnostics")
+	if failureCapture < 0 || broadDiagnostics < 0 || failureCapture > broadDiagnostics {
+		t.Fatal("Phase 7 must preserve focused failure evidence before broader diagnostics")
 	}
 	ignores := string(readFile(t, filepath.Join(root, ".trivyignore.yaml")))
 	for _, contract := range []string{

@@ -214,10 +214,11 @@ function Get-KubernetesObject {
 function Wait-ArgoApplication {
     param([Parameter(Mandatory)][string]$Name, [int]$TimeoutSeconds = 600)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastState = 'not found'
     do {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $json = @(& kubectl get application.argoproj.io $Name -n argocd -o json 2>$null)
+        $json = @(& kubectl --request-timeout=10s get application.argoproj.io $Name -n argocd -o json 2>$null)
         $exitCode = $LASTEXITCODE
         $ErrorActionPreference = $previousPreference
         if ($exitCode -eq 0 -and $json) {
@@ -225,10 +226,13 @@ function Wait-ArgoApplication {
             if ($application.status.sync.status -eq 'Synced' -and $application.status.health.status -eq 'Healthy') {
                 return $application
             }
+            $lastState = "sync=$($application.status.sync.status), health=$($application.status.health.status), message=$($application.status.health.message)"
+        } elseif ($exitCode -ne 0) {
+            $lastState = "Kubernetes request failed with exit code $exitCode"
         }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)
-    throw "Argo Application $Name did not become Synced and Healthy within $TimeoutSeconds seconds."
+    throw "Argo Application $Name did not become Synced and Healthy within $TimeoutSeconds seconds; last state: $lastState."
 }
 
 function Wait-SteadyStateReady {
@@ -308,6 +312,7 @@ function Invoke-Deploy {
         if ($LASTEXITCODE -ne 0) { throw 'Ephemeral platform secret bootstrap failed.' }
     }
     Invoke-External kubectl rollout restart deployment/argocd-server -n argocd
+    Invoke-External kubectl rollout restart statefulset/argocd-application-controller -n argocd
     Wait-ArgoWorkloads
 
     $projects = Join-Path $ArtifactRoot 'bootstrap-projects.yaml'
@@ -317,7 +322,7 @@ function Invoke-Deploy {
     Invoke-External kubectl apply -f $projects
     Invoke-External kubectl apply -f $rootApplication
     if ($Profile -eq 'full') {
-        $null = Wait-ArgoApplication -Name 'data-namespaces'
+        $null = Wait-ArgoApplication -Name 'data-namespaces' -TimeoutSeconds 900
         if (-not $env:SOPS_AGE_KEY -and -not (Test-Path -LiteralPath $localAgeKey -PathType Leaf)) {
             throw 'The full profile requires SOPS_AGE_KEY or the ignored local age key to decrypt backup-store credentials.'
         }

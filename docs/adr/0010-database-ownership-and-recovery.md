@@ -54,6 +54,16 @@ health during first installation. It does not hide the child Application's
 native health or bypass sync waves; it prevents a recovered bootstrap
 dependency from leaving all later data children permanently uncreated.
 
+The combined full profile initializes Kyverno and its policies at waves
+`-16/-15`, before Loki, Tempo, OTel Collector, and Alloy at `-14..-11`.
+Monitoring CRDs and Rollouts remain at `-18/-17`; the data foundation remains
+at `-10..-6`. This supersedes the cross-phase ordering only for the current
+combined platform: security is fail-closed before optional telemetry load can
+delay the API server. Argo reconciliation stays at 30 seconds but uses 15
+seconds of jitter, five status processors, and three operation processors.
+The application controller is restarted once before root creation so these
+ConfigMap-backed bounds cannot depend on Pod/configuration creation order.
+
 Team default-deny applies to CNPG. Database networking adds only application
 and Prometheus ingress plus four egress paths: SeaweedFS S3, the Kubernetes
 API Service, private RFC1918 endpoints on the kube-apiserver port required by

@@ -365,6 +365,19 @@ The controller preserves the active version, runtime digest, Git revision, and s
 
 The local identity belongs only at `.artifacts/secrets/steadystate.agekey`; GitHub uses the `SOPS_AGE_KEY` repository secret. Never commit the decrypted `.artifacts/secrets/rendered/grafana-admin.yaml` or paste the private key into logs. To rotate the Grafana credential, run `rotate-secrets`, review only the encrypted diff, deploy it, verify login, and retire the prior credential. If the age private key is lost, recover it from the repository secret or rotate to a new recipient and re-encrypt before deleting the old key.
 
+## Full-profile GitOps stops before data-namespaces
+
+Inspect `steadystate-root`, `kyverno`, the telemetry Applications, and the
+control-plane/Kyverno snapshots before retrying. The current root deliberately
+initializes Kyverno and its policies before Loki, Tempo, OTel Collector, and
+Alloy. Argo's application controller is bounded to five status and three
+operation processors with reconciliation jitter, then restarted before root
+creation. If rendered waves or controller parameters differ, reconcile the
+tracked GitOps configuration; do not bypass Kyverno, manually create later
+data Applications, or increase every timeout. Phase 7 failure evidence records
+current/previous control-plane logs and Kyverno Pod state before broader
+diagnostics so API instability remains attributable.
+
 ## Database stays Provisioning or Degraded
 
 ```powershell

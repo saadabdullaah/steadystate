@@ -250,7 +250,16 @@ function Capture([string]$Prefix) {
             Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-state.txt") "No kind containers were discoverable.$([Environment]::NewLine)"
             Write-Utf8 (Join-Path $ArtifactRoot "snapshots/$Prefix-kind-container-resources.txt") "No kind container resource measurements were available.$([Environment]::NewLine)"
         }
-        & docker system df *> (Join-Path $ArtifactRoot "snapshots/$Prefix-docker-disk.txt")
+        & kubectl --request-timeout=5s get pod -n kube-system -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-control-plane-pods.yaml")
+        & kubectl --request-timeout=5s get pod -n kyverno -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-kyverno-pods.yaml")
+        & kubectl --request-timeout=5s describe pod -n kyverno *> (Join-Path $ArtifactRoot "snapshots/$Prefix-kyverno-pods-describe.txt")
+        foreach ($component in @('kube-apiserver','kube-controller-manager','kube-scheduler','etcd')) {
+            $podName = "$component-steadystate-control-plane"
+            & kubectl --request-timeout=5s logs -n kube-system $podName --tail=500 *> (Join-Path $ArtifactRoot "logs/$Prefix-$component.log")
+            & kubectl --request-timeout=5s logs -n kube-system $podName --previous --tail=500 *> (Join-Path $ArtifactRoot "logs/$Prefix-$component-previous.log")
+        }
+        & kubectl --request-timeout=5s logs -n kyverno -l app.kubernetes.io/component=admission-controller --all-containers --tail=500 --prefix=true *> (Join-Path $ArtifactRoot "logs/$Prefix-kyverno-admission.log")
+        & kubectl --request-timeout=5s logs -n kyverno -l app.kubernetes.io/component=reports-controller --all-containers --tail=500 --prefix=true *> (Join-Path $ArtifactRoot "logs/$Prefix-kyverno-reports.log")
         & kubectl --request-timeout=5s get databases.platform.steadystate.dev,applications.platform.steadystate.dev -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-platform.yaml")
         & kubectl --request-timeout=5s get cluster.postgresql.cnpg.io,backup.postgresql.cnpg.io,scheduledbackup.postgresql.cnpg.io,objectstore.barmancloud.cnpg.io -n $Namespace -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-data.yaml")
         & kubectl --request-timeout=5s get applications.argoproj.io -n argocd -o yaml *> (Join-Path $ArtifactRoot "snapshots/$Prefix-argo.yaml")

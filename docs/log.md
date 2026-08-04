@@ -568,3 +568,17 @@
   stage and original error. The root Application now uses an explicit bounded
   retry policy, and failure capture tolerates an empty pre-backup inventory so
   diagnostics cannot replace the primary failure.
+- At head `d12e8ad`, CI, Phase 4 acceptance, Phase 5 acceptance, Phase 6
+  foundation, and Phase 7 foundation all passed. Phase 7 acceptance run
+  [30893474923](https://github.com/saadabdullaah/steadystate/actions/runs/30893474923)
+  failed before the recovery drill because the full combined stack
+  destabilized the Kubernetes API while Kyverno was initializing. The
+  retained snapshot showed `steadystate-root` waiting for `kyverno`, no data
+  Applications yet, API/controller/scheduler and several add-on restarts, all
+  three kind containers alive with `oomKilled=false`, and about 6.5 GiB across
+  the nodes—below the 8 GiB contract. Artifact `8886715016` has GitHub digest
+  `sha256:b11d9eb37478362ce18b6b14987878c11530a15cf1e91bc767442dc9e9886e8d`.
+  The correction starts fail-closed security before telemetry, bounds Argo
+  processors, adds reconciliation jitter, deterministically restarts the
+  configured application controller before root sync, and captures
+  control-plane/Kyverno current and previous state before slower diagnostics.

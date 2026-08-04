@@ -159,6 +159,14 @@ The root project can create only AppProjects and Argo Applications in `argocd`. 
 
 Argo uses annotation-based resource tracking. Lua health customizations require current observed generations: a Team is Healthy only with `Ready=True`; a Database or Application is Healthy only with `Phase=Healthy` and `Ready=True`, while `Phase=Degraded` maps to Degraded. The Argo Application customization forwards child health so the app-of-apps root waits truthfully.
 
+The current combined-stack bootstrap starts monitoring CRDs and Rollouts,
+then Kyverno and its fail-closed policies, then the optional telemetry
+pipeline, and finally the data foundation and operator. Argo uses bounded
+status/operation processors and reconciliation jitter on the single local API
+server. The controller restarts once after configuration and before root sync,
+so those limits are active deterministically rather than depending on Pod
+scheduling order.
+
 Argo owns platform configuration, monitoring, Rollouts, the operator installation, Team CRs, and Application CRs. It never owns operator-generated workload, traffic, analysis, or monitoring children. Those children retain controller owner references and explicit field-ownership boundaries. This prevents competing field managers and lets an operator outage leave the tenant Argo Application Healthy while the data plane and CR UIDs remain stable.
 
 ## Application ownership contract

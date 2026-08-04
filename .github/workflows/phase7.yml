@@ -166,6 +166,15 @@ jobs:
         shell: pwsh
         run: ./scripts/phase7-acceptance.ps1 -Stage Finalize
 
+      - name: Capture failure evidence
+        if: always() && steps.prepare.outcome != 'skipped' && steps.finalize.outcome != 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: pwsh
+        env:
+          PHASE7_FAILURE_MESSAGE: prepare=${{ steps.prepare.outcome }}, recovery=${{ steps.recovery.outcome }}, finalize=${{ steps.finalize.outcome }}
+        run: ./scripts/phase7-acceptance.ps1 -Stage CaptureFailure
+
       - name: Capture success or failure diagnostics
         if: always()
         continue-on-error: true
@@ -181,15 +190,6 @@ jobs:
               Set-Content -Encoding utf8 .artifacts/diagnostics/pre-cluster-failure.txt
             $global:LASTEXITCODE = 0
           }
-
-      - name: Capture failure evidence
-        if: always() && steps.prepare.outcome != 'skipped' && steps.finalize.outcome != 'success'
-        continue-on-error: true
-        timeout-minutes: 2
-        shell: pwsh
-        env:
-          PHASE7_FAILURE_MESSAGE: prepare=${{ steps.prepare.outcome }}, recovery=${{ steps.recovery.outcome }}, finalize=${{ steps.finalize.outcome }}
-        run: ./scripts/phase7-acceptance.ps1 -Stage CaptureFailure
 
       - name: Verify artifact completeness
         if: always() && steps.finalize.outcome == 'success'
