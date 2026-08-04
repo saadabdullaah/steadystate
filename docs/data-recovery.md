@@ -86,9 +86,9 @@ removes Database intent. Tenant pruning remains disabled, so the Application
 is expected to remain OutOfSync until the drill then requests finalizer-driven
 deletion. This prevents an older desired revision from recreating the Database.
 
-Hosted run `30903568810` passed this complete path with 100 acknowledged
-orders, matching source/restored SHA-256 checksums, an 11.173-minute RTO, a
-zero-minute measured archive boundary, eight WAL objects, and 31 retained
+Exact-main run `30910727236` passed this complete path with 100 acknowledged
+orders, matching source/restored SHA-256 checksums, a 12.58-minute RTO, a
+zero-minute measured archive boundary, ten WAL objects, and 33 retained
 objects after the final backup and Database deletion.
 
 ## Safe stop, cleanup, and emergencies

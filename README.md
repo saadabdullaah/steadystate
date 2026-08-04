@@ -4,7 +4,7 @@ SteadyState is a laptop-scale internal developer platform built around a Kuberne
 
 Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`. Phase 6 adds signed and SPDX-attested demo images, fail-closed Kyverno admission, workload isolation, truthful security status, encrypted Git secrets, security scanners, and a documented threat model. Phase 7 adds a `Database` API, CloudNativePG, continuous WAL/base backups to external SeaweedFS, application bindings, final-backup deletion, and declarative whole-cluster recovery.
 
-> Status: Phases 0 through 6 are complete and released through [`v0.6.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.6.0). Phase 7 implementation and branch acceptance are complete in draft [PR #51](https://github.com/saadabdullaah/steadystate/pull/51). Publication remains gated on merging the closeout, validating the exact `main` delivery commit, and publishing `v0.7.0`.
+> Status: Phases 0 through 7 are complete and released through [`v0.7.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.7.0). Phase 8 developer-golden-path planning is next.
 
 ## Architecture
 
@@ -199,10 +199,10 @@ full product profile.
 
 ![Phase 7 whole-cluster disaster recovery](docs/demonstrations/phase7-disaster-recovery.gif)
 
-[Hosted Phase 7 acceptance run 30903568810](https://github.com/saadabdullaah/steadystate/actions/runs/30903568810)
-passed all ten revision-bound checks on `6d71076`: 100 orders were backed up,
+[Hosted Phase 7 acceptance run 30910727236](https://github.com/saadabdullaah/steadystate/actions/runs/30910727236)
+passed all ten revision-bound checks on exact release commit `47c41d5`: 100 orders were backed up,
 the entire kind cluster was destroyed and recreated, the exact checksum was
-restored in 11.173 minutes with a zero-minute measured archive boundary, the
+restored in 12.58 minutes with a zero-minute measured archive boundary, the
 backup outage alert fired and cleared, and final deletion retained external
 backup data.
 
