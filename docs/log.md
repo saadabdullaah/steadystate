@@ -608,3 +608,36 @@
   `815f86dba99c641612c9e9c3ada4a6882bde16ba91b75a60e31f8903100624fa`;
   the committed successful GIF has SHA-256
   `a92d1ba110973bdf72af29456176e7a0d407765f2f1b73312b1d9525a1963898`.
+
+## 2026-08-04 - Phase 7 data and recovery released
+
+- Closeout PR [#51](https://github.com/saadabdullaah/steadystate/pull/51)
+  squash-merged as exact release commit
+  `47c41d5cabc531afd6bcd46f2108ba9065e7a76a` after all PR checks and
+  branch CodeQL passed. Bot delivery PR
+  [#50](https://github.com/saadabdullaah/steadystate/pull/50) had already
+  deployed signed and SPDX-attested `v0.7.0` good/bad images.
+- Exact-main publication gates passed: CI
+  [30910634104](https://github.com/saadabdullaah/steadystate/actions/runs/30910634104),
+  CodeQL
+  [30910634012](https://github.com/saadabdullaah/steadystate/actions/runs/30910634012),
+  Nightly
+  [30910712941](https://github.com/saadabdullaah/steadystate/actions/runs/30910712941),
+  Phase 4
+  [30910716390](https://github.com/saadabdullaah/steadystate/actions/runs/30910716390),
+  Phase 5
+  [30910719654](https://github.com/saadabdullaah/steadystate/actions/runs/30910719654),
+  Phase 6
+  [30910723943](https://github.com/saadabdullaah/steadystate/actions/runs/30910723943),
+  and Phase 7
+  [30910727236](https://github.com/saadabdullaah/steadystate/actions/runs/30910727236).
+- Exact-main artifact `8894059242` has GitHub SHA-256
+  `bbc33e16369684fa38fce3fa1641099546184c7b79b51556da1c0e5ecf72d703`.
+  Its ten checks measured 12.58-minute RTO, zero-minute archive boundary,
+  ten WAL/33 retained objects, 274.766 MiB data add-ons, 199.6 MiB
+  SeaweedFS, and 6151.422 MiB total in-cluster working set.
+- Annotated tag `v0.7.0` points to `47c41d5`; the
+  [GitHub release](https://github.com/saadabdullaah/steadystate/releases/tag/v0.7.0)
+  contains the exact-main GIF, evidence JSON, RTO/RPO report, transcript, and
+  SHA-256 manifest. No Phase 7 branch remains. Dependabot PRs #42 and #49 are
+  deliberately deferred because their current validation is failing.

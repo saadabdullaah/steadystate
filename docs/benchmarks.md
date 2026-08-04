@@ -14,11 +14,11 @@ SteadyState's limits are acceptance boundaries for a disposable laptop-scale pla
 | Phase 5 | Standard-profile in-cluster total | `<=6.5 GiB` | 5,272,350,720 bytes in run `29843478650` |
 | Phase 6 | Kyverno working set | `<=500 MiB` | 220,540,928 bytes |
 | Phase 6 | Secured standard-profile in-cluster total | `<=7 GiB` | 6,059,945,984 bytes |
-| Phase 7 | Data add-ons | `<=1.2 GiB` | 295.133 MiB in run `30903568810` |
-| Phase 7 | Host SeaweedFS | `<=400 MiB` | 189.4 MiB in run `30903568810` |
-| Phase 7 | Full-profile in-cluster total | `<=8 GiB` | 6345.988 MiB in run `30903568810` |
-| Phase 7 | Whole-cluster RTO | `<=30m` | 11.173 minutes in run `30903568810` |
-| Phase 7 | Confirmed archive RPO boundary | `<=5m` | 0 minutes in run `30903568810` |
+| Phase 7 | Data add-ons | `<=1.2 GiB` | 274.766 MiB in run `30910727236` |
+| Phase 7 | Host SeaweedFS | `<=400 MiB` | 199.6 MiB in run `30910727236` |
+| Phase 7 | Full-profile in-cluster total | `<=8 GiB` | 6151.422 MiB in run `30910727236` |
+| Phase 7 | Whole-cluster RTO | `<=30m` | 12.58 minutes in run `30910727236` |
+| Phase 7 | Confirmed archive RPO boundary | `<=5m` | 0 minutes in run `30910727236` |
 
 Phase 5 measures `container_memory_working_set_bytes` from Prometheus after telemetry and SLO checks have run. To distinguish the bounded steady working set from the intentional fast-burn load spike, both budgets must hold for three consecutive samples 15 seconds apart within a five-minute window. Zero/absent measurements and a budget that never stabilizes fail acceptance. Evidence records every sample, the final raw byte counts, timestamps, and a per-container observability breakdown; diagnostics capture the corresponding Pods and resource declarations.
 
@@ -26,5 +26,6 @@ Retention/storage caps are 24 hours and 4 GiB for Loki, and 24 hours and 2 GiB f
 
 Phase 7 measures the data namespaces and bound workload through Prometheus,
 the external SeaweedFS container through Docker, and the complete in-cluster
-working set independently. Run `30903568810` also retained 31 external
-objects, including eight WAL objects, after finalizer-driven Database deletion.
+working set independently. Exact-main run `30910727236` also retained 33
+external objects, including ten WAL objects, after finalizer-driven Database
+deletion.
