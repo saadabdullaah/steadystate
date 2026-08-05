@@ -1,5 +1,19 @@
 # Architecture Through Phase 7 Data Recovery
 
+## Phase 8 local-owner CLI boundary
+
+`platformctl` is a client of the existing Git, GitHub Actions broker,
+Kubernetes, Argo, telemetry, policy, and backup contracts. It is not a second
+control plane and adds no in-cluster component. Normal writes become typed,
+deterministically rendered GitHub App pull requests; the App private key stays
+inside GitHub Actions. Cluster reads use the configured local owner context.
+
+The only direct mutations are confirmed Rollout promote/abort break-glass
+actions. They use optimistic resource-version checks and produce local audit
+records plus Kubernetes Events. Generated workload children remain operator
+owned. The future portal must consume the same CLI/broker/catalog contracts
+rather than inventing parallel ownership.
+
 Phase 7 adds a separate durable-data boundary: Argo applies only the
 `Database` CR, the SteadyState operator owns CNPG/Barman/monitoring/network
 children, and Barman writes through the kind node into a host-side SeaweedFS

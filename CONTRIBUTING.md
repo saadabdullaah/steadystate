@@ -8,6 +8,19 @@
 4. Run relevant local checks before opening a pull request.
 5. Merge only through a green pull request using squash merge.
 
+## platformctl changes
+
+After changing the command tree, regenerate the checked-in reference, man
+pages, and completions:
+
+```powershell
+go run ./cmd/platformctl docs --directory docs/cli
+```
+
+Run `go test ./internal/platformctl/...` and verify that a second generation
+produces no diff. Release configuration is pinned in `.goreleaser.yml`; use
+the `Platformctl release` workflow for snapshots and tagged draft releases.
+
 ```powershell
 git switch main
 git pull --ff-only

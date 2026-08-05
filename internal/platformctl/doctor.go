@@ -20,10 +20,11 @@ import (
 )
 
 type DoctorCheck struct {
-	Name        string `json:"name" yaml:"name"`
-	Status      string `json:"status" yaml:"status"`
-	Details     string `json:"details" yaml:"details"`
-	Remediation string `json:"remediation,omitempty" yaml:"remediation,omitempty"`
+	Name        string   `json:"name" yaml:"name"`
+	Status      string   `json:"status" yaml:"status"`
+	Details     string   `json:"details" yaml:"details"`
+	Evidence    []string `json:"evidence,omitempty" yaml:"evidence,omitempty"`
+	Remediation string   `json:"remediation,omitempty" yaml:"remediation,omitempty"`
 }
 
 func newDoctorCommand(options *Options) *cobra.Command {
@@ -108,6 +109,14 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	} else {
 		add("github-auth", "Pass", "GitHub CLI is authenticated", "")
 	}
+	requiredGH := readVersionPin(filepath.Join(selected.CheckoutPath, "scripts", "versions.env"), "GITHUB_CLI_VERSION")
+	if raw, err := runExternal(ctx, selected.CheckoutPath, "gh", "--version"); err != nil {
+		add("github-cli-version", "Fail", ErrorMessage(err), "Install the checksum-verified GitHub CLI version documented by SteadyState.")
+	} else if actual := githubCLIVersion(raw); actual == "" || !versionAtLeast(actual, requiredGH) {
+		add("github-cli-version", "Fail", fmt.Sprintf("GitHub CLI %s or newer is required; detected %s", requiredGH, actual), "Upgrade GitHub CLI from its official signed release.")
+	} else {
+		add("github-cli-version", "Pass", fmt.Sprintf("GitHub CLI %s satisfies the security baseline %s", actual, requiredGH), "")
+	}
 	checkGitHubNames := func(check, kind string, required []string) {
 		raw, err := runExternal(ctx, selected.CheckoutPath, "gh", kind, "list", "--repo", selected.Repository, "--json", "name")
 		if err != nil {
@@ -181,6 +190,43 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	sort.SliceStable(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
 	return checks
+}
+
+func githubCLIVersion(output string) string {
+	fields := strings.Fields(strings.Split(strings.TrimSpace(output), "\n")[0])
+	if len(fields) >= 3 && fields[0] == "gh" && fields[1] == "version" {
+		return strings.TrimPrefix(fields[2], "v")
+	}
+	return ""
+}
+
+func versionAtLeast(actual, required string) bool {
+	parse := func(value string) ([3]int, bool) {
+		parts := strings.Split(strings.TrimPrefix(value, "v"), ".")
+		if len(parts) != 3 {
+			return [3]int{}, false
+		}
+		var result [3]int
+		for index, part := range parts {
+			value, err := strconv.Atoi(part)
+			if err != nil {
+				return [3]int{}, false
+			}
+			result[index] = value
+		}
+		return result, true
+	}
+	a, validActual := parse(actual)
+	r, validRequired := parse(required)
+	if !validActual || !validRequired {
+		return false
+	}
+	for index := range a {
+		if a[index] != r[index] {
+			return a[index] > r[index]
+		}
+	}
+	return true
 }
 
 func decodeGitHubNames(raw string) map[string]bool {

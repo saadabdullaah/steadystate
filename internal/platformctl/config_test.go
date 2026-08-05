@@ -125,6 +125,12 @@ func TestDoctorReadsNamesAndVersionPinsWithoutValues(t *testing.T) {
 	if got := readVersionPin(path, "KUBERNETES_VERSION"); got != "1.35.5" {
 		t.Fatalf("unexpected pin %q", got)
 	}
+	if got := githubCLIVersion("gh version 2.97.0 (2026-07-01)\n"); got != "2.97.0" {
+		t.Fatalf("unexpected GitHub CLI version %q", got)
+	}
+	if !versionAtLeast("2.98.1", "2.97.0") || versionAtLeast("2.96.9", "2.97.0") {
+		t.Fatal("GitHub CLI security baseline comparison is incorrect")
+	}
 }
 
 func TestWriteMachineOutputAndConfirmationStaySeparated(t *testing.T) {

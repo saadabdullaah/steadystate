@@ -58,6 +58,8 @@ func newApplicationCommand(options *Options) *cobra.Command {
 	command.AddCommand(newApplicationPolicyCommand(options))
 	command.AddCommand(newApplicationRolloutCommand(options))
 	command.AddCommand(newApplicationDoctorCommand(options))
+	command.AddCommand(newBreakGlassCommand(options, "promote"))
+	command.AddCommand(newBreakGlassCommand(options, "abort"))
 	addWriteCommands(nil, command, nil, options)
 	return command
 }
@@ -379,7 +381,7 @@ func newApplicationDoctorCommand(options *Options) *cobra.Command {
 	command := &cobra.Command{
 		Use: "doctor NAME", Short: "Diagnose Application health contracts", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, ns, client, ctx, cancel, err := commandClusterContext(cmd, options, namespace, "Application", args[0])
+			selected, ns, client, ctx, cancel, err := commandClusterContext(cmd, options, namespace, "Application", args[0])
 			if err != nil {
 				return err
 			}
@@ -388,33 +390,13 @@ func newApplicationDoctorCommand(options *Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			checks := []DoctorCheck{}
-			for _, condition := range []string{"Ready", "ServiceHealth", "SecurityPolicyReady", "DatabaseReady"} {
-				status, reason, message := conditionStatus(application, condition)
-				var state string
-				switch status {
-				case "True":
-					state = "Pass"
-				case "Unknown":
-					state = "Warning"
-				default:
-					state = "Fail"
-				}
-				checks = append(checks, DoctorCheck{Name: condition, Status: state, Details: strings.TrimSpace(reason + ": " + message), Remediation: conditionRemediation(condition)})
-			}
-			route, routeErr := client.Get(ctx, httpRouteGVR, ns, args[0])
-			if routeErr != nil {
-				checks = append(checks, DoctorCheck{Name: "HTTPRoute", Status: "Fail", Details: ErrorMessage(routeErr), Remediation: "Inspect Gateway and HTTPRoute status."})
-			} else {
-				status, details := routeHealth(route)
-				checks = append(checks, DoctorCheck{Name: "HTTPRoute", Status: status, Details: details, Remediation: "Inspect Gateway and HTTPRoute status."})
-			}
+			checks := runApplicationDoctor(ctx, selected, client, ns, args[0], application)
 			rows, failed := [][]string{}, false
 			for _, check := range checks {
-				rows = append(rows, []string{check.Status, check.Name, Redact(check.Details), check.Remediation})
+				rows = append(rows, []string{check.Status, check.Name, Redact(check.Details), strings.Join(check.Evidence, ", "), check.Remediation})
 				failed = failed || check.Status == "Fail"
 			}
-			if err := options.printer().Table([]string{"STATUS", "CHECK", "DETAILS", "REMEDIATION"}, rows, checks); err != nil {
+			if err := options.printer().Table([]string{"STATUS", "CHECK", "DETAILS", "EVIDENCE", "REMEDIATION"}, rows, checks); err != nil {
 				return err
 			}
 			if failed {
@@ -463,9 +445,46 @@ func routeHealth(route *unstructured.Unstructured) (string, string) {
 		}
 	}
 	if accepted && resolved {
-		return "Pass", "route is accepted and all references are resolved"
+		return "Pass", "route is accepted and all references are resolved; " + routeBackendWeights(route)
 	}
-	return "Fail", fmt.Sprintf("route contracts are incomplete (accepted=%t resolvedRefs=%t)", accepted, resolved)
+	return "Fail", fmt.Sprintf("route contracts are incomplete (accepted=%t resolvedRefs=%t); %s", accepted, resolved, routeBackendWeights(route))
+}
+
+func routeBackendWeights(route *unstructured.Unstructured) string {
+	rules, _, _ := unstructured.NestedSlice(route.Object, "spec", "rules")
+	backends := []string{}
+	for _, rawRule := range rules {
+		rule, ok := rawRule.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, rawBackend := range sliceValue(rule["backendRefs"]) {
+			backend, ok := rawBackend.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := backend["name"].(string)
+			weight := int64(1)
+			switch value := backend["weight"].(type) {
+			case int64:
+				weight = value
+			case float64:
+				weight = int64(value)
+			}
+			if name != "" {
+				backends = append(backends, fmt.Sprintf("%s=%d", name, weight))
+			}
+		}
+	}
+	if len(backends) == 0 {
+		return "no backend weights reported"
+	}
+	return "backend weights " + strings.Join(backends, ",")
+}
+
+func sliceValue(value any) []any {
+	items, _ := value.([]any)
+	return items
 }
 
 func printBackendJSON(options *Options, client *ClusterClient, ctx context.Context, service string, port int, path string, query url.Values) error {

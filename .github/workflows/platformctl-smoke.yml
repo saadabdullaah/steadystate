@@ -1,0 +1,134 @@
+name: Platformctl smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/platformctl-smoke.yml
+      - .github/workflows/platformctl-release.yml
+      - .goreleaser.yml
+      - cmd/platformctl/**
+      - internal/platformctl/**
+      - docs/cli/**
+      - scripts/install-platformctl.*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platformctl-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: ${{ matrix.os }} CLI contract
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: go1.25.12
+      CGO_ENABLED: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Verify exact Go and CLI contracts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .artifacts | Out-Null
+          $actual = (go version)
+          if ($actual -notmatch 'go1\.25\.12') { throw "Expected Go 1.25.12, got $actual" }
+          go test ./internal/platformctl/...
+          go build -trimpath -o .artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd/platformctl
+          & ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} --output json version
+          & ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} --output json profile list
+          & ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} docs --directory .artifacts/docs
+      - name: Hosted failure-diagnosis and break-glass fixtures
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: >-
+          go test -v ./internal/platformctl
+          -run 'TestApplicationDoctorFailureFixtures|TestBreakGlass'
+          -count=1
+      - name: Upload smoke snapshot
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: platformctl-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          path: .artifacts/
+          retention-days: 7
+          if-no-files-found: error
+          include-hidden-files: true
+
+  cross-compile:
+    name: six-target cross-compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: go1.25.12
+      CGO_ENABLED: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Build all supported targets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .artifacts | Out-Null
+          foreach ($os in @('windows','linux','darwin')) {
+            foreach ($arch in @('amd64','arm64')) {
+              $env:GOOS = $os
+              $env:GOARCH = $arch
+              $extension = if ($os -eq 'windows') { '.exe' } else { '' }
+              go build -trimpath -o ".artifacts/$os-$arch/platformctl$extension" ./cmd/platformctl
+              if ($LASTEXITCODE -ne 0) { throw "Cross-compile failed for $os/$arch" }
+            }
+          }
+      - name: Upload cross-compiled binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: platformctl-six-targets-${{ github.sha }}
+          path: .artifacts/
+          retention-days: 7
+          if-no-files-found: error
+          include-hidden-files: true
+
+  release-snapshot:
+    name: release archive snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: go1.25.12
+      CGO_ENABLED: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Install checksum-verified Syft
+        shell: bash
+        run: |
+          source scripts/versions.env
+          mkdir -p .artifacts/syft
+          archive=".artifacts/syft/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --location --retry 5 --retry-all-errors \
+            --output "$archive" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          echo "${SYFT_LINUX_AMD64_SHA256}  ${archive}" | sha256sum --check --status
+          tar -xzf "$archive" -C .artifacts/syft syft
+          chmod +x .artifacts/syft/syft
+          echo "$GITHUB_WORKSPACE/.artifacts/syft" >> "$GITHUB_PATH"
+      - name: Build six archives, checksums, and SPDX SBOMs
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --snapshot --clean
+      - name: Upload release snapshot
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: platformctl-release-snapshot-${{ github.sha }}
+          path: dist/
+          retention-days: 14
+          if-no-files-found: error
+          include-hidden-files: true
