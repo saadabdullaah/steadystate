@@ -34,6 +34,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install checksum-verified Go on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          source scripts/versions.env
+          case "$(uname -m)" in
+            arm64|aarch64) go_arch=arm64; expected="$GO_DARWIN_ARM64_SHA256" ;;
+            x86_64|amd64) go_arch=amd64; expected="$GO_DARWIN_AMD64_SHA256" ;;
+            *) echo "Unsupported macOS architecture: $(uname -m)" >&2; exit 2 ;;
+          esac
+          archive="$RUNNER_TEMP/go${GO_VERSION}.darwin-${go_arch}.tar.gz"
+          url="https://go.dev/dl/go${GO_VERSION}.darwin-${go_arch}.tar.gz"
+          curl --fail --location --retry 5 --retry-all-errors --output "$archive" "$url"
+          actual="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          test "$actual" = "$expected"
+          mkdir -p "$RUNNER_TEMP/go"
+          tar -xzf "$archive" --strip-components=1 -C "$RUNNER_TEMP/go"
+          echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
       - name: Verify exact Go and CLI contracts
         shell: pwsh
         run: |
