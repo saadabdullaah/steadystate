@@ -36,6 +36,12 @@ jobs:
         env:
           BASE_REVISION: ${{ github.event.pull_request.base.sha }}
         run: ./scripts/check-demo-version.ps1 -BaseRevision $env:BASE_REVISION
+      - name: Require generated service VERSION bumps
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        env:
+          BASE_REVISION: ${{ github.event.pull_request.base.sha }}
+        run: ./scripts/check-service-versions.ps1 -BaseRevision $env:BASE_REVISION
       - name: Go checks
         shell: pwsh
         run: |
@@ -50,6 +56,9 @@ jobs:
       - name: platformctl race tests
         shell: pwsh
         run: go test -race ./internal/platformctl/...
+      - name: Golden service template toolchains
+        shell: pwsh
+        run: ./scripts/dev.ps1 test-templates
       - name: Workflow, YAML, Markdown, and shell lint
         shell: bash
         run: |
@@ -78,6 +87,7 @@ jobs:
           git diff --exit-code -- api config/crd config/rbac
           ./scripts/dev.ps1 verify-gitops
           ./scripts/dev.ps1 test
+          ./scripts/dev.ps1 test-templates
           ./scripts/dev.ps1 platformctl
           ./bin/platformctl.exe --output json version
           ./bin/platformctl.exe --output json profile list

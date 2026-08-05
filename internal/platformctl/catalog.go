@@ -30,6 +30,20 @@ type CatalogTenant struct {
 	DeletionRequest string               `json:"deletionRequest,omitempty" yaml:"deletionRequest,omitempty"`
 	Applications    []CatalogApplication `json:"applications" yaml:"applications"`
 	Databases       []CatalogDatabase    `json:"databases" yaml:"databases"`
+	Services        []CatalogService     `json:"services" yaml:"services"`
+}
+
+type CatalogService struct {
+	Name            string   `json:"name" yaml:"name"`
+	Path            string   `json:"path" yaml:"path"`
+	Template        string   `json:"template" yaml:"template"`
+	Version         string   `json:"version" yaml:"version"`
+	Components      []string `json:"components" yaml:"components"`
+	DatabaseRef     string   `json:"databaseRef,omitempty" yaml:"databaseRef,omitempty"`
+	OwnsTeam        bool     `json:"ownsTeam,omitempty" yaml:"ownsTeam,omitempty"`
+	OwnsDatabase    bool     `json:"ownsDatabase,omitempty" yaml:"ownsDatabase,omitempty"`
+	Lifecycle       string   `json:"lifecycle" yaml:"lifecycle"`
+	DeletionRequest string   `json:"deletionRequest,omitempty" yaml:"deletionRequest,omitempty"`
 }
 
 type CatalogApplication struct {
@@ -70,6 +84,7 @@ func (c TenantCatalog) Validate(root string) error {
 	seenTeams := map[string]struct{}{}
 	seenApplications := map[string]struct{}{}
 	seenDatabases := map[string]struct{}{}
+	seenServices := map[string]struct{}{}
 	for _, tenant := range c.Tenants {
 		if !validName(tenant.Name, 58) {
 			return fmt.Errorf("invalid Team name %q", tenant.Name)
@@ -143,8 +158,60 @@ func (c TenantCatalog) Validate(root string) error {
 				}
 			}
 		}
+		for _, service := range tenant.Services {
+			if !validName(service.Name, 48) {
+				return fmt.Errorf("invalid service name %q", service.Name)
+			}
+			if _, exists := seenServices[service.Name]; exists {
+				return fmt.Errorf("duplicate service %q", service.Name)
+			}
+			seenServices[service.Name] = struct{}{}
+			if service.Path != "services/"+service.Name {
+				return fmt.Errorf("service %q path must be %q", service.Name, "services/"+service.Name)
+			}
+			if service.Template != "go-api" && service.Template != "react-static" && service.Template != "full-stack" {
+				return fmt.Errorf("service %q has unsupported template %q", service.Name, service.Template)
+			}
+			if !semverPattern.MatchString(service.Version) {
+				return fmt.Errorf("service %q has invalid version %q", service.Name, service.Version)
+			}
+			expectedComponents := templateComponents(service.Name, service.Template)
+			if strings.Join(service.Components, "\x00") != strings.Join(expectedComponents, "\x00") {
+				return fmt.Errorf("service %q components must be derived from its template", service.Name)
+			}
+			if err := validateServiceLifecycle(service.Lifecycle, service.DeletionRequest); err != nil {
+				return fmt.Errorf("service %q: %w", service.Name, err)
+			}
+			if service.DatabaseRef != "" {
+				if _, exists := tenantDatabases[service.DatabaseRef]; !exists {
+					return fmt.Errorf("service %q references unknown database %q", service.Name, service.DatabaseRef)
+				}
+			}
+			if err := requireDirectory(root, service.Path); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+func validateServiceLifecycle(lifecycle, deletionRequest string) error {
+	if lifecycle == "Scaffolded" {
+		if deletionRequest != "" {
+			return fmt.Errorf("scaffolded entries cannot carry a deletion request")
+		}
+		return nil
+	}
+	return validateLifecycle(lifecycle, deletionRequest)
+}
+
+func templateComponents(name, template string) []string {
+	switch template {
+	case "full-stack":
+		return []string{name, name + "-api"}
+	default:
+		return []string{name}
+	}
 }
 
 func validateLifecycle(lifecycle, deletionRequest string) error {

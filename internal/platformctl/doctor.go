@@ -278,7 +278,7 @@ func newClusterLifecycleCommand(options *Options, name, scriptCommand string) *c
 
 func runExternal(ctx context.Context, directory, executable string, arguments ...string) (string, error) {
 	switch executable {
-	case "git", "gh", "docker":
+	case "git", "gh", "docker", "kubectl", "pwsh":
 	default:
 		return "", fmt.Errorf("unsupported prerequisite executable %q", executable)
 	}

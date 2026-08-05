@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,203 @@ import (
 	"github.com/google/uuid"
 	"sigs.k8s.io/yaml"
 )
+
+func TestFullStackScaffoldAndActivationAreDeterministic(t *testing.T) {
+	root := brokerFixture(t)
+	request := NewChangeRequest("service.scaffold", testBaseSHA, ChangeParameters{Team: "checkout", Name: "checkout", Template: "full-stack", Version: "v0.1.0", CreateTeam: true, WithDatabase: true})
+	first, err := RenderChange(root, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := RenderChange(root, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RenderDigest != second.RenderDigest {
+		t.Fatal("service scaffold is not deterministic")
+	}
+	for _, change := range first.Files {
+		if strings.HasPrefix(change.Path, "gitops/applications/") {
+			t.Fatalf("scaffold PR activated an Application: %s", change.Path)
+		}
+	}
+	if err := ApplyChangeSet(root, first); err != nil {
+		t.Fatal(err)
+	}
+	lockData, err := os.ReadFile(filepath.Join(root, "services", "checkout", "web", "package-lock.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lock map[string]any
+	if err := json.Unmarshal(lockData, &lock); err != nil {
+		t.Fatalf("generated npm lock is invalid: %v", err)
+	}
+	if lock["lockfileVersion"] != float64(3) {
+		t.Fatalf("unexpected lockfile version: %#v", lock["lockfileVersion"])
+	}
+	catalog, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, _ := catalogTenant(catalog, "checkout")
+	if len(tenant.Services) != 1 || tenant.Services[0].Lifecycle != "Scaffolded" || len(tenant.Applications) != 0 || len(tenant.Databases) != 1 {
+		t.Fatalf("unexpected scaffold topology: %#v", tenant)
+	}
+	activation := NewChangeRequest("service.activate", testBaseSHA, ChangeParameters{Team: "checkout", Name: "checkout", Version: "v0.1.0"})
+	activationSet, err := RenderChange(root, activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyChangeSet(root, activationSet); err != nil {
+		t.Fatal(err)
+	}
+	web, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(applicationManifestPath("checkout"))))
+	api, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(applicationManifestPath("checkout-api"))))
+	if !strings.Contains(string(web), "tag: checkout-web-v0.1.0") || !strings.Contains(string(api), "tag: checkout-api-v0.1.0") {
+		t.Fatalf("activation tags are not component-scoped:\n%s\n%s", web, api)
+	}
+	if !strings.Contains(string(web), "networkIsolation: false") || !strings.Contains(string(api), "databaseRef:\n    name: checkout") {
+		t.Fatalf("full-stack connectivity contract is missing:\n%s\n%s", web, api)
+	}
+}
+
+func TestServiceRetirementUsesTwoReviewedRequests(t *testing.T) {
+	root := brokerFixture(t)
+	scaffold := NewChangeRequest("service.scaffold", testBaseSHA, ChangeParameters{Team: "notes", Name: "notes", Template: "go-api", Version: "v0.1.0", CreateTeam: true})
+	set, err := RenderChange(root, scaffold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyChangeSet(root, set); err != nil {
+		t.Fatal(err)
+	}
+	activate := NewChangeRequest("service.activate", testBaseSHA, ChangeParameters{Team: "notes", Name: "notes", Version: "v0.1.0"})
+	set, err = RenderChange(root, activate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyChangeSet(root, set); err != nil {
+		t.Fatal(err)
+	}
+	retire := NewChangeRequest("service.retire", testBaseSHA, ChangeParameters{Team: "notes", Name: "notes"})
+	set, err = RenderChange(root, retire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyChangeSet(root, set); err != nil {
+		t.Fatal(err)
+	}
+	wrong := NewChangeRequest("service.finalize", testBaseSHA, ChangeParameters{Team: "notes", Name: "notes", DeletionRequest: uuid.NewString(), ApprovalRevision: testBaseSHA})
+	if _, err := RenderChange(root, wrong); ExitCode(err) != ExitConflict {
+		t.Fatalf("wrong retirement request should fail: %v", err)
+	}
+	finalize := NewChangeRequest("service.finalize", testBaseSHA, ChangeParameters{Team: "notes", Name: "notes", DeletionRequest: retire.RequestID, ApprovalRevision: testBaseSHA})
+	set, err = RenderChange(root, finalize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyChangeSet(root, set); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Tenants) != 1 || catalog.Tenants[0].Name != "payments" {
+		t.Fatalf("owned service topology was not fully removed: %#v", catalog.Tenants)
+	}
+}
+
+func TestGeneratedTemplateToolchains(t *testing.T) {
+	if os.Getenv("STEADYSTATE_TEMPLATE_TOOLCHAIN_TEST") != "1" {
+		t.Skip("set STEADYSTATE_TEMPLATE_TOOLCHAIN_TEST=1 for external toolchain validation")
+	}
+	root := brokerFixture(t)
+	sourceRoot := repositoryRoot(t)
+	for _, file := range []string{"go.mod", "go.sum"} {
+		data, err := os.ReadFile(filepath.Join(sourceRoot, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, file), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := NewChangeRequest("service.scaffold", testBaseSHA, ChangeParameters{Team: "toolchain", Name: "toolchain", Template: "full-stack", Version: "v0.1.0", CreateTeam: true, WithDatabase: true})
+	set, err := RenderChange(root, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyChangeSet(root, set); err != nil {
+		t.Fatal(err)
+	}
+	commands := []*exec.Cmd{
+		exec.Command("npm", "--prefix", "services/toolchain/web", "ci", "--ignore-scripts", "--no-audit", "--no-fund"), // #nosec G204 -- fixed test-only command.
+		exec.Command("npm", "--prefix", "services/toolchain/web", "test"),                                              // #nosec G204 -- fixed test-only command.
+		exec.Command("npm", "--prefix", "services/toolchain/web", "run", "build"),                                      // #nosec G204 -- fixed test-only command.
+	}
+	for _, command := range commands {
+		command.Dir, command.Env = root, os.Environ()
+		output, runErr := command.CombinedOutput()
+		if runErr != nil {
+			t.Fatalf("%v failed: %v\n%s", command.Args, runErr, output)
+		}
+	}
+	copyDirectory(t, filepath.Join(root, "services", "toolchain", "web", "dist"), filepath.Join(root, "services", "toolchain", "web", "server", "dist"))
+	command := exec.Command("go", "test", "./services/toolchain/...") // #nosec G204 -- fixed test-only command.
+	command.Dir, command.Env = root, os.Environ()
+	if output, runErr := command.CombinedOutput(); runErr != nil {
+		t.Fatalf("%v failed: %v\n%s", command.Args, runErr, output)
+	}
+}
+
+func TestServiceReleasePlanBindsVersionAndSourceSHA(t *testing.T) {
+	root := brokerFixture(t)
+	runGit := func(arguments ...string) string {
+		command := exec.Command("git", arguments...) // #nosec G204 -- fixed test harness with internally supplied arguments.
+		command.Dir = root
+		// Git may detach automatic maintenance after a write. Disable it for this
+		// disposable repository so no background process can race t.TempDir cleanup.
+		command.Env = append(os.Environ(),
+			"GIT_CONFIG_COUNT=3",
+			"GIT_CONFIG_KEY_0=gc.auto", "GIT_CONFIG_VALUE_0=0",
+			"GIT_CONFIG_KEY_1=maintenance.auto", "GIT_CONFIG_VALUE_1=false",
+			"GIT_CONFIG_KEY_2=maintenance.autoDetach", "GIT_CONFIG_VALUE_2=false",
+		)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", arguments, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	runGit("init", "--initial-branch=main")
+	runGit("config", "user.name", "SteadyState Tests")
+	runGit("config", "user.email", "tests@steadystate.dev")
+	runGit("add", ".")
+	runGit("commit", "-m", "baseline")
+	baseSHA := runGit("rev-parse", "HEAD")
+	request := NewChangeRequest("service.scaffold", baseSHA, ChangeParameters{Team: "catalog", Name: "catalog", Template: "full-stack", Version: "v0.1.0", CreateTeam: true, WithDatabase: true})
+	set, err := RenderChange(root, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyChangeSet(root, set); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "scaffold")
+	sourceSHA := runGit("rev-parse", "HEAD")
+	items, err := buildServiceReleasePlan(root, baseSHA, sourceSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].SemverTag != "catalog-api-v0.1.0" || items[1].SemverTag != "catalog-web-v0.1.0" {
+		t.Fatalf("unexpected release matrix: %#v", items)
+	}
+	if items[0].SHATag != "catalog-api-sha-"+sourceSHA || items[1].SHATag != "catalog-web-sha-"+sourceSHA {
+		t.Fatalf("source tags are not immutable: %#v", items)
+	}
+}
 
 const testBaseSHA = "0123456789abcdef0123456789abcdef01234567"
 
@@ -268,7 +466,7 @@ func brokerFixture(t *testing.T) string {
 	t.Helper()
 	source := repositoryRoot(t)
 	destination := t.TempDir()
-	for _, path := range []string{"gitops/clusters/local/catalog", "gitops/teams/payments", "gitops/applications/demo", "gitops/databases/orders"} {
+	for _, path := range []string{"gitops/clusters/local/catalog", "gitops/teams/payments", "gitops/applications/demo", "gitops/databases/orders", "apps/demo-app"} {
 		copyDirectory(t, filepath.Join(source, filepath.FromSlash(path)), filepath.Join(destination, filepath.FromSlash(path)))
 	}
 	return destination
