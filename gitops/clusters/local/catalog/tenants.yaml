@@ -15,3 +15,10 @@ tenants:
   owners:
   - payments-owner
   teamPath: gitops/teams/payments
+- applications: []
+  databases: []
+  lifecycle: Active
+  name: broker-smoke
+  owners:
+  - phase8-smoke
+  teamPath: gitops/teams/broker-smoke

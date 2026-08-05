@@ -1,0 +1,15 @@
+apiVersion: platform.steadystate.dev/v1alpha1
+kind: Team
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "-1"
+  name: broker-smoke
+spec:
+  allowedRepositories:
+  - ghcr.io/saadabdullaah/broker-smoke-*
+  owners:
+  - phase8-smoke
+  quota:
+    cpu: "2"
+    memory: 4Gi
