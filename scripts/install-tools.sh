@@ -63,7 +63,7 @@ fi
 
 node_archive="$DOWNLOAD_DIR/node-v${NODE_VERSION}-linux-x64.tar.xz"
 download_verified "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" "$node_archive" "$NODE_LINUX_AMD64_SHA256"
-if [[ -x "$NODE_ROOT/bin/node" && "$($NODE_ROOT/bin/node --version)" != "v${NODE_VERSION}" ]]; then
+if [[ -x "$NODE_ROOT/bin/node" && "$("$NODE_ROOT/bin/node" --version)" != "v${NODE_VERSION}" ]]; then
   rm -rf "$NODE_ROOT"
 fi
 if [[ ! -x "$NODE_ROOT/bin/node" || "$FORCE" == true ]]; then
