@@ -30,6 +30,7 @@ const (
 )
 
 var gitObjectPattern = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+var semverPattern = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
 type ChangeRequest struct {
 	APIVersion      string           `json:"apiVersion" yaml:"apiVersion"`
@@ -66,6 +67,10 @@ type ChangeParameters struct {
 	ApprovalRevision    string   `json:"approvalRevision,omitempty" yaml:"approvalRevision,omitempty"`
 	Force               bool     `json:"force,omitempty" yaml:"force,omitempty"`
 	AcknowledgeDataLoss bool     `json:"acknowledgeDataLoss,omitempty" yaml:"acknowledgeDataLoss,omitempty"`
+	Template            string   `json:"template,omitempty" yaml:"template,omitempty"`
+	Version             string   `json:"version,omitempty" yaml:"version,omitempty"`
+	CreateTeam          bool     `json:"createTeam,omitempty" yaml:"createTeam,omitempty"`
+	WithDatabase        bool     `json:"withDatabase,omitempty" yaml:"withDatabase,omitempty"`
 }
 
 func NewChangeRequest(operation, baseSHA string, parameters ChangeParameters) ChangeRequest {
@@ -142,6 +147,8 @@ func (r ChangeRequest) Validate() error {
 		"app.create": true, "app.update": true, "app.delete": true, "app.finalize": true,
 		"database.create": true, "database.update": true, "database.restore": true,
 		"database.delete": true, "database.finalize": true,
+		"service.scaffold": true, "service.activate": true,
+		"service.retire": true, "service.finalize": true,
 	}
 	if !allowed[r.Operation] {
 		return exitError(ExitUsage, "unsupported operation %q", r.Operation)
@@ -165,6 +172,28 @@ func (r ChangeRequest) Validate() error {
 	}
 	if r.Parameters.Force != r.Parameters.AcknowledgeDataLoss {
 		return exitError(ExitUsage, "force deletion requires both --force and --acknowledge-data-loss")
+	}
+	if strings.HasPrefix(r.Operation, "service.") {
+		if !validName(r.Parameters.Name, 48) {
+			return exitError(ExitUsage, "service names must be DNS labels no longer than 48 characters")
+		}
+		if r.Operation == "service.scaffold" {
+			if r.Parameters.Template != "go-api" && r.Parameters.Template != "react-static" && r.Parameters.Template != "full-stack" {
+				return exitError(ExitUsage, "service template must be go-api, react-static, or full-stack")
+			}
+			if r.Parameters.Version != "v0.1.0" {
+				return exitError(ExitUsage, "new services must begin at v0.1.0")
+			}
+			if r.Parameters.WithDatabase && r.Parameters.Template != "full-stack" {
+				return exitError(ExitUsage, "--with-database is supported only by the full-stack template")
+			}
+			if r.Parameters.CreateTeam && r.Parameters.Team != r.Parameters.Name {
+				return exitError(ExitUsage, "--create-team requires the derived Team name to match the service")
+			}
+		}
+		if r.Operation == "service.activate" && !semverPattern.MatchString(r.Parameters.Version) {
+			return exitError(ExitUsage, "service activation requires strict vMAJOR.MINOR.PATCH")
+		}
 	}
 	if strings.HasSuffix(r.Operation, ".create") || strings.HasSuffix(r.Operation, ".update") || r.Operation == "database.restore" {
 		return r.validateDesiredState()

@@ -150,6 +150,10 @@ func newTypedWriteCommand(options *Options, operation, use, short string) *cobra
 		command.Flags().BoolVar(&flags.Force, "force", false, "request emergency force deletion")
 		command.Flags().BoolVar(&flags.AcknowledgeDataLoss, "acknowledge-data-loss", false, "acknowledge force-deletion data-loss risk")
 	}
+	if operation == "service.retire" {
+		command.Flags().BoolVar(&flags.Force, "force", false, "request emergency force deletion")
+		command.Flags().BoolVar(&flags.AcknowledgeDataLoss, "acknowledge-data-loss", false, "acknowledge force-deletion data-loss risk")
+	}
 	if strings.HasSuffix(operation, ".finalize") {
 		command.Flags().StringVar(&flags.DeletionRequest, "deletion-request", "", "approval PR deletion-request UUID")
 		command.Flags().StringVar(&flags.ApprovalRevision, "approval-revision", "", "merged approval commit")
@@ -192,11 +196,33 @@ func verifyFinalization(ctx context.Context, selected Context, operation string,
 		live, err = client.Get(ctx, teamGVR, "", parameters.Name)
 	case strings.HasPrefix(operation, "app."):
 		live, err = client.Get(ctx, applicationGVR, "team-"+parameters.Team, parameters.Name)
+	case strings.HasPrefix(operation, "service."):
+		catalog, catalogErr := LoadCatalog(selected.CheckoutPath)
+		if catalogErr != nil {
+			return catalogErr
+		}
+		tenant, service, catalogErr := findCatalogService(catalog, parameters.Name)
+		if catalogErr != nil {
+			return catalogErr
+		}
+		if service.OwnsTeam {
+			live, err = client.Get(ctx, teamGVR, "", tenant.Name)
+		} else if len(service.Components) > 0 {
+			if _, entryErr := applicationEntry(tenant, service.Components[0]); entryErr == nil {
+				live, err = client.Get(ctx, applicationGVR, "team-"+tenant.Name, service.Components[0])
+			}
+		}
+		if live == nil && err == nil && service.OwnsDatabase && service.DatabaseRef != "" {
+			live, err = client.Get(ctx, databaseGVR, "team-"+tenant.Name, service.DatabaseRef)
+		}
 	default:
 		live, err = client.Get(ctx, databaseGVR, "team-"+parameters.Team, parameters.Name)
 	}
 	if err != nil {
 		return err
+	}
+	if live == nil {
+		return nil
 	}
 	if live.GetAnnotations()["steadystate.dev/deletion-request"] != parameters.DeletionRequest {
 		return exitError(ExitConflict, "live resource does not carry the approved deletion request")

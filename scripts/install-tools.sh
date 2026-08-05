@@ -7,6 +7,7 @@ PLATFORM="linux-amd64"
 TOOLS_ROOT="$ROOT/.tools"
 BIN_DIR="$TOOLS_ROOT/bin/$PLATFORM"
 GO_ROOT="$TOOLS_ROOT/go/$PLATFORM"
+NODE_ROOT="$TOOLS_ROOT/node/$PLATFORM"
 DOWNLOAD_DIR="$TOOLS_ROOT/downloads"
 export GOCACHE="$TOOLS_ROOT/cache/go-build/$PLATFORM"
 export GOMODCACHE="$TOOLS_ROOT/cache/go-mod/$PLATFORM"
@@ -58,6 +59,17 @@ if [[ ! -x "$GO_ROOT/bin/go" || "$FORCE" == true ]]; then
   rm -rf "$GO_ROOT"
   mkdir -p "$GO_ROOT"
   tar -xzf "$go_archive" --strip-components=1 -C "$GO_ROOT"
+fi
+
+node_archive="$DOWNLOAD_DIR/node-v${NODE_VERSION}-linux-x64.tar.xz"
+download_verified "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" "$node_archive" "$NODE_LINUX_AMD64_SHA256"
+if [[ -x "$NODE_ROOT/bin/node" && "$($NODE_ROOT/bin/node --version)" != "v${NODE_VERSION}" ]]; then
+  rm -rf "$NODE_ROOT"
+fi
+if [[ ! -x "$NODE_ROOT/bin/node" || "$FORCE" == true ]]; then
+  rm -rf "$NODE_ROOT"
+  mkdir -p "$NODE_ROOT"
+  tar -xJf "$node_archive" --strip-components=1 -C "$NODE_ROOT"
 fi
 
 download_with_checksum_url \

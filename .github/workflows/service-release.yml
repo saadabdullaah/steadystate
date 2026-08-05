@@ -1,0 +1,322 @@
+name: Generated service release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/**
+  workflow_dispatch: #checkov:skip=CKV_GHA_7: Recovery is bound to an exact commit already on main.
+    inputs:
+      source_sha:
+        description: Exact main commit to recover
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+concurrency:
+  group: generated-service-release
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/saadabdullaah/steadystate-services
+  SOURCE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.sha }}
+
+jobs:
+  prepare:
+    name: validate service release plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify source is current main
+        shell: pwsh
+        run: |
+          if ($env:SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$') { throw 'Source SHA must be a full lowercase SHA-1.' }
+          git fetch origin main:refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0 -or (git rev-parse origin/main).Trim() -cne $env:SOURCE_SHA) { throw 'Recovery source is not current main.' }
+      - name: Install pinned Go
+        shell: pwsh
+        run: |
+          ./scripts/install-tools.ps1 -GoOnly
+          "$PWD/.tools/go/linux-amd64/bin" >> $env:GITHUB_PATH
+      - name: Build deterministic release matrix
+        id: plan
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          go build -trimpath -o .artifacts/platformctl ./cmd/platformctl
+          if ($LASTEXITCODE -ne 0) { throw 'platformctl build failed.' }
+          $base = $env:PUSH_BASE
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') { $base = (git rev-parse "$env:SOURCE_SHA^").Trim() }
+          if ($base -cnotmatch '^[0-9a-f]{40}$' -or $base -eq ('0' * 40)) { throw 'Release base is not a valid prior commit.' }
+          $matrix = ./.artifacts/platformctl service release-plan --base-sha $base --source-sha $env:SOURCE_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Generated-service release plan failed.' }
+          $parsed = $matrix | ConvertFrom-Json
+          "release=$(if (@($parsed.include).Count -gt 0) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+          "matrix=$($matrix.Trim())" >> $env:GITHUB_OUTPUT
+
+  publish:
+    name: publish ${{ matrix.service }} ${{ matrix.component }}
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        if: matrix.component == 'web'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.17.0
+          cache: npm
+          cache-dependency-path: services/${{ matrix.service }}/web/package-lock.json
+      - name: Install pinned Go
+        shell: pwsh
+        run: |
+          ./scripts/install-tools.ps1 -GoOnly
+          "$PWD/.tools/go/linux-amd64/bin" >> $env:GITHUB_PATH
+      - name: Test component
+        shell: pwsh
+        env:
+          COMPONENT: ${{ matrix.component }}
+          SERVICE_PATH: ${{ matrix.path }}
+        run: |
+          if ($env:COMPONENT -eq 'web') {
+            npm --prefix $env:SERVICE_PATH ci --ignore-scripts --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+            npm --prefix $env:SERVICE_PATH test
+            if ($LASTEXITCODE -ne 0) { throw 'frontend tests failed.' }
+            npm --prefix $env:SERVICE_PATH run build
+            if ($LASTEXITCODE -ne 0) { throw 'frontend build failed.' }
+            go test -race "./$env:SERVICE_PATH/server"
+          } else {
+            go test -race "./$env:SERVICE_PATH"
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Go component tests failed.' }
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fail closed on immutable-tag reuse
+        id: preflight
+        shell: pwsh
+        env:
+          SEMVER_TAG: ${{ matrix.semverTag }}
+          SHA_TAG: ${{ matrix.shaTag }}
+        run: |
+          function Resolve-Digest([string]$Tag) {
+            $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+            $raw = docker buildx imagetools inspect "$env:IMAGE`:$Tag" --format '{{json .Manifest.Digest}}' 2>$null
+            $code = $LASTEXITCODE; $ErrorActionPreference = $previous
+            if ($code -ne 0) { return '' }
+            return $raw.Trim('"').Trim()
+          }
+          $semver = Resolve-Digest $env:SEMVER_TAG
+          $sha = Resolve-Digest $env:SHA_TAG
+          if (($semver -and -not $sha) -or ($sha -and -not $semver)) { throw 'Immutable service tags are only partially published.' }
+          if ($semver -and $semver -cne $sha) { throw 'Immutable service tags resolve to different digests.' }
+          if ($semver) { "publish=false" >> $env:GITHUB_OUTPUT; "digest=$semver" >> $env:GITHUB_OUTPUT } else { "publish=true" >> $env:GITHUB_OUTPUT }
+      - name: Build and publish immutable component
+        if: steps.preflight.outputs.publish == 'true'
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.IMAGE }}:${{ matrix.semverTag }}
+            ${{ env.IMAGE }}:${{ matrix.shaTag }}
+      - name: Resolve immutable digest
+        id: digest
+        shell: pwsh
+        env:
+          EXISTING: ${{ steps.preflight.outputs.digest }}
+          BUILT: ${{ steps.build.outputs.digest }}
+        run: |
+          $digest = if ($env:BUILT) { $env:BUILT } else { $env:EXISTING }
+          if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'Published digest is invalid.' }
+          "value=$digest" >> $env:GITHUB_OUTPUT
+      - name: Trivy image gate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.digest.outputs.value }}
+          format: json
+          output: service-trivy.json
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.digest.outputs.value }}
+          format: spdx-json
+          output-file: service.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Install pinned Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v3.1.2
+      - name: Sign, attest, and verify component
+        shell: pwsh
+        env:
+          DIGEST: ${{ steps.digest.outputs.value }}
+        run: |
+          $reference = "$env:IMAGE@$env:DIGEST"
+          $identity = 'https://github.com/saadabdullaah/steadystate/.github/workflows/service-release.yml@refs/heads/main'
+          $issuer = 'https://token.actions.githubusercontent.com'
+          cosign sign --yes $reference
+          if ($LASTEXITCODE -ne 0) { throw 'Cosign signing failed.' }
+          cosign attest --yes --type spdxjson --predicate service.spdx.json $reference
+          if ($LASTEXITCODE -ne 0) { throw 'Cosign SBOM attestation failed.' }
+          cosign verify --certificate-identity $identity --certificate-oidc-issuer $issuer $reference | Out-File -Encoding utf8 signature.json
+          if ($LASTEXITCODE -ne 0) { throw 'Cosign signature verification failed.' }
+          cosign verify-attestation --type spdxjson --certificate-identity $identity --certificate-oidc-issuer $issuer $reference | Out-File -Encoding utf8 attestation.json
+          if ($LASTEXITCODE -ne 0) { throw 'Cosign attestation verification failed.' }
+          @{ service = '${{ matrix.service }}'; team = '${{ matrix.team }}'; component = '${{ matrix.component }}'; application = '${{ matrix.application }}'; version = '${{ matrix.version }}'; digest = $env:DIGEST; sourceSHA = $env:SOURCE_SHA } | ConvertTo-Json | Set-Content -Encoding utf8 release.json
+      - name: Require anonymous package access
+        shell: pwsh
+        env:
+          DIGEST: ${{ steps.digest.outputs.value }}
+        run: |
+          docker logout ghcr.io | Out-Null
+          docker buildx imagetools inspect "$env:IMAGE@$env:DIGEST" --format '{{json .Manifest.Digest}}' | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'steadystate-services is not anonymously readable; make the GHCR package public and rerun this workflow.' }
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: service-release-${{ matrix.service }}-${{ matrix.component }}-${{ env.SOURCE_SHA }}
+          path: |
+            release.json
+            service.spdx.json
+            service-trivy.json
+            signature.json
+            attestation.json
+          retention-days: 30
+          if-no-files-found: error
+
+  activation:
+    name: open activation pull request
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Go
+        shell: pwsh
+        run: |
+          ./scripts/install-tools.ps1 -GoOnly
+          "$PWD/.tools/go/linux-amd64/bin" >> $env:GITHUB_PATH
+      - name: Download release metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: service-release-*-${{ env.SOURCE_SHA }}
+          path: .artifacts/service-release
+          merge-multiple: false
+      - name: Validate activation proposals before App authentication
+        shell: pwsh
+        env:
+          MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
+        run: |
+          go build -trimpath -o .artifacts/platformctl ./cmd/platformctl
+          if ($LASTEXITCODE -ne 0) { throw 'platformctl build failed.' }
+          $items = @((ConvertFrom-Json $env:MATRIX_JSON).include)
+          $services = @($items | Group-Object service)
+          New-Item -ItemType Directory -Force .artifacts/activation | Out-Null
+          foreach ($group in $services) {
+            $first = $group.Group[0]
+            $proposal = ./.artifacts/platformctl service activation-proposal --team $first.team --name $first.service --version $first.version --base-sha $env:SOURCE_SHA | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw "Activation validation failed for $($first.service)." }
+            $proposal | Add-Member -NotePropertyName service -NotePropertyValue $first.service
+            $proposal | Add-Member -NotePropertyName version -NotePropertyValue $first.version
+            $proposal | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 ".artifacts/activation/$($first.service).json"
+          }
+      - name: Create repository-scoped delivery token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Render and open activation pull requests
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name "$env:APP_SLUG[bot]"
+          $userID = gh api "/users/$env:APP_SLUG[bot]" --jq .id
+          if ($LASTEXITCODE -ne 0 -or -not $userID) { throw 'Could not resolve GitHub App identity.' }
+          git config user.email "$userID+$env:APP_SLUG[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git"
+          foreach ($proposalFile in Get-ChildItem .artifacts/activation/*.json) {
+            $proposal = Get-Content -Raw $proposalFile | ConvertFrom-Json
+            $branch = "automation/platform/service-activate/$($proposal.requestID)"
+            $existingPR = gh pr list --head $branch --state all --json number --jq '.[0].number'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not inspect an existing activation request.' }
+            if ($existingPR) { Write-Host "Activation request already exists as PR #$existingPR."; continue }
+            $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+            git ls-remote --exit-code --heads origin $branch *> $null
+            $branchCode = $LASTEXITCODE; $ErrorActionPreference = $previous
+            if ($branchCode -eq 0) { throw 'Activation branch exists without a corresponding pull request.' }
+            if ($branchCode -ne 2) { throw 'Could not determine activation branch state.' }
+            git switch --detach $env:SOURCE_SHA
+            if ($LASTEXITCODE -ne 0) { throw 'Could not reset activation renderer to source.' }
+            $applied = ./.artifacts/platformctl broker apply --proposal $proposal.encoded | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $applied.renderDigest -cne $proposal.validation.renderDigest) { throw 'Activation render changed after authentication.' }
+            $expected = @($applied.files | ForEach-Object path | Sort-Object -Unique)
+            $actual = @(git status --porcelain=v1 --untracked-files=all | ForEach-Object { $_.Substring(3) } | Where-Object { $_ -notlike '.artifacts/*' } | Sort-Object -Unique)
+            if (($expected -join "`n") -cne ($actual -join "`n")) { throw 'Activation worktree differs from renderer allowlist.' }
+            git switch -c activation
+            git add -- $expected
+            git commit -m "service.activate`n`nRequest-ID: $($proposal.requestID)`nProposal-Digest: $($proposal.validation.proposalDigest)`nRender-Digest: $($proposal.validation.renderDigest)"
+            git push --set-upstream origin "HEAD:$branch"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not push activation branch.' }
+            $metadata = @(Get-ChildItem .artifacts/service-release -Recurse -Filter release.json | ForEach-Object { Get-Content -Raw $_ | ConvertFrom-Json } | Where-Object service -eq $proposal.service)
+            $digests = ($metadata | ForEach-Object { "- $($_.component): $($_.digest)" }) -join "`n"
+            $workflowURL = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            $body = "Generated-service activation after signed publication.`n`n- Request ID: $($proposal.requestID)`n- Service: $($proposal.service)`n- Version: $($proposal.version)`n- Source SHA: $env:SOURCE_SHA`n- Workflow: $workflowURL`n- SBOM: SPDX JSON with verified Cosign attestation`n`nDigests:`n$digests`n`nChanged paths:`n$(($expected | ForEach-Object { '- ' + $_ }) -join "`n")"
+            gh pr create --base main --head $branch --title "chore(gitops): activate $($proposal.service) $($proposal.version)" --body $body
+            if ($LASTEXITCODE -ne 0) { throw 'Could not open activation pull request.' }
+            git branch -D activation
+          }

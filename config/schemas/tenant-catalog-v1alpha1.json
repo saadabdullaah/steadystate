@@ -13,7 +13,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "teamPath", "owners", "lifecycle", "applications", "databases"],
+        "required": ["name", "teamPath", "owners", "lifecycle", "applications", "databases", "services"],
         "properties": {
           "name": {"$ref": "#/$defs/teamName"},
           "teamPath": {"type": "string", "pattern": "^gitops/teams/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
@@ -21,7 +21,8 @@
           "lifecycle": {"$ref": "#/$defs/lifecycle"},
           "deletionRequest": {"$ref": "#/$defs/requestID"},
           "applications": {"type": "array", "items": {"$ref": "#/$defs/application"}},
-          "databases": {"type": "array", "items": {"$ref": "#/$defs/database"}}
+          "databases": {"type": "array", "items": {"$ref": "#/$defs/database"}},
+          "services": {"type": "array", "items": {"$ref": "#/$defs/service"}}
         }
       }
     }
@@ -47,6 +48,23 @@
         "name": {"$ref": "#/$defs/name"},
         "path": {"type": "string", "pattern": "^gitops/databases/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
         "lifecycle": {"$ref": "#/$defs/lifecycle"},
+        "deletionRequest": {"$ref": "#/$defs/requestID"}
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "template", "version", "components", "lifecycle"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 48},
+        "path": {"type": "string", "pattern": "^services/[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+        "template": {"enum": ["go-api", "react-static", "full-stack"]},
+        "version": {"type": "string", "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+        "components": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/name"}},
+        "databaseRef": {"$ref": "#/$defs/name"},
+        "ownsTeam": {"type": "boolean"},
+        "ownsDatabase": {"type": "boolean"},
+        "lifecycle": {"enum": ["Scaffolded", "Active", "Retiring"]},
         "deletionRequest": {"$ref": "#/$defs/requestID"}
       }
     },

@@ -120,7 +120,7 @@ jobs:
           }
 
           $safeOperation = $env:OPERATION.Replace('.', '-')
-          if ($safeOperation -cnotmatch '^(team|app|database)-(create|update|restore|delete|finalize)$') { throw 'Rendered operation is invalid.' }
+          if ($safeOperation -cnotmatch '^(team|app|database|service)-(create|update|restore|delete|finalize|scaffold|activate|retire)$') { throw 'Rendered operation is invalid.' }
           $branch = "automation/platform/$safeOperation/$env:REQUEST_ID"
           $title = "chore(platform): $env:OPERATION $($env:REQUEST_ID.Substring(0, 8))"
           $expectedFiles = @($render.files | ForEach-Object { $_.path } | Sort-Object -Unique)
@@ -168,7 +168,7 @@ jobs:
           if (($actualFiles -join "`n") -cne ($expectedFiles -join "`n")) { throw 'Request branch contains unexpected files.' }
           $changed = ($expectedFiles | ForEach-Object { "- $_" }) -join "`n"
           $workflowUrl = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-          $warning = if ($env:OPERATION -match '(delete|finalize)$') { "`n> This is a reviewed lifecycle/deletion operation. Verify finalizer and data-retention implications before merging.`n" } else { '' }
+          $warning = if ($env:OPERATION -match '(delete|retire|finalize)$') { "`n> This is a reviewed lifecycle/deletion operation. Verify finalizer and data-retention implications before merging.`n" } else { '' }
           $body = @"
           Typed SteadyState platform change.
 

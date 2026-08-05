@@ -119,9 +119,216 @@ func (r *changeRenderer) render() error {
 		return r.approveDatabaseDeletion(p)
 	case "database.finalize":
 		return r.finalizeDatabase(p)
+	case "service.scaffold":
+		return r.scaffoldService(p)
+	case "service.activate":
+		return r.activateService(p)
+	case "service.retire":
+		return r.retireService(p)
+	case "service.finalize":
+		return r.finalizeService(p)
 	default:
 		return exitError(ExitUsage, "unsupported operation %q", r.request.Operation)
 	}
+}
+
+func (r *changeRenderer) scaffoldService(p ChangeParameters) error {
+	for _, tenant := range r.catalog.Tenants {
+		for _, service := range tenant.Services {
+			if service.Name == p.Name {
+				return exitError(ExitConflict, "service %q already exists", p.Name)
+			}
+		}
+	}
+	tenant, err := r.tenant(p.Team)
+	if err != nil {
+		if !p.CreateTeam || p.Team != p.Name {
+			return err
+		}
+		teamParameters := ChangeParameters{Name: p.Team, Owners: []string{p.Team + "-owners"}, AllowedRepositories: []string{"ghcr.io/saadabdullaah/steadystate-services"}, CPUQuota: "2", MemoryQuota: "4Gi"}
+		tenantValue := CatalogTenant{Name: p.Team, TeamPath: teamPath(p.Team), Owners: normalizeStrings(teamParameters.Owners), Lifecycle: "Active", Applications: []CatalogApplication{}, Databases: []CatalogDatabase{}, Services: []CatalogService{}}
+		r.catalog.Tenants = append(r.catalog.Tenants, tenantValue)
+		sort.Slice(r.catalog.Tenants, func(i, j int) bool { return r.catalog.Tenants[i].Name < r.catalog.Tenants[j].Name })
+		tenant, _ = r.tenant(p.Team)
+		if err := r.writeTeam(p.Team, teamParameters); err != nil {
+			return err
+		}
+	} else if p.CreateTeam {
+		return exitError(ExitConflict, "Team %q already exists; omit --create-team", p.Team)
+	}
+	if tenant.Lifecycle != "Active" {
+		return exitError(ExitConflict, "Team %q is retiring", p.Team)
+	}
+	databaseRef := ""
+	if p.WithDatabase {
+		databaseRef = p.Name
+		if databaseExists(tenant, databaseRef) {
+			return exitError(ExitConflict, "Database %q already exists", databaseRef)
+		}
+		databaseParameters := ChangeParameters{Team: p.Team, Name: databaseRef, Instances: 1, StorageSize: "1Gi", BackupSchedule: "0 0 2 * * *", BackupRetention: "7d"}
+		tenant.Databases = append(tenant.Databases, CatalogDatabase{Name: databaseRef, Path: databasePath(databaseRef), Lifecycle: "Active"})
+		sort.Slice(tenant.Databases, func(i, j int) bool { return tenant.Databases[i].Name < tenant.Databases[j].Name })
+		if err := r.writeDatabase(p.Team, databaseParameters); err != nil {
+			return err
+		}
+	}
+	service := CatalogService{Name: p.Name, Path: servicePath(p.Name), Template: p.Template, Version: p.Version, Components: templateComponents(p.Name, p.Template), DatabaseRef: databaseRef, OwnsTeam: p.CreateTeam, OwnsDatabase: p.WithDatabase, Lifecycle: "Scaffolded"}
+	tenant.Services = append(tenant.Services, service)
+	sort.Slice(tenant.Services, func(i, j int) bool { return tenant.Services[i].Name < tenant.Services[j].Name })
+	return r.writeServiceSource(service)
+}
+
+func (r *changeRenderer) activateService(p ChangeParameters) error {
+	tenant, err := r.activeTenant(p.Team)
+	if err != nil {
+		return err
+	}
+	service, err := serviceEntry(tenant, p.Name)
+	if err != nil {
+		return err
+	}
+	if service.Lifecycle == "Retiring" {
+		return exitError(ExitConflict, "service %q is retiring", p.Name)
+	}
+	service.Version = p.Version
+	for _, component := range service.Components {
+		parameters := ChangeParameters{Team: p.Team, Name: component, Owner: p.Team + "-owners", ImageRepository: serviceImageRepository, ImageTag: serviceImageTag(*service, component, p.Version), Port: 8080, MinReplicas: 1, MaxReplicas: 3}
+		if service.Template == "full-stack" && component == p.Name+"-api" {
+			parameters.DatabaseRef = service.DatabaseRef
+		}
+		entry, entryErr := applicationEntry(tenant, component)
+		if entryErr != nil {
+			tenant.Applications = append(tenant.Applications, CatalogApplication{Name: component, Path: applicationPath(component), DatabaseRef: parameters.DatabaseRef, Lifecycle: "Active"})
+		} else {
+			if entry.Lifecycle != "Active" {
+				return exitError(ExitConflict, "Application %q is retiring", component)
+			}
+			entry.DatabaseRef = parameters.DatabaseRef
+		}
+		if err := r.writeApplicationWithIsolation(p.Team, parameters, service.Template != "full-stack"); err != nil {
+			return err
+		}
+	}
+	sort.Slice(tenant.Applications, func(i, j int) bool { return tenant.Applications[i].Name < tenant.Applications[j].Name })
+	service.Lifecycle = "Active"
+	return r.writeServiceVersion(service)
+}
+
+func (r *changeRenderer) retireService(p ChangeParameters) error {
+	tenant, err := r.activeTenant(p.Team)
+	if err != nil {
+		return err
+	}
+	service, err := serviceEntry(tenant, p.Name)
+	if err != nil {
+		return err
+	}
+	if service.Lifecycle == "Retiring" {
+		return exitError(ExitConflict, "service %q is already retiring", p.Name)
+	}
+	service.Lifecycle, service.DeletionRequest = "Retiring", r.request.RequestID
+	for _, component := range service.Components {
+		application, entryErr := applicationEntry(tenant, component)
+		if entryErr == nil {
+			application.Lifecycle, application.DeletionRequest = "Retiring", r.request.RequestID
+			if err := r.approveManifest(applicationManifestPath(component), r.request.RequestID, p.Force); err != nil {
+				return err
+			}
+		}
+	}
+	if service.OwnsDatabase && service.DatabaseRef != "" {
+		database, entryErr := databaseEntry(tenant, service.DatabaseRef)
+		if entryErr == nil {
+			database.Lifecycle, database.DeletionRequest = "Retiring", r.request.RequestID
+			if err := r.approveManifest(databaseManifestPath(database.Name), r.request.RequestID, p.Force); err != nil {
+				return err
+			}
+		}
+	}
+	if service.OwnsTeam {
+		tenant.Lifecycle, tenant.DeletionRequest = "Retiring", r.request.RequestID
+		if err := r.approveManifest(teamManifestPath(tenant.Name), r.request.RequestID, p.Force); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *changeRenderer) finalizeService(p ChangeParameters) error {
+	tenant, err := r.tenant(p.Team)
+	if err != nil {
+		return err
+	}
+	service, err := serviceEntry(tenant, p.Name)
+	if err != nil {
+		return err
+	}
+	if err := requireRetiring(service.Lifecycle, service.DeletionRequest, p); err != nil {
+		return err
+	}
+	for _, component := range service.Components {
+		if entry, entryErr := applicationEntry(tenant, component); entryErr == nil {
+			if err := requireRetiring(entry.Lifecycle, entry.DeletionRequest, p); err != nil {
+				return err
+			}
+			if err := r.deleteLeaf(entry.Path, "application.yaml"); err != nil {
+				return err
+			}
+		}
+	}
+	if service.OwnsDatabase && service.DatabaseRef != "" {
+		if entry, entryErr := databaseEntry(tenant, service.DatabaseRef); entryErr == nil {
+			if err := requireRetiring(entry.Lifecycle, entry.DeletionRequest, p); err != nil {
+				return err
+			}
+			if err := r.deleteLeaf(entry.Path, "database.yaml"); err != nil {
+				return err
+			}
+		}
+	}
+	if err := r.deleteServiceSource(*service); err != nil {
+		return err
+	}
+	if service.OwnsTeam {
+		if err := requireRetiring(tenant.Lifecycle, tenant.DeletionRequest, p); err != nil {
+			return err
+		}
+		if err := r.deleteLeaf(tenant.TeamPath, "team.yaml"); err != nil {
+			return err
+		}
+		filtered := r.catalog.Tenants[:0]
+		for _, candidate := range r.catalog.Tenants {
+			if candidate.Name != tenant.Name {
+				filtered = append(filtered, candidate)
+			}
+		}
+		r.catalog.Tenants = filtered
+		return nil
+	}
+	apps := tenant.Applications[:0]
+	for _, app := range tenant.Applications {
+		if !contains(service.Components, app.Name) {
+			apps = append(apps, app)
+		}
+	}
+	tenant.Applications = apps
+	if service.OwnsDatabase {
+		databases := tenant.Databases[:0]
+		for _, db := range tenant.Databases {
+			if db.Name != service.DatabaseRef {
+				databases = append(databases, db)
+			}
+		}
+		tenant.Databases = databases
+	}
+	services := tenant.Services[:0]
+	for _, candidate := range tenant.Services {
+		if candidate.Name != service.Name {
+			services = append(services, candidate)
+		}
+	}
+	tenant.Services = services
+	return nil
 }
 
 func (r *changeRenderer) tenant(name string) (*CatalogTenant, error) {
@@ -251,6 +458,9 @@ func (r *changeRenderer) approveTeamDeletion(p ChangeParameters) error {
 			return err
 		}
 	}
+	for index := range tenant.Services {
+		tenant.Services[index].Lifecycle, tenant.Services[index].DeletionRequest = "Retiring", r.request.RequestID
+	}
 	return nil
 }
 
@@ -309,6 +519,11 @@ func (r *changeRenderer) finalizeTeam(p ChangeParameters) error {
 	}
 	for _, database := range tenant.Databases {
 		if err := r.deleteLeaf(database.Path, "database.yaml"); err != nil {
+			return err
+		}
+	}
+	for _, service := range tenant.Services {
+		if err := r.deleteServiceSource(service); err != nil {
 			return err
 		}
 	}
@@ -420,6 +635,10 @@ func (r *changeRenderer) writeTeam(name string, p ChangeParameters) error {
 }
 
 func (r *changeRenderer) writeApplication(team string, p ChangeParameters) error {
+	return r.writeApplicationWithIsolation(team, p, true)
+}
+
+func (r *changeRenderer) writeApplicationWithIsolation(team string, p ChangeParameters, networkIsolation bool) error {
 	spec := map[string]any{
 		"owner": p.Owner, "image": map[string]any{"repository": p.ImageRepository, "tag": p.ImageTag},
 		"runtime":       map[string]any{"port": p.Port, "replicas": map[string]any{"min": p.MinReplicas, "max": p.MaxReplicas}},
@@ -427,7 +646,10 @@ func (r *changeRenderer) writeApplication(team string, p ChangeParameters) error
 		"deployment":    map[string]any{"strategy": "canary", "automaticRollback": true, "steps": []any{canaryStep(10), canaryStep(25), canaryStep(50), canaryStep(100)}},
 		"reliability":   map[string]any{"availabilityTarget": "99.9%", "maximumP95Latency": "250ms", "maximumErrorRate": "1%"},
 		"observability": map[string]any{"metrics": true, "logs": true, "traces": true},
-		"security":      map[string]any{"requireSignedImage": true, "runAsNonRoot": true, "networkIsolation": true},
+		"security":      map[string]any{"requireSignedImage": true, "runAsNonRoot": true, "networkIsolation": networkIsolation},
+	}
+	if p.DatabaseRef != "" {
+		spec["databaseRef"] = map[string]any{"name": p.DatabaseRef}
 	}
 	object := map[string]any{"apiVersion": "platform.steadystate.dev/v1alpha1", "kind": "Application", "metadata": metadata(p.Name, "team-"+team, "1"), "spec": spec}
 	return r.writeLeaf(applicationPath(p.Name), "application.yaml", object)
@@ -558,6 +780,22 @@ func validateChangePath(path string) error {
 		return nil
 	}
 	parts := strings.Split(path, "/")
+	if len(parts) >= 3 && parts[0] == "services" && validName(parts[1], 48) {
+		relative := strings.Join(parts[2:], "/")
+		allowed := map[string]bool{
+			"README.md": true, "VERSION": true, "service.yaml": true,
+			"api/Dockerfile": true, "api/main.go": true, "api/main_test.go": true,
+			"web/Dockerfile": true, "web/package.json": true, "web/package-lock.json": true,
+			"web/index.html": true, "web/tsconfig.json": true, "web/vite.config.ts": true,
+			"web/src/main.tsx": true, "web/src/style.css": true,
+			"web/test/template.test.js": true,
+			"web/server/main.go":        true, "web/server/main_test.go": true,
+		}
+		if !allowed[relative] {
+			return exitError(ExitUsage, "rendered service file %q is outside the broker allowlist", path)
+		}
+		return nil
+	}
 	if len(parts) != 4 || parts[0] != "gitops" || (parts[1] != "teams" && parts[1] != "applications" && parts[1] != "databases") || !validName(parts[2], 63) {
 		return exitError(ExitUsage, "rendered path %q is outside the broker allowlist", path)
 	}
@@ -646,6 +884,7 @@ func databasePath(name string) string            { return "gitops/databases/" + 
 func teamManifestPath(name string) string        { return teamPath(name) + "/team.yaml" }
 func applicationManifestPath(name string) string { return applicationPath(name) + "/application.yaml" }
 func databaseManifestPath(name string) string    { return databasePath(name) + "/database.yaml" }
+func servicePath(name string) string             { return "services/" + name }
 
 func applicationEntry(tenant *CatalogTenant, name string) (*CatalogApplication, error) {
 	for index := range tenant.Applications {
@@ -666,4 +905,20 @@ func databaseEntry(tenant *CatalogTenant, name string) (*CatalogDatabase, error)
 func databaseExists(tenant *CatalogTenant, name string) bool {
 	item, _ := databaseEntry(tenant, name)
 	return item != nil && item.Lifecycle == "Active"
+}
+func serviceEntry(tenant *CatalogTenant, name string) (*CatalogService, error) {
+	for index := range tenant.Services {
+		if tenant.Services[index].Name == name {
+			return &tenant.Services[index], nil
+		}
+	}
+	return nil, exitError(ExitNotFound, "service %q is not present in Team %q", name, tenant.Name)
+}
+func contains(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }

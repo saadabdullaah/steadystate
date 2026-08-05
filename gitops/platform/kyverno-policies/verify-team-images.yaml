@@ -58,6 +58,8 @@ spec:
           identities:
             - subject: https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main
               issuer: https://token.actions.githubusercontent.com
+            - subject: https://github.com/saadabdullaah/steadystate/.github/workflows/service-release.yml@refs/heads/main
+              issuer: https://token.actions.githubusercontent.com
         ctlog:
           url: https://rekor.sigstore.dev
   attestations:
@@ -69,9 +71,9 @@ spec:
         images.containers.map(image,
           verifyImageSignatures(image, [attestors.steadystateDelivery])
         ).all(results, results > 0)
-      message: Images must be signed by the SteadyState main-branch demo release workflow.
+      message: Images must be signed by an approved SteadyState main-branch release workflow.
     - expression: >-
         images.containers.map(image,
           verifyAttestationSignatures(image, attestations.spdxSBOM, [attestors.steadystateDelivery])
         ).all(results, results > 0)
-      message: Images must carry a verified SPDX SBOM attestation from the SteadyState main-branch demo release workflow.
+      message: Images must carry a verified SPDX SBOM attestation from an approved SteadyState main-branch release workflow.

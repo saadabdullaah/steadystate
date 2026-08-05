@@ -16,7 +16,8 @@
       "enum": [
         "team.create", "team.update", "team.delete", "team.finalize",
         "app.create", "app.update", "app.delete", "app.finalize",
-        "database.create", "database.update", "database.restore", "database.delete", "database.finalize"
+        "database.create", "database.update", "database.restore", "database.delete", "database.finalize",
+        "service.scaffold", "service.activate", "service.retire", "service.finalize"
       ]
     },
     "parameters": {
@@ -45,7 +46,11 @@
         "deletionRequest": {"type": "string", "format": "uuid"},
         "approvalRevision": {"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"},
         "force": {"type": "boolean"},
-        "acknowledgeDataLoss": {"type": "boolean"}
+        "acknowledgeDataLoss": {"type": "boolean"},
+        "template": {"enum": ["go-api", "react-static", "full-stack"]},
+        "version": {"type": "string", "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+        "createTeam": {"type": "boolean"},
+        "withDatabase": {"type": "boolean"}
       }
     }
   }

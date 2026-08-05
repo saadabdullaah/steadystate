@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-envtest','run','platformctl','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','start-backup-store','stop-backup-store','verify-data','test-data-recovery','phase7-foundation','phase7-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-templates','test-envtest','run','platformctl','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','start-backup-store','stop-backup-store','verify-data','test-data-recovery','phase7-foundation','phase7-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -31,7 +31,8 @@ $Platform = if ($IsWindowsHost) { 'windows-amd64' } else { 'linux-amd64' }
 $Exe = if ($IsWindowsHost) { '.exe' } else { '' }
 $BinDir = Join-Path $Root ".tools/bin/$Platform"
 $GoBinDir = Join-Path $Root ".tools/go/$Platform/bin"
-$env:PATH = "$GoBinDir$([IO.Path]::PathSeparator)$BinDir$([IO.Path]::PathSeparator)$env:PATH"
+$NodeBinDir = if ($IsWindowsHost) { Join-Path $Root ".tools/node/$Platform" } else { Join-Path $Root ".tools/node/$Platform/bin" }
+$env:PATH = "$GoBinDir$([IO.Path]::PathSeparator)$NodeBinDir$([IO.Path]::PathSeparator)$BinDir$([IO.Path]::PathSeparator)$env:PATH"
 $env:GOCACHE = Join-Path $Root '.tools/cache/go-build'
 $env:GOMODCACHE = Join-Path $Root ".tools/cache/go-mod/$Platform"
 $env:GOPATH = Join-Path $Root ".tools/gopath/$Platform"
@@ -310,11 +311,12 @@ function Invoke-CheckVersions {
     $v = Read-Versions
     $actual = @{
         go = ((& go version) -split ' ')[2].TrimStart('go')
+        node = (& node --version).TrimStart('v')
         kind = ((& kind version) -split ' ')[1].TrimStart('v')
         kubectl = (& kubectl version --client -o json | ConvertFrom-Json).clientVersion.gitVersion.TrimStart('v')
         helm = (& helm version --template '{{.Version}}').TrimStart('v')
     }
-    $expected = @{go=$v.GO_VERSION; kind=$v.KIND_VERSION; kubectl=$v.KUBERNETES_VERSION; helm=$v.HELM_VERSION}
+    $expected = @{go=$v.GO_VERSION; node=$v.NODE_VERSION; kind=$v.KIND_VERSION; kubectl=$v.KUBERNETES_VERSION; helm=$v.HELM_VERSION}
     foreach ($name in $expected.Keys) {
         if ($actual[$name] -ne $expected[$name]) { throw "$name version mismatch: expected $($expected[$name]), got $($actual[$name])" }
         Write-Host "[PASS] $name $($actual[$name])"
@@ -562,7 +564,8 @@ try {
             if (-not (Test-CommandAvailable 'golangci-lint')) { throw "golangci-lint is missing. Run '.\scripts\dev.ps1 tools'." }
             Invoke-External golangci-lint run ./...
         }
-        'test' { Assert-Tools; Invoke-External go test ./... }
+		'test' { Assert-Tools; Invoke-External go test ./... }
+		'test-templates' { Assert-Tools; $env:STEADYSTATE_TEMPLATE_TOOLCHAIN_TEST = '1'; Invoke-External go test ./internal/platformctl -run '^TestGeneratedTemplateToolchains$' -count=1 }
         'test-envtest' { Invoke-Envtest }
         'run' { Assert-Tools; Invoke-External go run ./cmd }
         'platformctl' {

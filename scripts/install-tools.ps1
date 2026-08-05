@@ -3,6 +3,7 @@ param(
     [switch]$Force,
     [switch]$BaseOnly,
     [switch]$GoOnly,
+    [switch]$NodeOnly,
     [switch]$IncludeSecurity,
     [switch]$SkipLint
 )
@@ -158,6 +159,24 @@ if ($IsWindowsHost) {
 
     if ($GoOnly) { Write-Host "Installed pinned Go $($v.GO_VERSION)."; exit 0 }
 
+    $nodeArchive = Join-Path $DownloadDir "node-v$($v.NODE_VERSION)-win-x64.zip"
+    Get-VerifiedFile -Url "https://nodejs.org/dist/v$($v.NODE_VERSION)/node-v$($v.NODE_VERSION)-win-x64.zip" -Destination $nodeArchive -ExpectedSha256 $v.NODE_WINDOWS_AMD64_SHA256
+    $nodeRoot = Join-Path $ToolsRoot "node/$Platform"
+    $nodeBinary = Join-Path $nodeRoot 'node.exe'
+    if (Test-Path -LiteralPath $nodeBinary) {
+        $installedNode = ((& $nodeBinary --version) -join '').Trim().TrimStart('v')
+        if ($installedNode -ne $v.NODE_VERSION) { Remove-Item -Recurse -Force -LiteralPath $nodeRoot }
+    }
+    if ($Force -and (Test-Path -LiteralPath $nodeRoot)) { Remove-Item -Recurse -Force -LiteralPath $nodeRoot }
+    if (-not (Test-Path -LiteralPath $nodeBinary)) {
+        $nodeExtract = Join-Path $ToolsRoot 'node-extract/windows-amd64'
+        if (Test-Path -LiteralPath $nodeExtract) { Remove-Item -Recurse -Force -LiteralPath $nodeExtract }
+        Expand-Archive -LiteralPath $nodeArchive -DestinationPath $nodeExtract -Force
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $nodeRoot) | Out-Null
+        Move-Item -LiteralPath (Join-Path $nodeExtract "node-v$($v.NODE_VERSION)-win-x64") -Destination $nodeRoot
+    }
+    if ($NodeOnly) { Write-Host "Installed pinned Node.js $($v.NODE_VERSION)."; exit 0 }
+
     Install-DirectBinary -Name 'kubectl' -Url "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/windows/amd64/kubectl.exe" -ChecksumUrl "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/windows/amd64/kubectl.exe.sha256"
     Install-DirectBinary -Name 'kind' -Url "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-windows-amd64" -ChecksumUrl "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-windows-amd64.sha256sum"
 
@@ -219,6 +238,22 @@ if ($IsWindowsHost) {
     }
 
     if ($GoOnly) { Write-Host "Installed pinned Go $($v.GO_VERSION)."; exit 0 }
+
+    $nodeArchive = Join-Path $DownloadDir "node-v$($v.NODE_VERSION)-linux-x64.tar.xz"
+    Get-VerifiedFile -Url "https://nodejs.org/dist/v$($v.NODE_VERSION)/node-v$($v.NODE_VERSION)-linux-x64.tar.xz" -Destination $nodeArchive -ExpectedSha256 $v.NODE_LINUX_AMD64_SHA256
+    $nodeRoot = Join-Path $ToolsRoot "node/$Platform"
+    $nodeBinary = Join-Path $nodeRoot 'bin/node'
+    if (Test-Path -LiteralPath $nodeBinary) {
+        $installedNode = ((& $nodeBinary --version) -join '').Trim().TrimStart('v')
+        if ($installedNode -ne $v.NODE_VERSION) { Remove-Item -Recurse -Force -LiteralPath $nodeRoot }
+    }
+    if ($Force -and (Test-Path -LiteralPath $nodeRoot)) { Remove-Item -Recurse -Force -LiteralPath $nodeRoot }
+    if (-not (Test-Path -LiteralPath $nodeBinary)) {
+        New-Item -ItemType Directory -Force -Path $nodeRoot | Out-Null
+        & tar -xJf $nodeArchive --strip-components=1 -C $nodeRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to extract the Node.js SDK' }
+    }
+    if ($NodeOnly) { Write-Host "Installed pinned Node.js $($v.NODE_VERSION)."; exit 0 }
 
     Install-DirectBinary -Name 'kubectl' -Url "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/linux/amd64/kubectl" -ChecksumUrl "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/linux/amd64/kubectl.sha256"
     Install-DirectBinary -Name 'kind' -Url "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-linux-amd64" -ChecksumUrl "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-linux-amd64.sha256sum"
