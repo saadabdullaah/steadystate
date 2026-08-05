@@ -1,11 +1,8 @@
-# checkov:skip=CKV_GHA_7: The typed broker intentionally accepts exactly four
-# size-capped inputs, validates them before authentication, re-renders them
-# server-side, and restricts output to an exact path allowlist.
 name: Platform change
 run-name: Platform change ${{ inputs.request_id }}
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: #checkov:skip=CKV_GHA_7: Typed, validated broker inputs are the only accepted request surface.
     inputs:
       schema_version:
         description: Typed ChangeRequest schema version
