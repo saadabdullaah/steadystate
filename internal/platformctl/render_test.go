@@ -168,6 +168,14 @@ func TestServiceReleasePlanBindsVersionAndSourceSHA(t *testing.T) {
 	runGit := func(arguments ...string) string {
 		command := exec.Command("git", arguments...) // #nosec G204 -- fixed test harness with internally supplied arguments.
 		command.Dir = root
+		// Git may detach automatic maintenance after a write. Disable it for this
+		// disposable repository so no background process can race t.TempDir cleanup.
+		command.Env = append(os.Environ(),
+			"GIT_CONFIG_COUNT=3",
+			"GIT_CONFIG_KEY_0=gc.auto", "GIT_CONFIG_VALUE_0=0",
+			"GIT_CONFIG_KEY_1=maintenance.auto", "GIT_CONFIG_VALUE_1=false",
+			"GIT_CONFIG_KEY_2=maintenance.autoDetach", "GIT_CONFIG_VALUE_2=false",
+		)
 		output, err := command.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v failed: %v\n%s", arguments, err, output)
