@@ -20,6 +20,7 @@ type BuildInfo struct {
 
 type Options struct {
 	ConfigPath  string
+	AuditDir    string
 	ContextName string
 	Format      string
 	Timeout     time.Duration
@@ -85,6 +86,7 @@ func NewRootCommand(options Options) *cobra.Command {
 		newRequestCommand(&options),
 		newBrokerCommand(&options),
 		newCompletionCommand(root),
+		newDocsCommand(root),
 	)
 	return root
 }

@@ -531,3 +531,27 @@ external-store connectivity and let it complete. Only when data loss is
 explicitly accepted may an administrator add
 `steadystate.dev/force-delete: "true"`. The operator never adds it
 automatically, and external objects remain after deletion.
+
+## platformctl reports a stale or conflicting break-glass target
+
+Run `platformctl app rollout NAME` again and inspect the current Rollout. The
+CLI binds promote or abort to the observed resource version and refuses a
+changed target. Do not retry blindly or patch Rollout status manually. Confirm
+the intended Application name again and supply a new incident reason only
+after reviewing the new state.
+
+## platformctl cannot write its local audit record
+
+Break glass fails before Kubernetes mutation when the private audit directory
+cannot be created or written. Repair permissions for the `audit` directory
+beside the active CLI configuration, then retry with a newly reviewed reason.
+Do not redirect audit output into the repository or disable the fail-closed
+check.
+
+## platformctl doctor reports Unknown
+
+`Unknown` means a supporting API or telemetry backend could not be queried; it
+is not fabricated application health. Follow the named evidence reference and
+remediation. Restore the unavailable Argo, Kyverno, Prometheus, Loki, Tempo,
+CloudNativePG, or Barman dependency and rerun the command. Confirmed unhealthy
+application state is reported as `Fail` and exits with code 5.

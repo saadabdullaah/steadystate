@@ -1,0 +1,78 @@
+version: 2
+
+project_name: platformctl
+
+builds:
+  - id: platformctl
+    main: ./cmd/platformctl
+    binary: platformctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X main.version={{ .Version }}
+        -X main.commit={{ .Commit }}
+        -X main.buildDate={{ .Date }}
+        -X main.dirty=false
+
+archives:
+  - id: platformctl
+    ids:
+      - platformctl
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - src: LICENSE
+      - src: README.md
+      - src: docs/cli/completions/*
+        dst: completions
+      - src: docs/cli/man/*
+        dst: man
+      - src: docs/cli/*.md
+        dst: docs
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - id: archive-sboms
+    artifacts: archive
+    documents:
+      - "${artifact}.spdx.json"
+
+snapshot:
+  version_template: 0.8.0-next
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore\(deps\):'
+
+release:
+  github:
+    owner: saadabdullaah
+    name: steadystate
+  draft: true
+  prerelease: auto
+  name_template: "SteadyState {{ .Tag }}"

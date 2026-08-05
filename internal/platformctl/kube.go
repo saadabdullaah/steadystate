@@ -14,10 +14,12 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -34,6 +36,9 @@ var (
 	backupGVR       = schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "backups"}
 	httpRouteGVR    = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
 	argoAppGVR      = schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	deploymentGVR   = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	replicaSetGVR   = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"}
+	podGVR          = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 )
 
 type ClusterClient struct {
@@ -111,6 +116,43 @@ func (c *ClusterClient) List(ctx stdcontext.Context, gvr schema.GroupVersionReso
 		return list.Items[i].GetNamespace() < list.Items[j].GetNamespace()
 	})
 	return list.Items, nil
+}
+
+func (c *ClusterClient) PatchStatus(ctx stdcontext.Context, gvr schema.GroupVersionResource, namespace, name, resourceVersion string, operations []map[string]any) (*unstructured.Unstructured, error) {
+	patch := append([]map[string]any{{"op": "test", "path": "/metadata/resourceVersion", "value": resourceVersion}}, operations...)
+	data, err := json.Marshal(patch)
+	if err != nil {
+		return nil, err
+	}
+	result, err := c.dynamic.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.JSONPatchType, data, metav1.PatchOptions{}, "status")
+	if err != nil {
+		if apierrors.IsConflict(err) || apierrors.IsInvalid(err) || strings.Contains(strings.ToLower(err.Error()), "test failed") {
+			return nil, exitError(ExitConflict, "%s %s/%s changed before the break-glass action; inspect it again", gvr.Resource, namespace, name)
+		}
+		return nil, kubernetesError(err, gvr.Resource, namespace, name)
+	}
+	return result, nil
+}
+
+func (c *ClusterClient) RecordRolloutEvent(ctx stdcontext.Context, rollout *unstructured.Unstructured, requestID, stage, reason, note, eventType string) error {
+	name := rollout.GetName() + ".platformctl." + strings.ToLower(stage) + "." + strings.ReplaceAll(requestID, "-", "")
+	if len(name) > 253 {
+		name = name[:253]
+	}
+	event := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: rollout.GetNamespace()},
+		InvolvedObject: corev1.ObjectReference{
+			APIVersion: rollout.GetAPIVersion(), Kind: rollout.GetKind(), Namespace: rollout.GetNamespace(),
+			Name: rollout.GetName(), UID: rollout.GetUID(), ResourceVersion: rollout.GetResourceVersion(),
+		},
+		Reason: reason, Message: Redact(note), Type: eventType,
+		Source:         corev1.EventSource{Component: "platformctl"},
+		FirstTimestamp: metav1.Now(), LastTimestamp: metav1.Now(), Count: 1,
+	}
+	if _, err := c.core.CoreV1().Events(rollout.GetNamespace()).Create(ctx, event, metav1.CreateOptions{}); err != nil {
+		return kubernetesError(err, "events", rollout.GetNamespace(), name)
+	}
+	return nil
 }
 
 func kubernetesError(err error, resource, namespace, name string) error {
