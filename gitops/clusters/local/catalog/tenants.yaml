@@ -1,17 +1,17 @@
 apiVersion: cli.steadystate.dev/v1alpha1
 kind: TenantCatalog
 tenants:
-  - name: payments
-    teamPath: gitops/teams/payments
-    owners:
-      - payments-owner
+- applications:
+  - databaseRef: orders
     lifecycle: Active
-    applications:
-      - name: demo
-        path: gitops/applications/demo
-        databaseRef: orders
-        lifecycle: Active
-    databases:
-      - name: orders
-        path: gitops/databases/orders
-        lifecycle: Active
+    name: demo
+    path: gitops/applications/demo
+  databases:
+  - lifecycle: Active
+    name: orders
+    path: gitops/databases/orders
+  lifecycle: Active
+  name: payments
+  owners:
+  - payments-owner
+  teamPath: gitops/teams/payments
