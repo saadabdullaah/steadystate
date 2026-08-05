@@ -36,8 +36,16 @@ try {
         $changedModuleLines = @($moduleDiff | Where-Object { $_ -cmatch '^[+-][^+-]' })
         $affectedModules = @($demoModules | Where-Object {
             $modulePath, $moduleVersion = $_ -split '\|', 2
-            $modulePattern = '^[+-]\s*' + [regex]::Escape($modulePath) + '\s+' + [regex]::Escape($moduleVersion) + '(?:\s|/go\.mod\s)'
-            $changedModuleLines -cmatch $modulePattern
+            $modulePattern = '^\s*' + [regex]::Escape($modulePath) + '\s+' + [regex]::Escape($moduleVersion) + '(?:\s+//\s*indirect)?\s*$'
+            $added = @($changedModuleLines | Where-Object {
+                $_.StartsWith('+') -and $_.Substring(1) -cmatch $modulePattern
+            }).Count -gt 0
+            $removed = @($changedModuleLines | Where-Object {
+                $_.StartsWith('-') -and $_.Substring(1) -cmatch $modulePattern
+            }).Count -gt 0
+            # Moving the same pinned module between direct and indirect blocks
+            # does not change the demo dependency graph or rebuilt binary.
+            $added -ne $removed
         })
         $buildDirectiveChanged = @($changedModuleLines | Where-Object { $_ -cmatch '^[+-]\s*(?:go|toolchain|replace|exclude)\s+' }).Count -gt 0
         if ($affectedModules.Count -gt 0 -or $buildDirectiveChanged) {

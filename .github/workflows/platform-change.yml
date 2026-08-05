@@ -1,3 +1,6 @@
+# checkov:skip=CKV_GHA_7: The typed broker intentionally accepts exactly four
+# size-capped inputs, validates them before authentication, re-renders them
+# server-side, and restricts output to an exact path allowlist.
 name: Platform change
 run-name: Platform change ${{ inputs.request_id }}
 
