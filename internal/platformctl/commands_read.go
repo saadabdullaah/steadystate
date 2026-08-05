@@ -35,6 +35,7 @@ func newTeamCommand(options *Options) *cobra.Command {
 		},
 	})
 	command.AddCommand(resourceStatusCommand(options, "status NAME", "Show Team status", teamGVR, "Team", false))
+	addWriteCommands(command, nil, nil, options)
 	return command
 }
 
@@ -57,6 +58,7 @@ func newApplicationCommand(options *Options) *cobra.Command {
 	command.AddCommand(newApplicationPolicyCommand(options))
 	command.AddCommand(newApplicationRolloutCommand(options))
 	command.AddCommand(newApplicationDoctorCommand(options))
+	addWriteCommands(nil, command, nil, options)
 	return command
 }
 
@@ -82,6 +84,7 @@ func newDatabaseCommand(options *Options) *cobra.Command {
 	}
 	backups.Flags().StringVarP(&namespace, "namespace", "n", "", "Team namespace")
 	command.AddCommand(backups)
+	addWriteCommands(nil, nil, command, options)
 	return command
 }
 

@@ -1,0 +1,190 @@
+name: Platform change
+run-name: Platform change ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch: #checkov:skip=CKV_GHA_7: Typed, validated broker inputs are the only accepted request surface.
+    inputs:
+      schema_version:
+        description: Typed ChangeRequest schema version
+        required: true
+        type: string
+      request_id:
+        description: UUID request identifier
+        required: true
+        type: string
+      base_sha:
+        description: Exact main commit used for rendering
+        required: true
+        type: string
+      proposal:
+        description: Strict Base64-encoded ChangeRequest JSON
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-change-${{ inputs.request_id }}
+  cancel-in-progress: false
+
+jobs:
+  broker:
+    name: typed-proposal-broker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact proposal base
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Go only
+        shell: pwsh
+        run: |
+          ./scripts/install-tools.ps1 -GoOnly
+          "$PWD/.tools/go/linux-amd64/bin" >> $env:GITHUB_PATH
+
+      - name: Validate request and render before App authentication
+        id: validated
+        shell: pwsh
+        env:
+          PROPOSAL: ${{ inputs.proposal }}
+          INPUT_SCHEMA: ${{ inputs.schema_version }}
+          INPUT_REQUEST_ID: ${{ inputs.request_id }}
+          INPUT_BASE_SHA: ${{ inputs.base_sha }}
+        run: |
+          if ($env:INPUT_SCHEMA -ne 'v1alpha1') { throw 'Unsupported broker schema version.' }
+          if ($env:INPUT_REQUEST_ID -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') { throw 'Request ID is not a canonical UUID.' }
+          if ($env:INPUT_BASE_SHA -cnotmatch '^([0-9a-f]{40}|[0-9a-f]{64})$') { throw 'Base SHA is invalid.' }
+          if ($env:PROPOSAL.Length -gt 49152) { throw 'Proposal exceeds the 48 KiB broker limit.' }
+
+          New-Item -ItemType Directory -Force .artifacts/broker | Out-Null
+          go build -trimpath -o .artifacts/platformctl ./cmd/platformctl
+          if ($LASTEXITCODE -ne 0) { throw 'platformctl build failed.' }
+          $validatedJSON = ./.artifacts/platformctl broker validate --proposal $env:PROPOSAL
+          if ($LASTEXITCODE -ne 0) { throw 'Proposal validation failed.' }
+          $validatedJSON | Set-Content -Encoding utf8 .artifacts/broker/validated.json
+          $metadata = $validatedJSON | ConvertFrom-Json
+          if ($metadata.requestID -cne $env:INPUT_REQUEST_ID) { throw 'Input and proposal request IDs differ.' }
+
+          git fetch origin main:refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch main.' }
+          $remoteMain = (git rev-parse origin/main).Trim()
+          if ($remoteMain -cne $env:INPUT_BASE_SHA) { throw 'The proposal base is stale; re-plan against current main.' }
+          "proposal_digest=$($metadata.proposalDigest)" >> $env:GITHUB_OUTPUT
+          "render_digest=$($metadata.renderDigest)" >> $env:GITHUB_OUTPUT
+          "operation=$($metadata.operation)" >> $env:GITHUB_OUTPUT
+
+      - name: Create repository-scoped delivery token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Re-checkout with the App identity
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ inputs.base_sha }}
+          fetch-depth: 0
+          persist-credentials: true
+          clean: false
+
+      - name: Re-render, commit, and open pull request
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PROPOSAL: ${{ inputs.proposal }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          EXPECTED_PROPOSAL_DIGEST: ${{ steps.validated.outputs.proposal_digest }}
+          EXPECTED_RENDER_DIGEST: ${{ steps.validated.outputs.render_digest }}
+          OPERATION: ${{ steps.validated.outputs.operation }}
+          INITIATING_ACTOR: ${{ github.actor }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          go build -trimpath -o .artifacts/platformctl ./cmd/platformctl
+          if ($LASTEXITCODE -ne 0) { throw 'platformctl rebuild failed.' }
+          $revalidatedJSON = ./.artifacts/platformctl broker validate --proposal $env:PROPOSAL
+          if ($LASTEXITCODE -ne 0) { throw 'Proposal re-render failed.' }
+          $revalidatedJSON | Set-Content -Encoding utf8 .artifacts/broker/revalidated.json
+          $render = $revalidatedJSON | ConvertFrom-Json
+          if ($render.proposalDigest -cne $env:EXPECTED_PROPOSAL_DIGEST -or $render.renderDigest -cne $env:EXPECTED_RENDER_DIGEST) {
+              throw 'Proposal output changed between unauthenticated validation and App-authenticated rendering.'
+          }
+
+          $safeOperation = $env:OPERATION.Replace('.', '-')
+          if ($safeOperation -cnotmatch '^(team|app|database)-(create|update|restore|delete|finalize)$') { throw 'Rendered operation is invalid.' }
+          $branch = "automation/platform/$safeOperation/$env:REQUEST_ID"
+          $title = "chore(platform): $env:OPERATION $($env:REQUEST_ID.Substring(0, 8))"
+          $expectedFiles = @($render.files | ForEach-Object { $_.path } | Sort-Object -Unique)
+          if ($expectedFiles.Count -eq 0) { throw 'Broker produced no changed files.' }
+
+          git config user.name '${{ steps.app-token.outputs.app-slug }}[bot]'
+          $userId = gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id
+          if ($LASTEXITCODE -ne 0 -or -not $userId) { throw 'Could not resolve the GitHub App bot identity.' }
+          git config user.email "$userId+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+          git fetch origin main:refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0 -or (git rev-parse origin/main).Trim() -cne $env:BASE_SHA) { throw 'Main changed after validation.' }
+
+          $previousPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          git ls-remote --exit-code --heads origin $branch *> $null
+          $branchExitCode = $LASTEXITCODE
+          $ErrorActionPreference = $previousPreference
+          if ($branchExitCode -eq 0) {
+              git fetch origin "$branch`:refs/remotes/origin/$branch"
+              if ($LASTEXITCODE -ne 0) { throw 'Could not fetch the existing request branch.' }
+              $message = git log -1 --format=%B "origin/$branch"
+              if ($message -notcontains "Proposal-Digest: $env:EXPECTED_PROPOSAL_DIGEST") {
+                  throw 'Request ID reuse has a different proposal digest.'
+              }
+              git switch --create broker-request --track "origin/$branch"
+          } elseif ($branchExitCode -eq 2) {
+              git switch --create broker-request $env:BASE_SHA
+              $appliedJSON = ./.artifacts/platformctl broker apply --proposal $env:PROPOSAL
+              if ($LASTEXITCODE -ne 0) { throw 'Applying the typed proposal failed.' }
+              $appliedJSON | Set-Content -Encoding utf8 .artifacts/broker/applied.json
+              $applied = $appliedJSON | ConvertFrom-Json
+              if ($applied.renderDigest -cne $env:EXPECTED_RENDER_DIGEST) { throw 'Applied render digest differs from validation.' }
+              $actualFiles = @(git diff --name-only | Sort-Object -Unique)
+              if (($actualFiles -join "`n") -cne ($expectedFiles -join "`n")) { throw 'Worktree changes differ from the renderer allowlist.' }
+              git add -- $expectedFiles
+              git commit -m "$env:OPERATION`n`nRequest-ID: $env:REQUEST_ID`nProposal-Digest: $env:EXPECTED_PROPOSAL_DIGEST`nRender-Digest: $env:EXPECTED_RENDER_DIGEST"
+              if ($LASTEXITCODE -ne 0) { throw 'Could not commit the rendered change.' }
+              git push --set-upstream origin "HEAD:$branch"
+              if ($LASTEXITCODE -ne 0) { throw 'Could not push the request branch.' }
+          } else {
+              throw 'Could not determine whether the request branch exists.'
+          }
+
+          $actualFiles = @(git diff --name-only origin/main...HEAD | Sort-Object -Unique)
+          if (($actualFiles -join "`n") -cne ($expectedFiles -join "`n")) { throw 'Request branch contains unexpected files.' }
+          $changed = ($expectedFiles | ForEach-Object { "- $_" }) -join "`n"
+          $workflowUrl = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          $warning = if ($env:OPERATION -match '(delete|finalize)$') { "`n> This is a reviewed lifecycle/deletion operation. Verify finalizer and data-retention implications before merging.`n" } else { '' }
+          $body = @"
+          Typed SteadyState platform change.
+
+          - Request ID: $env:REQUEST_ID
+          - Operation: $env:OPERATION
+          - Initiating actor: $env:INITIATING_ACTOR
+          - Base SHA: $env:BASE_SHA
+          - Renderer: v0.8.0
+          - Proposal digest: $env:EXPECTED_PROPOSAL_DIGEST
+          - Render digest: $env:EXPECTED_RENDER_DIGEST
+          - Workflow: $workflowUrl
+          $warning
+          Changed paths:
+          $changed
+          "@
+          $number = gh pr list --head $branch --base main --state open --json number --jq '.[0].number'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not query existing request pull requests.' }
+          if ($number) { gh pr edit $number --title $title --body $body } else { gh pr create --base main --head $branch --title $title --body $body }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create or update the request pull request.' }

@@ -289,6 +289,9 @@ func runExternal(ctx context.Context, directory, executable string, arguments ..
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", exitError(ExitTimeout, "%s command timed out", executable)
+		}
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = err.Error()

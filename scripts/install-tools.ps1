@@ -2,6 +2,7 @@
 param(
     [switch]$Force,
     [switch]$BaseOnly,
+    [switch]$GoOnly,
     [switch]$IncludeSecurity,
     [switch]$SkipLint
 )
@@ -155,6 +156,8 @@ if ($IsWindowsHost) {
         Remove-Item -Recurse -Force $extractRoot
     }
 
+    if ($GoOnly) { Write-Host "Installed pinned Go $($v.GO_VERSION)."; exit 0 }
+
     Install-DirectBinary -Name 'kubectl' -Url "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/windows/amd64/kubectl.exe" -ChecksumUrl "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/windows/amd64/kubectl.exe.sha256"
     Install-DirectBinary -Name 'kind' -Url "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-windows-amd64" -ChecksumUrl "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-windows-amd64.sha256sum"
 
@@ -214,6 +217,8 @@ if ($IsWindowsHost) {
         New-Item -ItemType Directory -Force -Path $goRoot | Out-Null
         & tar -xzf $goArchive --strip-components=1 -C $goRoot
     }
+
+    if ($GoOnly) { Write-Host "Installed pinned Go $($v.GO_VERSION)."; exit 0 }
 
     Install-DirectBinary -Name 'kubectl' -Url "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/linux/amd64/kubectl" -ChecksumUrl "https://dl.k8s.io/release/v$($v.KUBERNETES_VERSION)/bin/linux/amd64/kubectl.sha256"
     Install-DirectBinary -Name 'kind' -Url "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-linux-amd64" -ChecksumUrl "https://kind.sigs.k8s.io/dl/v$($v.KIND_VERSION)/kind-linux-amd64.sha256sum"

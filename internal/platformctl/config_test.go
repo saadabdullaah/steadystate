@@ -2,6 +2,7 @@ package platformctl
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,5 +124,38 @@ func TestDoctorReadsNamesAndVersionPinsWithoutValues(t *testing.T) {
 	}
 	if got := readVersionPin(path, "KUBERNETES_VERSION"); got != "1.35.5" {
 		t.Fatalf("unexpected pin %q", got)
+	}
+}
+
+func TestWriteMachineOutputAndConfirmationStaySeparated(t *testing.T) {
+	set := ChangeSet{RequestID: "6ba7b810-9dad-41d1-80b4-00c04fd430c8", ProposalDigest: "sha256:proposal", RenderDigest: "sha256:render", Files: []FileChange{{Path: CatalogRelativePath, Action: "update"}}}
+	var stdout, stderr bytes.Buffer
+	options := Options{Format: "json", Stdin: strings.NewReader("yes\n"), Stdout: &stdout, Stderr: &stderr}
+	confirmed, err := confirmSubmission(&options, "team.create", "payments")
+	if err != nil || !confirmed {
+		t.Fatalf("confirmation failed: confirmed=%t err=%v", confirmed, err)
+	}
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "Submit team.create") {
+		t.Fatalf("prompt polluted machine stdout: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if err := printChangeSummary(&options, set, "planned", "", "diff-body"); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("machine output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if decoded["diff"] != "diff-body" {
+		t.Fatalf("machine plan omitted diff: %#v", decoded)
+	}
+}
+
+func TestConfigRejectsUnsafeDefaultBranch(t *testing.T) {
+	config := NewConfig("local", t.TempDir())
+	value := config.Contexts["local"]
+	value.DefaultBranch = "main:refs/heads/injected"
+	config.Contexts["local"] = value
+	if err := config.Validate(); err == nil {
+		t.Fatal("unsafe Git ref must be rejected")
 	}
 }

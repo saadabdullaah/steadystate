@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
+	"github.com/google/uuid"
 	"sigs.k8s.io/yaml"
 )
 
@@ -21,21 +23,28 @@ type TenantCatalog struct {
 }
 
 type CatalogTenant struct {
-	Name         string               `json:"name" yaml:"name"`
-	TeamPath     string               `json:"teamPath" yaml:"teamPath"`
-	Applications []CatalogApplication `json:"applications" yaml:"applications"`
-	Databases    []CatalogDatabase    `json:"databases" yaml:"databases"`
+	Name            string               `json:"name" yaml:"name"`
+	TeamPath        string               `json:"teamPath" yaml:"teamPath"`
+	Owners          []string             `json:"owners" yaml:"owners"`
+	Lifecycle       string               `json:"lifecycle" yaml:"lifecycle"`
+	DeletionRequest string               `json:"deletionRequest,omitempty" yaml:"deletionRequest,omitempty"`
+	Applications    []CatalogApplication `json:"applications" yaml:"applications"`
+	Databases       []CatalogDatabase    `json:"databases" yaml:"databases"`
 }
 
 type CatalogApplication struct {
-	Name        string `json:"name" yaml:"name"`
-	Path        string `json:"path" yaml:"path"`
-	DatabaseRef string `json:"databaseRef,omitempty" yaml:"databaseRef,omitempty"`
+	Name            string `json:"name" yaml:"name"`
+	Path            string `json:"path" yaml:"path"`
+	DatabaseRef     string `json:"databaseRef,omitempty" yaml:"databaseRef,omitempty"`
+	Lifecycle       string `json:"lifecycle" yaml:"lifecycle"`
+	DeletionRequest string `json:"deletionRequest,omitempty" yaml:"deletionRequest,omitempty"`
 }
 
 type CatalogDatabase struct {
-	Name string `json:"name" yaml:"name"`
-	Path string `json:"path" yaml:"path"`
+	Name            string `json:"name" yaml:"name"`
+	Path            string `json:"path" yaml:"path"`
+	Lifecycle       string `json:"lifecycle" yaml:"lifecycle"`
+	DeletionRequest string `json:"deletionRequest,omitempty" yaml:"deletionRequest,omitempty"`
 }
 
 func LoadCatalog(root string) (TenantCatalog, error) {
@@ -69,6 +78,19 @@ func (c TenantCatalog) Validate(root string) error {
 			return fmt.Errorf("duplicate Team %q", tenant.Name)
 		}
 		seenTeams[tenant.Name] = struct{}{}
+		if len(tenant.Owners) == 0 || len(tenant.Owners) > 32 {
+			return fmt.Errorf("team %q must contain 1-32 catalog owners", tenant.Name)
+		}
+		seenOwners := map[string]bool{}
+		for _, owner := range tenant.Owners {
+			if strings.TrimSpace(owner) == "" || strings.ContainsAny(owner, "\r\n\t ") || seenOwners[owner] {
+				return fmt.Errorf("team %q contains an invalid or duplicate owner", tenant.Name)
+			}
+			seenOwners[owner] = true
+		}
+		if err := validateLifecycle(tenant.Lifecycle, tenant.DeletionRequest); err != nil {
+			return fmt.Errorf("team %q: %w", tenant.Name, err)
+		}
 		expectedTeamPath := "gitops/teams/" + tenant.Name
 		if tenant.TeamPath != expectedTeamPath {
 			return fmt.Errorf("team %q path must be %q", tenant.Name, expectedTeamPath)
@@ -86,6 +108,9 @@ func (c TenantCatalog) Validate(root string) error {
 			}
 			seenDatabases[database.Name] = struct{}{}
 			tenantDatabases[database.Name] = struct{}{}
+			if err := validateLifecycle(database.Lifecycle, database.DeletionRequest); err != nil {
+				return fmt.Errorf("database %q: %w", database.Name, err)
+			}
 			expected := "gitops/databases/" + database.Name
 			if database.Path != expected {
 				return fmt.Errorf("database %q path must be %q", database.Name, expected)
@@ -102,6 +127,9 @@ func (c TenantCatalog) Validate(root string) error {
 				return fmt.Errorf("duplicate Application %q", application.Name)
 			}
 			seenApplications[application.Name] = struct{}{}
+			if err := validateLifecycle(application.Lifecycle, application.DeletionRequest); err != nil {
+				return fmt.Errorf("application %q: %w", application.Name, err)
+			}
 			expected := "gitops/applications/" + application.Name
 			if application.Path != expected {
 				return fmt.Errorf("application %q path must be %q", application.Name, expected)
@@ -114,6 +142,21 @@ func (c TenantCatalog) Validate(root string) error {
 					return fmt.Errorf("application %q references unknown database %q", application.Name, application.DatabaseRef)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+func validateLifecycle(lifecycle, deletionRequest string) error {
+	if lifecycle != "Active" && lifecycle != "Retiring" {
+		return fmt.Errorf("lifecycle must be Active or Retiring")
+	}
+	if lifecycle == "Active" && deletionRequest != "" {
+		return fmt.Errorf("active entries cannot carry a deletion request")
+	}
+	if lifecycle == "Retiring" {
+		if _, err := uuid.Parse(deletionRequest); err != nil {
+			return fmt.Errorf("retiring entries require a UUID deletion request")
 		}
 	}
 	return nil

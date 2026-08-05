@@ -158,7 +158,7 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	}
 
 	payments := findObject(t, objects, "Application", "payments")
-	assertAutomated(t, payments, false)
+	assertAutomated(t, payments, true)
 	sources := nestedSlice(t, payments, "spec", "sources")
 	if len(sources) != 2 {
 		t.Fatalf("standard-profile payments has %d sources, want Team and Application only", len(sources))
