@@ -44,7 +44,12 @@ func TestPhase8RetiringTeamEnablesExactArgoCascade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog = []byte(strings.Replace(string(catalog), "lifecycle: Active", "lifecycle: Retiring\n    deletionRequest: 6ba7b810-9dad-41d1-80b4-00c04fd430c8", 1))
+	catalog = []byte(strings.Replace(
+		string(catalog),
+		"  lifecycle: Active\n  name: payments",
+		"  deletionRequest: 6ba7b810-9dad-41d1-80b4-00c04fd430c8\n  lifecycle: Retiring\n  name: payments",
+		1,
+	))
 	if err := os.WriteFile(catalogPath, catalog, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +71,7 @@ func TestPhase8BrokerWorkflowTrustBoundary(t *testing.T) {
 		"permission-contents: write", "permission-pull-requests: write",
 		"INITIATING_ACTOR: ${{ github.actor }}", "Proposal-Digest:",
 		"automation/platform/", "persist-credentials: false", "cancel-in-progress: false",
+		"git status --porcelain=v1 --untracked-files=all",
 	} {
 		if !strings.Contains(workflow, expected) {
 			t.Fatalf("broker workflow is missing %q", expected)

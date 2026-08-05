@@ -1,6 +1,7 @@
 package platformctl
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"sigs.k8s.io/yaml"
 )
 
 const testBaseSHA = "0123456789abcdef0123456789abcdef01234567"
@@ -92,6 +94,25 @@ func TestRendererCreatesOnlyDerivedTeamFilesDeterministically(t *testing.T) {
 	}
 	if tenant, err := catalogTenant(catalog, "orders"); err != nil || tenant.Lifecycle != "Active" {
 		t.Fatalf("created Team is not active: %#v %v", tenant, err)
+	}
+}
+
+func TestRepositoryCatalogUsesCanonicalBrokerEncoding(t *testing.T) {
+	root := repositoryRoot(t)
+	catalog, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := yaml.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracked, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(CatalogRelativePath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(tracked, canonical) {
+		t.Fatal("tracked tenant catalog is not in canonical broker encoding")
 	}
 }
 

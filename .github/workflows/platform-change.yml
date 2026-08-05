@@ -153,7 +153,7 @@ jobs:
               $appliedJSON | Set-Content -Encoding utf8 .artifacts/broker/applied.json
               $applied = $appliedJSON | ConvertFrom-Json
               if ($applied.renderDigest -cne $env:EXPECTED_RENDER_DIGEST) { throw 'Applied render digest differs from validation.' }
-              $actualFiles = @(git diff --name-only | Sort-Object -Unique)
+              $actualFiles = @(git status --porcelain=v1 --untracked-files=all | ForEach-Object { $_.Substring(3) } | Sort-Object -Unique)
               if (($actualFiles -join "`n") -cne ($expectedFiles -join "`n")) { throw 'Worktree changes differ from the renderer allowlist.' }
               git add -- $expectedFiles
               git commit -m "$env:OPERATION`n`nRequest-ID: $env:REQUEST_ID`nProposal-Digest: $env:EXPECTED_PROPOSAL_DIGEST`nRender-Digest: $env:EXPECTED_RENDER_DIGEST"
