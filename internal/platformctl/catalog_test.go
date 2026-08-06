@@ -12,10 +12,19 @@ func TestRepositoryCatalogPreservesReleasedTopology(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Tenants) != 1 || catalog.Tenants[0].Name != "payments" {
-		t.Fatalf("unexpected tenants: %#v", catalog.Tenants)
+	if len(catalog.Tenants) == 0 {
+		t.Fatal("repository catalog has no tenants")
 	}
-	tenant := catalog.Tenants[0]
+	var tenant *CatalogTenant
+	for index := range catalog.Tenants {
+		if catalog.Tenants[index].Name == "payments" {
+			tenant = &catalog.Tenants[index]
+			break
+		}
+	}
+	if tenant == nil {
+		t.Fatalf("released payments tenant is missing: %#v", catalog.Tenants)
+	}
 	if len(tenant.Applications) != 1 || tenant.Applications[0].Name != "demo" || tenant.Applications[0].DatabaseRef != "orders" {
 		t.Fatalf("released demo topology changed: %#v", tenant.Applications)
 	}

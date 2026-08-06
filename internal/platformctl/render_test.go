@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"go/format"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,6 +43,12 @@ func TestFullStackScaffoldAndActivationAreDeterministic(t *testing.T) {
 			exitError, ok := err.(*exec.ExitError)
 			if !ok || exitError.ExitCode() != 1 {
 				t.Fatalf("check generated service path %s: %v", change.Path, err)
+			}
+		}
+		if strings.HasSuffix(change.Path, ".go") {
+			formatted, err := format.Source(change.Content)
+			if err != nil || !bytes.Equal(formatted, change.Content) {
+				t.Fatalf("generated Go source is not canonical: %s: %v", change.Path, err)
 			}
 		}
 	}
@@ -484,6 +491,27 @@ func brokerFixture(t *testing.T) string {
 	destination := t.TempDir()
 	for _, path := range []string{"gitops/clusters/local/catalog", "gitops/teams/payments", "gitops/applications/demo", "gitops/databases/orders", "apps/demo-app"} {
 		copyDirectory(t, filepath.Join(source, filepath.FromSlash(path)), filepath.Join(destination, filepath.FromSlash(path)))
+	}
+	catalogPath := filepath.Join(destination, filepath.FromSlash(CatalogRelativePath))
+	data, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var catalog TenantCatalog
+	if err := yaml.UnmarshalStrict(data, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	payments, err := catalogTenant(catalog, "payments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog.Tenants = []CatalogTenant{*payments}
+	data, err = yaml.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(catalogPath, data, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	return destination
 }

@@ -3,6 +3,7 @@ package platformctl
 import (
 	_ "embed"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"sort"
@@ -134,6 +135,16 @@ func (r *changeRenderer) serviceFiles(service CatalogService) (map[string][]byte
 		for path, content := range reactTemplateFiles(service.Name, service.Template == "full-stack") {
 			files["web/"+path] = []byte(content)
 		}
+	}
+	for path, content := range files {
+		if !strings.HasSuffix(path, ".go") {
+			continue
+		}
+		formatted, formatErr := format.Source(content)
+		if formatErr != nil {
+			return nil, fmt.Errorf("format generated Go source %s: %w", path, formatErr)
+		}
+		files[path] = formatted
 	}
 	return files, nil
 }
