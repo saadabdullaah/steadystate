@@ -790,7 +790,7 @@ func validateChangePath(path string) error {
 			"web/src/main.tsx": true, "web/src/style.css": true,
 			"web/test/template.test.js": true,
 			"web/server/main.go":        true, "web/server/main_test.go": true,
-			"web/server/dist/index.html": true,
+			"web/server/static/index.html": true,
 		}
 		if !allowed[relative] {
 			return exitError(ExitUsage, "rendered service file %q is outside the broker allowlist", path)
