@@ -334,5 +334,8 @@ jobs:
             $body = "Generated-service activation after signed publication.`n`n- Request ID: $($proposal.requestID)`n- Service: $($proposal.service)`n- Version: $($proposal.version)`n- Source SHA: $env:SOURCE_SHA`n- Workflow: $workflowURL`n- SBOM: SPDX JSON with verified Cosign attestation`n`nDigests:`n$digests`n`nChanged paths:`n$(($expected | ForEach-Object { '- ' + $_ }) -join "`n")"
             gh pr create --base main --head $branch --title "chore(gitops): activate $($proposal.service) $($proposal.version)" --body $body
             if ($LASTEXITCODE -ne 0) { throw 'Could not open activation pull request.' }
+            git switch --detach $env:ACTIVATION_BASE
+            if ($LASTEXITCODE -ne 0) { throw 'Could not leave the temporary activation branch.' }
             git branch -D activation
+            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the temporary activation branch.' }
           }

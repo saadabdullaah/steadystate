@@ -119,6 +119,8 @@ func TestGeneratedServiceReleaseRecoveryContract(t *testing.T) {
 		"ACTIVATION_BASE: ${{ needs.prepare.outputs.activation_base }}",
 		"--base-sha $env:ACTIVATION_BASE",
 		"git switch --detach $env:ACTIVATION_BASE",
+		"Could not leave the temporary activation branch.",
+		"git branch -D activation",
 		"$global:LASTEXITCODE = 0",
 		"release-preflight.json",
 	} {
