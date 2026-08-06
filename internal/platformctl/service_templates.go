@@ -186,7 +186,7 @@ func reactTemplateFiles(name string, proxy bool) map[string]string {
 import("net/http/httptest";"testing")
 func TestHealth(t *testing.T){r:=httptest.NewRecorder(); newHandler("").ServeHTTP(r,httptest.NewRequest("GET","/healthz",nil)); if r.Code!=200{t.Fatalf("status %d",r.Code)}}
 `,
-		"server/dist/index.html": "<!doctype html><html lang=\"en\"><body><main>Build the frontend before running the production server.</main></body></html>\n",
+		"server/static/index.html": "<!doctype html><html lang=\"en\"><body><main>Build the frontend before running the production server.</main></body></html>\n",
 		"Dockerfile": fmt.Sprintf(`ARG NODE_IMAGE=node:24.17.0-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6
 ARG GO_BUILDER=golang:1.25.12-alpine3.23@sha256:cc985ef6f9c3bf9ece7488129c9abe0a150388ccdfa428d886fc709dca0b230a
 FROM ${NODE_IMAGE} AS frontend
@@ -201,7 +201,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY services/%s/web/server ./services/%s/web/server
-COPY --from=frontend /src/dist ./services/%s/web/server/dist
+COPY --from=frontend /src/dist ./services/%s/web/server/static
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/web ./services/%s/web/server
 FROM scratch
 USER 65532:65532
@@ -249,7 +249,7 @@ import(
  sdktrace "go.opentelemetry.io/otel/sdk/trace"
  "go.opentelemetry.io/otel/trace"
 )
-//go:embed dist/*
+//go:embed static/*
 var assets embed.FS
 var requests atomic.Uint64
 type statusWriter struct{http.ResponseWriter;status int}
@@ -269,7 +269,7 @@ func newHandler(proxyTarget string)http.Handler{
  mux.HandleFunc("/metrics",func(w http.ResponseWriter,_ *http.Request){w.Header().Set("Content-Type","text/plain; version=0.0.4");_,_=io.WriteString(w,"http_requests_total{application=\\\"%s\\\",namespace=\\\""+value("STEADYSTATE_APP_NAMESPACE","local")+"\\\",version=\\\""+value("STEADYSTATE_APP_VERSION","development")+"\\\",status=\\\"200\\\"} "+strconv.FormatUint(requests.Load(),10)+"\\n")})
  mux.HandleFunc("/.well-known/runtime",func(w http.ResponseWriter,_ *http.Request){w.Header().Set("Content-Type","application/json");_=json.NewEncoder(w).Encode(map[string]string{"application":%q,"namespace":value("STEADYSTATE_APP_NAMESPACE","local"),"version":value("STEADYSTATE_APP_VERSION","development")})})
  if proxyTarget!=""{target,_:=url.Parse(proxyTarget);proxy:=httputil.NewSingleHostReverseProxy(target);mux.Handle("/api/",http.StripPrefix("/api",proxy))}
- built,_:=fs.Sub(assets,"dist");files:=http.FileServer(http.FS(built));mux.HandleFunc("/",func(w http.ResponseWriter,r *http.Request){if r.URL.Path!="/"{if _,err:=fs.Stat(built,strings.TrimPrefix(r.URL.Path,"/"));err!=nil{r.URL.Path="/"}};if strings.Contains(r.URL.Path,"assets/"){w.Header().Set("Cache-Control","public,max-age=31536000,immutable")}else{w.Header().Set("Cache-Control","no-cache")};files.ServeHTTP(w,r)})
+ built,_:=fs.Sub(assets,"static");files:=http.FileServer(http.FS(built));mux.HandleFunc("/",func(w http.ResponseWriter,r *http.Request){if r.URL.Path!="/"{if _,err:=fs.Stat(built,strings.TrimPrefix(r.URL.Path,"/"));err!=nil{r.URL.Path="/"}};if strings.Contains(r.URL.Path,"assets/"){w.Header().Set("Cache-Control","public,max-age=31536000,immutable")}else{w.Header().Set("Cache-Control","no-cache")};files.ServeHTTP(w,r)})
  return requestMiddleware(mux)
 }
 func requestMiddleware(next http.Handler)http.Handler{return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){id:=r.Header.Get("X-Request-ID");if id==""{id=secureID()};w.Header().Set("X-Request-ID",id);record:=&statusWriter{ResponseWriter:w,status:http.StatusOK};start:=time.Now();next.ServeHTTP(record,r);if r.URL.Path!="/healthz"&&r.URL.Path!="/readyz"&&r.URL.Path!="/metrics"{requests.Add(1);span:=trace.SpanFromContext(r.Context()).SpanContext();slog.Info("http request","request_id",id,"trace_id",span.TraceID().String(),"span_id",span.SpanID().String(),"method",r.Method,"route",normalized(r.URL.Path),"status",record.status,"latency_ms",time.Since(start).Milliseconds(),"application",%q,"namespace",value("STEADYSTATE_APP_NAMESPACE","local"),"version",value("STEADYSTATE_APP_VERSION","development"))}})}

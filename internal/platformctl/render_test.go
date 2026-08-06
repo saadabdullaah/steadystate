@@ -32,6 +32,18 @@ func TestFullStackScaffoldAndActivationAreDeterministic(t *testing.T) {
 		if strings.HasPrefix(change.Path, "gitops/applications/") {
 			t.Fatalf("scaffold PR activated an Application: %s", change.Path)
 		}
+		if strings.HasPrefix(change.Path, "services/") {
+			command := exec.Command("git", "check-ignore", "--quiet", "--no-index", change.Path) // #nosec G204 -- renderer-derived path validated by the broker allowlist.
+			command.Dir = repositoryRoot(t)
+			err := command.Run()
+			if err == nil {
+				t.Fatalf("generated service path is ignored by Git: %s", change.Path)
+			}
+			exitError, ok := err.(*exec.ExitError)
+			if !ok || exitError.ExitCode() != 1 {
+				t.Fatalf("check generated service path %s: %v", change.Path, err)
+			}
+		}
 	}
 	if err := ApplyChangeSet(root, first); err != nil {
 		t.Fatal(err)
@@ -47,7 +59,7 @@ func TestFullStackScaffoldAndActivationAreDeterministic(t *testing.T) {
 	if lock["lockfileVersion"] != float64(3) {
 		t.Fatalf("unexpected lockfile version: %#v", lock["lockfileVersion"])
 	}
-	fallback, err := os.ReadFile(filepath.Join(root, "services", "checkout", "web", "server", "dist", "index.html"))
+	fallback, err := os.ReadFile(filepath.Join(root, "services", "checkout", "web", "server", "static", "index.html"))
 	if err != nil || !strings.Contains(string(fallback), "Build the frontend") {
 		t.Fatalf("generated React server fallback is missing: %v", err)
 	}
@@ -159,7 +171,7 @@ func TestGeneratedTemplateToolchains(t *testing.T) {
 			t.Fatalf("%v failed: %v\n%s", command.Args, runErr, output)
 		}
 	}
-	copyDirectory(t, filepath.Join(root, "services", "toolchain", "web", "dist"), filepath.Join(root, "services", "toolchain", "web", "server", "dist"))
+	copyDirectory(t, filepath.Join(root, "services", "toolchain", "web", "dist"), filepath.Join(root, "services", "toolchain", "web", "server", "static"))
 	command := exec.Command("go", "test", "./services/toolchain/...") // #nosec G204 -- fixed test-only command.
 	command.Dir, command.Env = root, os.Environ()
 	if output, runErr := command.CombinedOutput(); runErr != nil {
