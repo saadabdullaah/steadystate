@@ -186,6 +186,7 @@ func reactTemplateFiles(name string, proxy bool) map[string]string {
 import("net/http/httptest";"testing")
 func TestHealth(t *testing.T){r:=httptest.NewRecorder(); newHandler("").ServeHTTP(r,httptest.NewRequest("GET","/healthz",nil)); if r.Code!=200{t.Fatalf("status %d",r.Code)}}
 `,
+		"server/dist/index.html": "<!doctype html><html lang=\"en\"><body><main>Build the frontend before running the production server.</main></body></html>\n",
 		"Dockerfile": fmt.Sprintf(`ARG NODE_IMAGE=node:24.17.0-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6
 ARG GO_BUILDER=golang:1.25.12-alpine3.23@sha256:cc985ef6f9c3bf9ece7488129c9abe0a150388ccdfa428d886fc709dca0b230a
 FROM ${NODE_IMAGE} AS frontend

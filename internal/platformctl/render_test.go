@@ -47,6 +47,10 @@ func TestFullStackScaffoldAndActivationAreDeterministic(t *testing.T) {
 	if lock["lockfileVersion"] != float64(3) {
 		t.Fatalf("unexpected lockfile version: %#v", lock["lockfileVersion"])
 	}
+	fallback, err := os.ReadFile(filepath.Join(root, "services", "checkout", "web", "server", "dist", "index.html"))
+	if err != nil || !strings.Contains(string(fallback), "Build the frontend") {
+		t.Fatalf("generated React server fallback is missing: %v", err)
+	}
 	catalog, err := LoadCatalog(root)
 	if err != nil {
 		t.Fatal(err)

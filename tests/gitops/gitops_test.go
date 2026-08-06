@@ -14,6 +14,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -63,8 +64,9 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 		"--set-string", "gitRevision="+testRevision,
 	)
 	objects := decodeManifests(t, rendered)
-	if len(objects) != 14 {
-		t.Fatalf("root chart rendered %d objects, want 14", len(objects))
+	tenantNames := catalogTenantNames(t, root)
+	if len(objects) != 13+len(tenantNames) {
+		t.Fatalf("root chart rendered %d objects for %d catalog tenants, want %d", len(objects), len(tenantNames), 13+len(tenantNames))
 	}
 
 	for _, name := range []string{"root", "tenant"} {
@@ -102,6 +104,10 @@ func TestRootChartRevisionOrderingAndSyncBoundaries(t *testing.T) {
 	for name, wave := range expectedWaves {
 		application := findObject(t, objects, "Application", name)
 		assertAnnotation(t, application, "argocd.argoproj.io/sync-wave", wave)
+	}
+	for _, name := range tenantNames {
+		application := findObject(t, objects, "Application", name)
+		assertAnnotation(t, application, "argocd.argoproj.io/sync-wave", "0")
 	}
 
 	argocd := findObject(t, objects, "Application", "argocd-configuration")
@@ -210,8 +216,9 @@ func TestRootChartCanIsolateEarlierPhaseAcceptance(t *testing.T) {
 		"--set", "enableSecurity=false",
 	)
 	objects := decodeManifests(t, rendered)
-	if len(objects) != 8 {
-		t.Fatalf("isolated Phase 4 root chart rendered %d objects, want 8", len(objects))
+	tenantCount := len(catalogTenantNames(t, root))
+	if len(objects) != 7+tenantCount {
+		t.Fatalf("isolated Phase 4 root chart rendered %d objects for %d catalog tenants, want %d", len(objects), tenantCount, 7+tenantCount)
 	}
 	for _, object := range objects {
 		name := objectString(object, "metadata", "name")
@@ -749,8 +756,9 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 		"--set", "enableDataFoundation=true",
 	)
 	objects := decodeManifests(t, rendered)
-	if len(objects) != 19 {
-		t.Fatalf("full data foundation rendered %d objects, want 19", len(objects))
+	tenantCount := len(catalogTenantNames(t, root))
+	if len(objects) != 18+tenantCount {
+		t.Fatalf("full data foundation rendered %d objects for %d catalog tenants, want %d", len(objects), tenantCount, 18+tenantCount)
 	}
 	isolated := decodeManifests(t, run(t, root, "helm",
 		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
@@ -1898,6 +1906,27 @@ func contains(values []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+func catalogTenantNames(t *testing.T, root string) []string {
+	t.Helper()
+	data := readFile(t, filepath.Join(root, "gitops", "clusters", "local", "catalog", "tenants.yaml"))
+	var catalog struct {
+		Tenants []struct {
+			Name string `yaml:"name"`
+		} `yaml:"tenants"`
+	}
+	if err := yaml.Unmarshal(data, &catalog); err != nil {
+		t.Fatalf("decode tenant catalog: %v", err)
+	}
+	names := make([]string, 0, len(catalog.Tenants))
+	for _, tenant := range catalog.Tenants {
+		if tenant.Name == "" {
+			t.Fatal("tenant catalog contains an empty name")
+		}
+		names = append(names, tenant.Name)
+	}
+	return names
 }
 
 func repositoryRoot(t *testing.T) string {
