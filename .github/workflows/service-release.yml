@@ -33,6 +33,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       release: ${{ steps.plan.outputs.release }}
+      activation_base: ${{ steps.source.outputs.activation_base }}
     steps:
       - name: Checkout exact source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -40,12 +41,20 @@ jobs:
           ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify source is current main
+      - name: Verify source is merged into main
+        id: source
         shell: pwsh
         run: |
           if ($env:SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$') { throw 'Source SHA must be a full lowercase SHA-1.' }
           git fetch origin main:refs/remotes/origin/main
-          if ($LASTEXITCODE -ne 0 -or (git rev-parse origin/main).Trim() -cne $env:SOURCE_SHA) { throw 'Recovery source is not current main.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch current main.' }
+          $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+          git merge-base --is-ancestor $env:SOURCE_SHA origin/main
+          $ancestorCode = $LASTEXITCODE; $ErrorActionPreference = $previous
+          if ($ancestorCode -ne 0) { throw 'Recovery source is not an exact commit merged into main.' }
+          $activationBase = (git rev-parse origin/main).Trim()
+          if ($activationBase -cnotmatch '^[0-9a-f]{40}$') { throw 'Current main is not a full lowercase SHA-1.' }
+          "activation_base=$activationBase" >> $env:GITHUB_OUTPUT
       - name: Install pinned Go
         shell: pwsh
         run: |
@@ -133,11 +142,13 @@ jobs:
             $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
             $raw = docker buildx imagetools inspect "$env:IMAGE`:$Tag" --format '{{json .Manifest.Digest}}' 2>$null
             $code = $LASTEXITCODE; $ErrorActionPreference = $previous
-            if ($code -ne 0) { return '' }
+            if ($code -ne 0) { $global:LASTEXITCODE = 0; return '' }
             return $raw.Trim('"').Trim()
           }
           $semver = Resolve-Digest $env:SEMVER_TAG
           $sha = Resolve-Digest $env:SHA_TAG
+          @{ semverTag = $env:SEMVER_TAG; shaTag = $env:SHA_TAG; semverPresent = [bool]$semver; shaPresent = [bool]$sha } |
+            ConvertTo-Json | Set-Content -Encoding utf8 release-preflight.json
           if (($semver -and -not $sha) -or ($sha -and -not $semver)) { throw 'Immutable service tags are only partially published.' }
           if ($semver -and $semver -cne $sha) { throw 'Immutable service tags resolve to different digests.' }
           if ($semver) { "publish=false" >> $env:GITHUB_OUTPUT; "digest=$semver" >> $env:GITHUB_OUTPUT } else { "publish=true" >> $env:GITHUB_OUTPUT }
@@ -218,6 +229,7 @@ jobs:
           name: service-release-${{ matrix.service }}-${{ matrix.component }}-${{ env.SOURCE_SHA }}
           path: |
             release.json
+            release-preflight.json
             service.spdx.json
             service-trivy.json
             signature.json
@@ -234,10 +246,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout exact source
+      - name: Checkout current activation base
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ env.SOURCE_SHA }}
+          ref: ${{ needs.prepare.outputs.activation_base }}
           fetch-depth: 0
           persist-credentials: false
       - name: Install pinned Go
@@ -255,6 +267,7 @@ jobs:
         shell: pwsh
         env:
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
+          ACTIVATION_BASE: ${{ needs.prepare.outputs.activation_base }}
         run: |
           go build -trimpath -o .artifacts/platformctl ./cmd/platformctl
           if ($LASTEXITCODE -ne 0) { throw 'platformctl build failed.' }
@@ -263,7 +276,7 @@ jobs:
           New-Item -ItemType Directory -Force .artifacts/activation | Out-Null
           foreach ($group in $services) {
             $first = $group.Group[0]
-            $proposal = ./.artifacts/platformctl service activation-proposal --team $first.team --name $first.service --version $first.version --base-sha $env:SOURCE_SHA | ConvertFrom-Json
+            $proposal = ./.artifacts/platformctl service activation-proposal --team $first.team --name $first.service --version $first.version --base-sha $env:ACTIVATION_BASE | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0) { throw "Activation validation failed for $($first.service)." }
             $proposal | Add-Member -NotePropertyName service -NotePropertyValue $first.service
             $proposal | Add-Member -NotePropertyName version -NotePropertyValue $first.version
@@ -282,6 +295,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          ACTIVATION_BASE: ${{ needs.prepare.outputs.activation_base }}
         run: |
           $ErrorActionPreference = 'Stop'
           git config user.name "$env:APP_SLUG[bot]"
@@ -289,6 +303,8 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not $userID) { throw 'Could not resolve GitHub App identity.' }
           git config user.email "$userID+$env:APP_SLUG[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git"
+          git fetch origin main:refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0 -or (git rev-parse origin/main).Trim() -cne $env:ACTIVATION_BASE) { throw 'Activation base became stale; rerun recovery against current main.' }
           foreach ($proposalFile in Get-ChildItem .artifacts/activation/*.json) {
             $proposal = Get-Content -Raw $proposalFile | ConvertFrom-Json
             $branch = "automation/platform/service-activate/$($proposal.requestID)"
@@ -300,8 +316,8 @@ jobs:
             $branchCode = $LASTEXITCODE; $ErrorActionPreference = $previous
             if ($branchCode -eq 0) { throw 'Activation branch exists without a corresponding pull request.' }
             if ($branchCode -ne 2) { throw 'Could not determine activation branch state.' }
-            git switch --detach $env:SOURCE_SHA
-            if ($LASTEXITCODE -ne 0) { throw 'Could not reset activation renderer to source.' }
+            git switch --detach $env:ACTIVATION_BASE
+            if ($LASTEXITCODE -ne 0) { throw 'Could not reset activation renderer to current main.' }
             $applied = ./.artifacts/platformctl broker apply --proposal $proposal.encoded | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or $applied.renderDigest -cne $proposal.validation.renderDigest) { throw 'Activation render changed after authentication.' }
             $expected = @($applied.files | ForEach-Object path | Sort-Object -Unique)

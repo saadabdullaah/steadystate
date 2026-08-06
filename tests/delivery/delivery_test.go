@@ -109,6 +109,28 @@ func TestDemoReleaseWorkflowContract(t *testing.T) {
 	}
 }
 
+func TestGeneratedServiceReleaseRecoveryContract(t *testing.T) {
+	root := repositoryRoot(t)
+	workflow := read(t, filepath.Join(root, ".github", "workflows", "service-release.yml"))
+	for _, required := range []string{
+		"git merge-base --is-ancestor $env:SOURCE_SHA origin/main",
+		"activation_base=$activationBase",
+		"ref: ${{ needs.prepare.outputs.activation_base }}",
+		"ACTIVATION_BASE: ${{ needs.prepare.outputs.activation_base }}",
+		"--base-sha $env:ACTIVATION_BASE",
+		"git switch --detach $env:ACTIVATION_BASE",
+		"$global:LASTEXITCODE = 0",
+		"release-preflight.json",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("generated-service release recovery is missing %q", required)
+		}
+	}
+	if strings.Contains(workflow, "git switch --detach $env:SOURCE_SHA") {
+		t.Fatal("recovery activation must render from current main, not the historical image source")
+	}
+}
+
 func TestDemoTelemetryImageContract(t *testing.T) {
 	root := repositoryRoot(t)
 	source := read(t, filepath.Join(root, "apps", "demo-app", "main.go"))
