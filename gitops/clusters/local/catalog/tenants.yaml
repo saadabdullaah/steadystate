@@ -16,7 +16,14 @@ tenants:
   - payments-owner
   services: []
   teamPath: gitops/teams/payments
-- applications: []
+- applications:
+  - lifecycle: Active
+    name: xyz
+    path: gitops/applications/xyz
+  - databaseRef: xyz
+    lifecycle: Active
+    name: xyz-api
+    path: gitops/applications/xyz-api
   databases:
   - lifecycle: Active
     name: xyz
@@ -30,7 +37,7 @@ tenants:
     - xyz
     - xyz-api
     databaseRef: xyz
-    lifecycle: Scaffolded
+    lifecycle: Active
     name: xyz
     ownsDatabase: true
     ownsTeam: true
