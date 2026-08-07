@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -165,6 +166,51 @@ func TestDatabaseUnstructuredReconcileCreatesAbsentChildWithDesiredIdentity(t *t
 	owner := metav1.GetControllerOf(current)
 	if owner == nil || owner.UID != database.UID || owner.Kind != "Database" {
 		t.Fatalf("created ObjectStore owner = %#v, want Database %s", owner, database.UID)
+	}
+}
+
+func TestLegacyDatabaseMonitoringCleanupRequiresDatabaseOwnership(t *testing.T) {
+	database := databaseStatusFixture()
+	for _, test := range []struct {
+		name      string
+		owner     metav1.OwnerReference
+		wantFound bool
+	}{
+		{name: "database-owned", owner: resources.DatabaseOwnerReference(database), wantFound: false},
+		{name: "application-owned", owner: metav1.OwnerReference{
+			APIVersion: platformv1alpha1.GroupVersion.String(), Kind: "Application", Name: database.Name,
+			UID: types.UID("application-owner"), Controller: ptr.To(true), BlockOwnerDeletion: ptr.To(true),
+		}, wantFound: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			if err := platformv1alpha1.AddToScheme(scheme); err != nil {
+				t.Fatal(err)
+			}
+			scheme.AddKnownTypeWithName(resources.DatabaseServiceMonitorGVK, &unstructured.Unstructured{})
+			legacy := resources.LegacyDatabaseMonitoringResources(database)[0]
+			legacy.SetOwnerReferences([]metav1.OwnerReference{test.owner})
+			reconciler := &DatabaseReconciler{
+				Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(database, legacy).Build(),
+				Scheme: scheme,
+			}
+			changed, err := reconciler.deleteDatabaseObjectIfControlledBy(context.Background(), database, legacy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changed == test.wantFound {
+				t.Fatalf("changed = %t, want %t", changed, !test.wantFound)
+			}
+			current := &unstructured.Unstructured{}
+			current.SetGroupVersionKind(resources.DatabaseServiceMonitorGVK)
+			err = reconciler.Get(context.Background(), client.ObjectKeyFromObject(legacy), current)
+			if test.wantFound && err != nil {
+				t.Fatalf("Application-owned monitoring object was removed: %v", err)
+			}
+			if !test.wantFound && !apierrors.IsNotFound(err) {
+				t.Fatalf("Database-owned legacy monitoring object still exists: %v", err)
+			}
+		})
 	}
 }
 

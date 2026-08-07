@@ -26,7 +26,10 @@ The tiers are:
 - image custody: a registry-aware `MutatingPolicy` rewrites unmanaged Team Pods
   and managed Applications explicitly requesting verification to
   `repository@sha256:...`; an `ImageValidatingPolicy` independently checks the
-  exact main-branch demo-release OIDC identity and SPDX attestation.
+  exact main-branch demo-release or generic service-release OIDC identity and
+  SPDX attestation. Kyverno `1.18.2` supports only one keyless identity per
+  Cosign attestor, so the two workflow authorities are separate attestors and
+  verification succeeds only when at least one exact authority validates.
 
 Kyverno `1.18.2` evaluates `ImageValidatingPolicy.validationConfigurations`
 and records verification outcomes, but its CEL handler does not itself emit an

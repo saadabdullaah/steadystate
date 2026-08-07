@@ -600,12 +600,35 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 	imagePolicyText := string(readFile(t, filepath.Join(policyPath, "verify-team-images.yaml")))
 	for _, identity := range []string{
 		"https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main",
+		"https://github.com/saadabdullaah/steadystate/.github/workflows/service-release.yml@refs/heads/main",
 		"https://token.actions.githubusercontent.com",
 		"https://rekor.sigstore.dev",
 		"exclude-cloudnative-pg",
 	} {
 		if !strings.Contains(imagePolicyText, identity) {
 			t.Errorf("ImageValidatingPolicy is missing trust contract %q", identity)
+		}
+	}
+	attestors := nestedSlice(t, imagePolicy, "spec", "attestors")
+	if len(attestors) != 2 {
+		t.Fatalf("ImageValidatingPolicy has %d attestors, want one per release workflow", len(attestors))
+	}
+	for _, raw := range attestors {
+		attestor, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("ImageValidatingPolicy attestor has unexpected type %T", raw)
+		}
+		identities := nestedSlice(t, attestor, "cosign", "keyless", "identities")
+		if len(identities) != 1 {
+			t.Fatalf("Kyverno 1.18 requires one keyless identity per attestor, got %d", len(identities))
+		}
+	}
+	for _, expression := range []string{
+		"verifyImageSignatures(image, [attestors.demoDelivery, attestors.serviceDelivery])",
+		"verifyAttestationSignatures(image, attestations.spdxSBOM, [attestors.demoDelivery, attestors.serviceDelivery])",
+	} {
+		if !strings.Contains(imagePolicyText, expression) {
+			t.Errorf("ImageValidatingPolicy is missing split-authority expression %q", expression)
 		}
 	}
 	rendered := string(run(t, root, "kustomize", "build", policyPath))

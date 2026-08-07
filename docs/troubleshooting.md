@@ -344,6 +344,12 @@ cosign verify --certificate-identity 'https://github.com/saadabdullaah/steadysta
 cosign verify-attestation --type spdxjson --certificate-identity 'https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' ghcr.io/saadabdullaah/steadystate-demo-app:v0.6.0
 ```
 
+For a generated service, substitute the exact
+`service-release.yml@refs/heads/main` certificate identity and its immutable
+`steadystate-services` tag. The Kyverno policy keeps demo and generic service
+workflows as separate Cosign attestors because Kyverno `1.18.2` does not
+support multiple keyless identities inside one attestor.
+
 A valid signature from a branch, another workflow, or the Phase 6 acceptance workflow is intentionally denied. A Sigstore/Rekor or GHCR outage fails closed and must not be worked around by disabling `failurePolicy: Fail`. Wait for the dependency to recover, retain the last healthy workload, and rerun delivery.
 
 ## Application reports SecurityPolicyRejected

@@ -678,3 +678,16 @@
   product/runbook/evidence documentation. Final run, artifact ID/checksum,
   exact-main regression links, GIF checksum, tag, and release remain to be
   recorded after hosted acceptance succeeds.
+- Closeout CI run
+  [31169160234](https://github.com/saadabdullaah/steadystate/actions/runs/31169160234)
+  passed all five jobs. Phase 8 acceptance run
+  [31169160225](https://github.com/saadabdullaah/steadystate/actions/runs/31169160225)
+  passed package verification, exact App-authored PR evidence, full-profile
+  bootstrap, image load, and exact-branch GitOps deployment before exposing
+  two product integration defects. A same-named `Database` and `Application`
+  both requested `xyz-monitor`, while Kyverno `1.18.2` rejected the policy's
+  two keyless identities inside one Cosign attestor. Artifact `8990939264`
+  retained the CR conditions, exact controller errors, Kyverno verification
+  errors, cluster snapshot, and cleanup evidence. Database monitoring now has
+  type-qualified names with ownership-safe legacy cleanup, and the two exact
+  release workflows are modeled as separate Kyverno attestors.

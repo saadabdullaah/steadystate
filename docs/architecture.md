@@ -178,7 +178,7 @@ desired state remains unhealthy.
 
 ## Supply-chain trust and admission contract
 
-The Demo release workflow is the only trusted image issuer. GitHub OIDC keylessly signs the immutable good and bad digests and attaches separate SPDX JSON attestations. Kyverno accepts a signature only when its certificate subject is the exact `demo-release.yml@refs/heads/main` workflow and its issuer is GitHub Actions. Tags are mutated to verified digests at admission. A signature from any other repository, workflow, or ref remains untrusted even when cryptographically valid.
+The Demo and generic service release workflows are the only trusted image issuers. GitHub OIDC keylessly signs immutable digests and attaches SPDX JSON attestations. Kyverno accepts a signature only when its certificate subject is the exact `demo-release.yml@refs/heads/main` or `service-release.yml@refs/heads/main` workflow and its issuer is GitHub Actions. Because Kyverno `1.18.2` accepts one keyless identity per Cosign attestor, each workflow is represented by a separate authority and verification requires at least one exact match. Tags are mutated to verified digests at admission. A signature from any other repository, workflow, or ref remains untrusted even when cryptographically valid.
 
 Stable Kyverno `ValidatingPolicy` resources enforce universal Team safety and the stricter SteadyState application Pod contract. The `ImageValidatingPolicy` applies to every unmanaged Team Pod and to managed Applications labeled `steadystate.dev/require-signed-image=true`. Platform namespaces are selected out explicitly; Team users cannot create native workloads or forge the trusted operator path through their namespaced RBAC.
 

@@ -149,6 +149,7 @@ func TestDatabaseNamesAreSuffixSafe(t *testing.T) {
 		"cluster": DatabaseClusterName(database), "connection": DatabaseConnectionSecretName(database),
 		"credential": DatabaseBackupCredentialName(database), "objectStore": DatabaseObjectStoreName(database),
 		"scheduled": DatabaseScheduledBackupName(database), "final": DatabaseFinalBackupName(database),
+		"monitor": DatabaseServiceMonitorName(database), "alerts": DatabasePrometheusRuleName(database),
 	} {
 		if len(value) > 63 {
 			t.Errorf("%s name has %d characters: %s", name, len(value), value)
@@ -161,6 +162,25 @@ func TestDatabaseNamesAreSuffixSafe(t *testing.T) {
 		if len(policy.Name) > 63 {
 			t.Errorf("NetworkPolicy name has %d characters: %s", len(policy.Name), policy.Name)
 		}
+	}
+}
+
+func TestDatabaseMonitoringCannotCollideWithSameNamedApplication(t *testing.T) {
+	database := testDatabase("xyz")
+	application := testApplication()
+	application.Name = database.Name
+	application.Namespace = database.Namespace
+	if DatabaseServiceMonitorName(database) == ServiceMonitorName(application) {
+		t.Fatal("Database and Application generated the same ServiceMonitor name")
+	}
+	if DatabasePrometheusRuleName(database) == PrometheusRuleName(application) {
+		t.Fatal("Database and Application generated the same PrometheusRule name")
+	}
+	if got, want := DatabaseServiceMonitor(database).GetName(), "xyz-database-monitor"; got != want {
+		t.Fatalf("Database ServiceMonitor name = %q, want %q", got, want)
+	}
+	if got, want := DatabasePrometheusRule(database).GetName(), "xyz-database-alerts"; got != want {
+		t.Fatalf("Database PrometheusRule name = %q, want %q", got, want)
 	}
 }
 

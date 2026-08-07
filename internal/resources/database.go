@@ -31,6 +31,8 @@ var (
 	CNPGBackupGVK              = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Backup"}
 	CNPGScheduledGVK           = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "ScheduledBackup"}
 	BarmanObjectStoreGVK       = schema.GroupVersionKind{Group: "barmancloud.cnpg.io", Version: "v1", Kind: "ObjectStore"}
+	DatabaseServiceMonitorGVK  = schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "ServiceMonitor"}
+	DatabasePrometheusRuleGVK  = schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "PrometheusRule"}
 	KubernetesAPIEndpointCIDRs = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
 )
 
@@ -81,6 +83,14 @@ func DatabaseScheduledBackupName(database *platformv1alpha1.Database) string {
 
 func DatabaseFinalBackupName(database *platformv1alpha1.Database) string {
 	return suffixedName(database.Name, "-final")
+}
+
+func DatabaseServiceMonitorName(database *platformv1alpha1.Database) string {
+	return suffixedName(database.Name, "-database-monitor")
+}
+
+func DatabasePrometheusRuleName(database *platformv1alpha1.Database) string {
+	return suffixedName(database.Name, "-database-alerts")
 }
 
 func DatabaseBackupServerName(database *platformv1alpha1.Database) string {
@@ -317,14 +327,14 @@ func DatabaseBackupNetworkPolicy(database *platformv1alpha1.Database, endpointCI
 func ptrIntOrString(value intstr.IntOrString) *intstr.IntOrString { return &value }
 
 func DatabaseServiceMonitor(database *platformv1alpha1.Database) *unstructured.Unstructured {
-	return databaseUnstructured(database, schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "ServiceMonitor"}, suffixedName(database.Name, "-monitor"), map[string]any{
+	return databaseUnstructured(database, DatabaseServiceMonitorGVK, DatabaseServiceMonitorName(database), map[string]any{
 		"selector":  map[string]any{"matchLabels": map[string]any{"cnpg.io/cluster": DatabaseClusterName(database)}},
 		"endpoints": []any{map[string]any{"port": "metrics", "interval": "15s"}},
 	})
 }
 
 func DatabasePrometheusRule(database *platformv1alpha1.Database) *unstructured.Unstructured {
-	return databaseUnstructured(database, schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "PrometheusRule"}, suffixedName(database.Name, "-alerts"), map[string]any{
+	return databaseUnstructured(database, DatabasePrometheusRuleGVK, DatabasePrometheusRuleName(database), map[string]any{
 		"groups": []any{map[string]any{
 			"name": fmt.Sprintf("steadystate.database.%s", database.Name),
 			"rules": []any{
@@ -348,6 +358,16 @@ func DatabasePrometheusRule(database *platformv1alpha1.Database) *unstructured.U
 			},
 		}},
 	})
+}
+
+// LegacyDatabaseMonitoringResources returns the Phase 7 monitoring identities.
+// The controller removes them only when the current Database is their controller
+// owner, so an Application with the same name can never be deleted by migration.
+func LegacyDatabaseMonitoringResources(database *platformv1alpha1.Database) []*unstructured.Unstructured {
+	return []*unstructured.Unstructured{
+		databaseUnstructured(database, DatabaseServiceMonitorGVK, suffixedName(database.Name, "-monitor"), map[string]any{}),
+		databaseUnstructured(database, DatabasePrometheusRuleGVK, suffixedName(database.Name, "-alerts"), map[string]any{}),
+	}
 }
 
 func DatabaseOwnerReference(database *platformv1alpha1.Database) metav1.OwnerReference {
