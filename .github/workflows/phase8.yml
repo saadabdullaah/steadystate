@@ -142,6 +142,11 @@ jobs:
         shell: pwsh
         run: ./.artifacts/platformctl --output json --timeout 18m cluster up
 
+      - name: Reserve hosted kind control-plane resources
+        timeout-minutes: 2
+        shell: pwsh
+        run: ./scripts/phase8-acceptance.ps1 -Stage Stabilize
+
       - name: Start retained external backup store
         id: backup-store
         timeout-minutes: 4

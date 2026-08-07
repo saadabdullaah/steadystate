@@ -724,3 +724,15 @@
   `xyz`, and requires three consecutive API-storage/RBAC stability checks
   before product assertions. Historical tenant coverage remains in Nightly and
   the Phase 7 acceptance suite.
+- Closeout CI run
+  [31184905034](https://github.com/saadabdullaah/steadystate/actions/runs/31184905034)
+  passed all five jobs at `72e6fc8`. Phase 8 acceptance run
+  [31184909671](https://github.com/saadabdullaah/steadystate/actions/runs/31184909671)
+  confirmed the filtered `xyz` render but artifact `8997945445` showed the
+  kind API again returning EOF while the Database provisioned. The hosted
+  harness now reserves Docker scheduling priority and soft memory for the
+  exact control-plane container before add-ons start, fails early after six
+  consecutive API outages, and captures Docker stats/inspect/kind logs before
+  bounded raw-API snapshots. This changes no local cluster or product
+  contract; it removes host overcommit from the acceptance runner and makes a
+  future infrastructure failure diagnosable.

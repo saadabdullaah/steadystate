@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
+    [ValidateSet('Prepare','Stabilize','Test','Finalize','CaptureFailure')]
     [string]$Stage,
     [int]$HttpPort = 8080
 )
@@ -80,15 +80,46 @@ function Invoke-PlatformctlEventually([string[]]$Arguments, [string]$OutputPath,
 }
 
 function Wait-Ready([string]$Resource, [string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 600) {
-    Wait-Until $TimeoutSeconds "$Resource $Namespace/$Name did not become current-generation Ready." {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $apiFailures = 0
+    do {
         $raw = @(& kubectl --request-timeout=10s get $Resource $Name -n $Namespace -o json 2>$null)
-        if ($LASTEXITCODE -ne 0 -or -not $raw) { return $false }
-        $object = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
-        return @($object.status.conditions | Where-Object {
-            $_.type -eq 'Ready' -and $_.status -eq 'True' -and
-            [int64]$_.observedGeneration -eq [int64]$object.metadata.generation
-        }).Count -eq 1
+        if ($LASTEXITCODE -eq 0 -and $raw) {
+            $apiFailures = 0
+            $object = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
+            if (@($object.status.conditions | Where-Object {
+                $_.type -eq 'Ready' -and $_.status -eq 'True' -and
+                [int64]$_.observedGeneration -eq [int64]$object.metadata.generation
+            }).Count -eq 1) { return }
+        } else {
+            $apiFailures++
+            if ($apiFailures -ge 6) {
+                throw "Kubernetes API became unavailable while waiting for $Resource $Namespace/$Name."
+            }
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw "$Resource $Namespace/$Name did not become current-generation Ready."
+}
+
+function Set-HostedControlPlanePriority {
+    if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Linux') {
+        throw 'Hosted kind resource stabilization is restricted to the Linux Phase 8 workflow.'
     }
+    $expected = @('steadystate-control-plane','steadystate-worker','steadystate-worker2')
+    $actual = @(& docker ps --filter 'label=io.x-k8s.kind.cluster=steadystate' --format '{{.Names}}' | Sort-Object)
+    if ($LASTEXITCODE -ne 0 -or ($actual -join "`n") -cne (($expected | Sort-Object) -join "`n")) {
+        throw "Refusing to tune unexpected kind containers: $($actual -join ', ')."
+    }
+    & docker update --cpu-shares 2048 --memory-reservation 2g steadystate-control-plane | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not reserve hosted control-plane resources.' }
+    foreach ($worker in @('steadystate-worker','steadystate-worker2')) {
+        & docker update --cpu-shares 768 $worker | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not set hosted worker scheduling weight for $worker." }
+    }
+    $snapshot = @(& docker inspect @($expected) --format '{{.Name}} cpuShares={{.HostConfig.CpuShares}} memoryReservation={{.HostConfig.MemoryReservation}}')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not verify hosted kind resource stabilization.' }
+    Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/hosted-kind-resources.txt') (($snapshot -join [Environment]::NewLine) + [Environment]::NewLine)
 }
 
 function Wait-ControlPlaneStable([int]$TimeoutSeconds = 300) {
@@ -253,17 +284,36 @@ function Capture-Cluster([string]$Prefix) {
     $snapshot = Join-Path $ArtifactRoot "snapshots/$Prefix"
     New-Item -ItemType Directory -Force -Path $snapshot | Out-Null
     foreach ($item in @(
-        @{name='argo';args=@('get','applications.argoproj.io','-n','argocd','-o','yaml')},
-        @{name='platform';args=@('get','teams,applications.platform.steadystate.dev,databases.platform.steadystate.dev','-A','-o','yaml')},
-        @{name='delivery';args=@('get','rollouts.argoproj.io,analysisruns.argoproj.io','-A','-o','yaml')},
-        @{name='routes';args=@('get','httproutes.gateway.networking.k8s.io','-A','-o','yaml')},
-        @{name='workloads';args=@('get','pods,services','-A','-o','wide')}
+        @{name='argo';path='/apis/argoproj.io/v1alpha1/namespaces/argocd/applications'},
+        @{name='teams';path='/apis/platform.steadystate.dev/v1alpha1/teams'},
+        @{name='applications';path='/apis/platform.steadystate.dev/v1alpha1/applications'},
+        @{name='databases';path='/apis/platform.steadystate.dev/v1alpha1/databases'},
+        @{name='rollouts';path='/apis/argoproj.io/v1alpha1/rollouts'},
+        @{name='analysisruns';path='/apis/argoproj.io/v1alpha1/analysisruns'},
+        @{name='routes';path='/apis/gateway.networking.k8s.io/v1/httproutes'},
+        @{name='pods';path='/api/v1/pods'},
+        @{name='services';path='/api/v1/services'}
     )) {
-        $arguments = @($item.args)
-        $lines = @(& kubectl --request-timeout=20s @arguments 2>&1)
-        Write-Utf8 (Join-Path $snapshot "$($item.name).txt") (($lines -join [Environment]::NewLine) + [Environment]::NewLine)
+        $lines = @(& kubectl --request-timeout=5s get --raw=$item.path 2>&1)
+        Write-Utf8 (Join-Path $snapshot "$($item.name).json") (($lines -join [Environment]::NewLine) + [Environment]::NewLine)
         $global:LASTEXITCODE = 0
     }
+}
+
+function Capture-Host([string]$Prefix) {
+    $snapshot = Join-Path $ArtifactRoot "snapshots/$Prefix-host"
+    New-Item -ItemType Directory -Force -Path $snapshot | Out-Null
+    $names = @(& docker ps -a --filter 'label=io.x-k8s.kind.cluster=steadystate' --format '{{.Names}}' 2>&1)
+    Write-Utf8 (Join-Path $snapshot 'kind-containers.txt') (($names -join [Environment]::NewLine) + [Environment]::NewLine)
+    $stats = @(& docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} memory={{.MemUsage}} pids={{.PIDs}}' @($names) 2>&1)
+    Write-Utf8 (Join-Path $snapshot 'docker-stats.txt') (($stats -join [Environment]::NewLine) + [Environment]::NewLine)
+    foreach ($name in @($names | Where-Object { $_ -match '^steadystate-(control-plane|worker[0-9]*)$' })) {
+        $inspect = @(& docker inspect $name 2>&1)
+        Write-Utf8 (Join-Path $snapshot "$name-inspect.json") (($inspect -join [Environment]::NewLine) + [Environment]::NewLine)
+        $logs = @(& docker logs --tail 500 $name 2>&1)
+        Write-Utf8 (Join-Path $snapshot "$name.log") (($logs -join [Environment]::NewLine) + [Environment]::NewLine)
+    }
+    $global:LASTEXITCODE = 0
 }
 
 function Capture-Logs([string]$Prefix) {
@@ -322,6 +372,10 @@ switch ($Stage) {
         Save-State $state
         Write-Transcript "BRANCH $branch"
         Write-Host "PHASE8_ACCEPTANCE_BRANCH=$branch"
+    }
+    'Stabilize' {
+        Set-HostedControlPlanePriority
+        Write-Host 'Hosted kind control-plane resource priority is verified.'
     }
     'Test' {
         $state = Get-State
@@ -497,6 +551,7 @@ switch ($Stage) {
         } else {
             Write-Utf8 (Join-Path $ArtifactRoot 'failure-evidence.json') (([ordered]@{schemaVersion=1;phase='8';result='failed';message=$env:PHASE8_FAILURE_MESSAGE} | ConvertTo-Json) + [Environment]::NewLine)
         }
+        Capture-Host 'failure-capture'
         Capture-Cluster 'failure-capture'
         Capture-Logs 'failure-capture'
         Assert-NoSecrets

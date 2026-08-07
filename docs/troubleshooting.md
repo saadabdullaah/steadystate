@@ -640,3 +640,11 @@ close any still-open acceptance-only PR, delete only those exact refs, run
 `platformctl cluster down`, and stop the exact SeaweedFS resources with the
 repository command. Never recursively delete Docker resources or repository
 directories. Normal `main` and automation PRs are outside this cleanup scope.
+
+The hosted full-profile job also gives the exact `steadystate-control-plane`
+container a higher Docker CPU scheduling weight and a 2 GiB soft memory
+reservation before GitOps add-ons start. This is runner stabilization, not a
+different platform profile. If the API returns repeated EOFs, inspect the
+artifact's `failure-capture-host` Docker stats, inspect data, and kind logs
+first; the acceptance wait fails after six consecutive API failures rather
+than spending the full Database timeout against a dead control plane.
