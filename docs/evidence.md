@@ -46,3 +46,34 @@ with retained objects, all memory budgets, and a non-empty recording.
 The full drill runs before VHS so a browser and GIF encoder cannot compete
 with the disposable full-profile control plane. VHS records the concise real
 stage/check transcript only after every functional assertion passes.
+
+Phase 8 uploads `phase8-acceptance-<commit>` with:
+
+- `phase8-zero-to-live.gif`, its tracked tape, and the timestamped transcript;
+- schema-versioned state/evidence with exact source, disposable branch,
+  proposal IDs/digests, PR URLs/authors/merge actors, revisions, checks, and
+  finalizer timeline;
+- the human scaffold/activation PR A/B metadata and the acceptance-only
+  retirement PR C/D metadata;
+- exact CLI version, cluster, Team, Application, Database, backup, provenance,
+  rollout, SLO, policy, and doctor output;
+- signed service-image manifests, Cosign verification, and SPDX-attestation
+  verification for the web and API components;
+- frontend/same-origin API/PostgreSQL results, canonical order checksum, and
+  Prometheus/Loki/Tempo evidence;
+- healthy and failure-diagnosis fixtures, confirmed break-glass rejection
+  output, rendered proposal results, and redacted audit-contract proof;
+- Argo, Team, Application, Database, Rollout, AnalysisRun, route, Pod, Service,
+  backup-retention, and resource-usage snapshots;
+- success/failure component logs and common diagnostics captured before
+  cleanup.
+
+Phase 8 schema version `1` requires six unique elapsed checks: exact CLI/live
+health, frontend/API/PostgreSQL behavior, canary/provenance/telemetry/policy and
+diagnosis, resource budget, two-PR finalizer retirement, and absence of
+residual live/request resources. Auto-merge is accepted only for PRs whose base
+is the exact disposable `acceptance/phase8-<run>-<attempt>` ref. The artifact
+must prove that no open acceptance PR or request branch remains, the Team
+namespace and CR graph disappeared, and the final Database archive stayed in
+the external store. Private keys, tokens, authorization, age identities,
+PostgreSQL URIs/passwords, and Secret values are forbidden.

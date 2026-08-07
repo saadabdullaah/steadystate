@@ -1,16 +1,19 @@
 # SteadyState
 
-SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, durable PostgreSQL, and tested recovery without requiring a cloud account.
+SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator and the `platformctl` developer CLI. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, durable PostgreSQL, tested recovery, and a reviewed service golden path without requiring a cloud account.
 
-Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`. Phase 6 adds signed and SPDX-attested demo images, fail-closed Kyverno admission, workload isolation, truthful security status, encrypted Git secrets, security scanners, and a documented threat model. Phase 7 adds a `Database` API, CloudNativePG, continuous WAL/base backups to external SeaweedFS, application bindings, final-backup deletion, and declarative whole-cluster recovery.
+Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`. Phase 6 adds signed and SPDX-attested demo images, fail-closed Kyverno admission, workload isolation, truthful security status, encrypted Git secrets, security scanners, and a documented threat model. Phase 7 adds a `Database` API, CloudNativePG, continuous WAL/base backups to external SeaweedFS, application bindings, final-backup deletion, and declarative whole-cluster recovery. Phase 8 adds the cross-platform `platformctl` CLI, a typed GitHub App proposal broker, catalog-driven tenancy, Go/React/full-stack scaffolds, signed generic service delivery, ordered diagnostics, protected two-PR deletion, and confirmed break glass.
 
-> Status: Phases 0 through 7 are complete and released through [`v0.7.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.7.0). Phase 8 developer-golden-path planning is next.
+> Status: Phases 0 through 7 are released through [`v0.7.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.7.0). Phase 8 checkpoints 1-4, the human-reviewed `xyz` scaffold PR, signed service publication, and activation PR are complete. The Phase 8 acceptance closeout and exact-main `v0.8.0` publication are the remaining gates.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Dev["Developer"] --> Commit["Git commit"]
+    Dev["Developer"] --> CLI["platformctl"]
+    CLI --> Broker["Typed Actions broker"]
+    Broker --> Review["GitHub App pull request"]
+    Review --> Commit["Reviewed Git commit"]
     Commit --> Release["Demo release workflow"]
     Release --> GHCR["Immutable GHCR image"]
     Release --> PR["GitOps version-bump PR"]
@@ -42,6 +45,7 @@ flowchart LR
     Kind --> Calico["Calico CNI and NetworkPolicy"]
     Kind --> Argo
     CI["GitHub Actions acceptance"] --> PS
+    CI --> CLI
 ```
 
 The repository is a monorepo. Operator APIs and controllers live alongside the CLI, local platform configuration, GitOps state, demo application, tests, and documentation so an end-to-end change can be reviewed in one pull request.
@@ -210,6 +214,74 @@ backup data.
 preserves `steadystate-backup-data`. Purging requires the explicit
 `scripts/backup-store.ps1 -Action Stop -PurgeData` contract.
 
+## Developer golden path with platformctl
+
+`platformctl` is the supported Phase 8 developer entrypoint. It stores only
+non-secret context in the operating-system configuration directory, delegates
+the existing bounded cluster lifecycle, reads platform and telemetry APIs, and
+turns normal writes into typed Git proposals. The GitHub App private key stays
+inside GitHub Actions; the CLI uses the developer's active `gh` session only
+to dispatch and locate the broker run.
+
+See the [developer golden-path runbook](docs/golden-path.md) and the generated
+[CLI command reference](docs/cli/platformctl.md) for the complete workflow.
+
+Build and initialize the exact checkout:
+
+```powershell
+go build -trimpath -o .artifacts/platformctl.exe ./cmd/platformctl
+.\.artifacts\platformctl.exe config init --checkout $PWD
+.\.artifacts\platformctl.exe context set local --checkout $PWD --profile full
+.\.artifacts\platformctl.exe context use local
+.\.artifacts\platformctl.exe doctor
+.\.artifacts\platformctl.exe cluster up
+```
+
+The release archives also contain checksum-verifying installation scripts,
+generated command reference, man pages, and bash/zsh/fish/PowerShell
+completions. Windows and Linux support the complete local lifecycle; macOS
+supports configuration, Git proposals, reads, diagnostics, and best-effort
+local lifecycle.
+
+Create a full-stack service without authoring Kubernetes YAML:
+
+```powershell
+.\.artifacts\platformctl.exe init xyz --template full-stack --create-team --with-database
+```
+
+The command shows the deterministic diff, asks for confirmation, and dispatches
+the typed broker. Scaffold PR A contains catalog state, Team/Database intent,
+and generated source but no active Application. After review and merge, the
+service release tests, scans, signs, and SPDX-attests web/API images in the
+public `steadystate-services` package and opens activation PR B. Merging PR B
+deploys through the existing Argo, Rollouts, Kyverno, observability, and data
+paths.
+
+Useful read and diagnosis commands include:
+
+```powershell
+.\.artifacts\platformctl.exe team status xyz
+.\.artifacts\platformctl.exe database backups xyz
+.\.artifacts\platformctl.exe app provenance xyz-api
+.\.artifacts\platformctl.exe app logs xyz-api --historical
+.\.artifacts\platformctl.exe app traces xyz-api
+.\.artifacts\platformctl.exe app slo xyz-api
+.\.artifacts\platformctl.exe app policy xyz-api
+.\.artifacts\platformctl.exe app doctor xyz-api
+```
+
+Normal retirement is protected by two reviewed proposals: `service retire`
+marks only the selected catalog/resources Retiring and removes their prune
+protection; `service finalize` is accepted only after the approval revision is
+merged and visible in Argo. Finalizers then remove workloads in order, complete
+the Database final backup, remove the Team namespace, and retain external
+archives. `app promote` and `app abort` are confirmed break-glass operations,
+not substitutes for a recovery Git change.
+
+The dedicated Phase 8 workflow repeats the live finalizer proof only on an
+`acceptance/phase8-*` branch, records proposal/PR identities and digests, and
+cannot auto-merge into `main` or a normal branch.
+
 ## Linux and CI
 
 Linux and GitHub Actions use the same PowerShell implementation through Make:
@@ -234,6 +306,7 @@ make start-backup-store PROFILE=full
 make verify-data PROFILE=full
 make test-data-recovery PROFILE=full
 make phase7-acceptance PROFILE=full
+make phase8-acceptance PROFILE=full
 make undeploy-gitops
 make destroy
 ```
@@ -276,6 +349,8 @@ make destroy
 | `verify-data` | Verify data pins, encrypted credentials, GitOps renders, CRDs, and Database resource contracts |
 | `phase7-foundation` | Prove SeaweedFS/Barman backup, WAL, deletion, restore, and checksum compatibility |
 | `test-data-recovery` / `phase7-acceptance` | Run the workflow-controlled whole-cluster recovery, RTO/RPO, alert, final-backup, and evidence proof |
+| `phase8-acceptance` | Run one workflow-controlled Phase 8 CLI golden-path, evidence, or failure-capture stage on the prepared full profile |
+| `platformctl` | Build or run the supported developer CLI for contexts, local lifecycle, reads, diagnosis, typed Git proposals, and confirmed break glass |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |
 

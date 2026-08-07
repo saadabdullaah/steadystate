@@ -641,3 +641,40 @@
   contains the exact-main GIF, evidence JSON, RTO/RPO report, transcript, and
   SHA-256 manifest. No Phase 7 branch remains. Dependabot PRs #42 and #49 are
   deliberately deferred because their current validation is failing.
+
+## 2026-08-07 - Phase 8 developer golden path closeout candidate
+
+- CLI foundation PR #53 (`e721d9e`) established `platformctl`, stable
+  configuration/output/exit contracts, catalog-driven root rendering, and
+  cluster/telemetry/data read paths. Broker PRs #54/#55 (`0b066a3`, `86a2690`)
+  added the typed four-input workflow, GitHub App trust boundary, protected
+  prune, and two-PR lifecycle renderer. Broker smoke run `30996324120` passed
+  and its harmless temporary PR/ref were removed.
+- Golden-template PR #57 (`e956723`) added Go API, embedded React static, and
+  full-stack React/Go/PostgreSQL templates plus signed generic service
+  delivery. Operations/release PR #59 (`921b638`) added ordered application
+  diagnosis, confirmed break glass, six-target archives, SBOM/checksum
+  signature/provenance contracts, installers, reference, man pages, and
+  completions. Focused correctness PRs #61/#62/#64 (`cefea9b`, `b094d87`,
+  `f3c85ae`) fixed catalog-aware scaffolding, embedded-asset ownership, and
+  generated Go/fixture determinism.
+- App-authored scaffold PR #65 merged as
+  `b6d9e6bb5df2f289e36d8d48c6be83443645b8eb`. It added the `xyz` full-stack
+  source, Team, and Database desired state without active Applications. Service
+  release recovery run `31114158974` then built, scanned, signed, SPDX-attested,
+  and anonymously verified the public `xyz-web-v0.1.0` and `xyz-api-v0.1.0`
+  images. Activation PR #67 passed all five checks and merged as `ded9b43`,
+  adding only the generated Application/catalog activation state.
+- Release recovery PR #66 (`b992c67`) made absent immutable tags an expected
+  preflight result and separated historical image source from the current
+  activation base. Cleanup PR #68 (`a3cc284`) corrected the ephemeral runner's
+  checked-out branch deletion order. GitHub-hosted runner allocation degraded
+  during #68; after service recovery, CI run `31159912958` passed all five jobs
+  and the PR merged.
+- The closeout branch adds the dedicated 90-minute staged Phase 8 acceptance,
+  schema-versioned evidence, real transcript/GIF contract, exact-revision CLI
+  interactions, App-authored acceptance-only retirement PRs, final-backup and
+  retained-archive proof, redacted diagnostics, ADR-0011, and synchronized
+  product/runbook/evidence documentation. Final run, artifact ID/checksum,
+  exact-main regression links, GIF checksum, tag, and release remain to be
+  recorded after hosted acceptance succeeds.

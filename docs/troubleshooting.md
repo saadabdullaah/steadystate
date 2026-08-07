@@ -555,3 +555,82 @@ is not fabricated application health. Follow the named evidence reference and
 remediation. Restore the unavailable Argo, Kyverno, Prometheus, Loki, Tempo,
 CloudNativePG, or Barman dependency and rerun the command. Confirmed unhealthy
 application state is reported as `Fail` and exits with code 5.
+
+## platformctl cannot find the checkout or configuration
+
+Run `platformctl config view` and verify that the selected context points to
+the repository root, not a generated service subdirectory. On Windows the file
+is under `%AppData%\SteadyState`; on Linux/macOS it is under
+`$XDG_CONFIG_HOME/steadystate` or `~/.config/steadystate`. Configuration is
+non-secret. If migration is required, preserve the automatic backup and never
+copy tokens, kubeconfig contents, SOPS keys, or database credentials into the
+file.
+
+## A broker request is stale, missing, or changed
+
+`platformctl` requires a clean tracked checkout whose HEAD equals current
+`origin/main`. Pull the reviewed changes, rerun with `--plan`, compare the new
+diff, and submit a new request. Do not reuse the old request UUID. A broker run
+that reports a proposal/render digest mismatch or unexpected file fails closed;
+inspect its URL with `platformctl request status REQUEST_ID` and do not edit the
+automation branch manually.
+
+If dispatch succeeds but the CLI cannot discover the run within 60 seconds,
+use the printed request UUID in GitHub Actions. GitHub runner degradation may
+delay the run without invalidating the proposal. Do not repeatedly dispatch the
+same intent with different UUIDs until the Actions queue is understood.
+
+## Generated service publication or activation fails
+
+Open the service release artifact and compare component/version/SHA tags. All
+tags absent is a new release; all expected tags resolving to their recorded
+digests is an idempotent rerun. Partial tags or mismatched digests require
+maintainer investigation and intentionally fail closed. Verify that the shared
+`steadystate-services` package is public before anonymous manifest, signature,
+or attestation checks.
+
+Activation PR B must change only the generated Application leaves/catalog
+version expected by the renderer. Its author must be the repository delivery
+App, and its body must record both component digests, source SHA, workflow, and
+SPDX verification. Never activate a tag manually to bypass a failed release.
+
+## A generated frontend or same-origin API is unavailable
+
+Run `platformctl app doctor WEB_NAME`, then inspect the web and API Applications
+separately. The embedded Go web server serves the React build and proxies
+`/api/` to the deterministic same-Team API Service. A frontend route can be
+healthy while the API or Database is not. Check the API's `DatabaseReady`,
+`SecurityPolicyReady`, Rollout, Service endpoints, and Database backup status;
+do not add CORS or a public second route as an ad-hoc fix.
+
+## Historical logs, traces, SLO, or policy output is empty
+
+Confirm the Application opted into the relevant telemetry and is labeled for
+Alloy/OTel discovery. Make one request with a known `X-Request-ID`, allow the
+bounded ingestion interval, and retry `app logs --historical`, `app traces`, or
+`app slo`. `Unknown` is the correct result for an unavailable backend. Restore
+Prometheus, Loki, Tempo, OTel, Alloy, or Kyverno rather than weakening the
+doctor result.
+
+## Service retirement is blocked
+
+Retirement requires two distinct reviewed proposals. Merge the approval PR,
+wait until the tenant Argo Application reports that exact revision, and verify
+the live resource carries the approval deletion UUID. Then run
+`platformctl service finalize NAME --team TEAM --deletion-request UUID
+--approval-revision SHA`. A one-step manifest removal remains OutOfSync because
+`Prune=false`; that is protection, not a reason to patch the live CR.
+
+Database finalization can remain pending while the deterministic final Barman
+Backup runs. Inspect `platformctl database backups NAME` and external-store
+health. Use force deletion only through a new reviewed proposal with both
+`--force` and `--acknowledge-data-loss`; external archives remain retained.
+
+## Phase 8 acceptance cleanup was interrupted
+
+Acceptance is restricted to `acceptance/phase8-<run>-<attempt>` and
+`automation/platform/acceptance/...` refs. Capture diagnostics before cleanup,
+close any still-open acceptance-only PR, delete only those exact refs, run
+`platformctl cluster down`, and stop the exact SeaweedFS resources with the
+repository command. Never recursively delete Docker resources or repository
+directories. Normal `main` and automation PRs are outside this cleanup scope.

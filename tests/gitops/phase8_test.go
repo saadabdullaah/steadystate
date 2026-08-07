@@ -86,3 +86,77 @@ func TestPhase8BrokerWorkflowTrustBoundary(t *testing.T) {
 		t.Fatal("broker App token requests an out-of-scope permission")
 	}
 }
+
+func TestPhase8AcceptanceWorkflowContract(t *testing.T) {
+	root := repositoryRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "phase8.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	for _, expected := range []string{
+		"name: Phase 8 acceptance", "timeout-minutes: 90", "cancel-in-progress: false",
+		"pull_request:", "github.event.pull_request.head.repo.full_name == github.repository",
+		"PHASE8_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+		"permission-contents: write", "permission-pull-requests: write",
+		"./scripts/phase8-acceptance.ps1 -Stage Prepare",
+		"./scripts/phase8-acceptance.ps1 -Stage Test",
+		"./scripts/phase8-acceptance.ps1 -Stage Finalize",
+		"./scripts/phase8-acceptance.ps1 -Stage CaptureFailure",
+		"PHASE8_ACCEPTANCE_AUTOMERGE: \"true\"",
+		"vhs docs/demonstrations/phase8-zero-to-live.tape",
+		"phase8-acceptance-${{ env.PHASE8_SOURCE_SHA }}", "if-no-files-found: error",
+		"Capture failure evidence before cleanup", "Delete disposable acceptance branch",
+		"Destroy disposable cluster through platformctl",
+	} {
+		if !strings.Contains(workflow, expected) {
+			t.Fatalf("Phase 8 workflow is missing %q", expected)
+		}
+	}
+	if strings.Contains(workflow, "permission-actions: write") || strings.Contains(workflow, "cancel-in-progress: true") {
+		t.Fatal("Phase 8 acceptance expands App permissions or permits cancellation")
+	}
+}
+
+func TestPhase8AcceptanceSafetyAndEvidenceContract(t *testing.T) {
+	root := repositoryRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "phase8-acceptance.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, expected := range []string{
+		"^acceptance/phase8-[0-9]+-[0-9]+$", "Acceptance auto-merge refuses non-acceptance branches.",
+		"Acceptance auto-merge can never target main or a normal branch.",
+		"broker validate --proposal", "broker apply --proposal", "gh pr merge", "--base $State.branch",
+		"service.retire", "service.finalize", "Wait-ArgoRevision", "retained-object-inventory.txt",
+		"git branch -D acceptance-request", "Could not remove the temporary local acceptance branch.",
+		"TestApplicationDoctorFailureFixtures|TestBreakGlass", "app-authored-two-pr-finalizer-retirement",
+		"no-residual-live-or-request-resources", "Assert-NoSecrets", "schemaVersion=1;phase='8'",
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("Phase 8 acceptance script is missing %q", expected)
+		}
+	}
+	if strings.Contains(script, "gh pr merge $number --repo $Repository --base main") {
+		t.Fatal("Phase 8 acceptance can auto-merge into main")
+	}
+	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"PHASE8_ACCEPTANCE_STAGE ?= Test", "-Phase8AcceptanceStage $(PHASE8_ACCEPTANCE_STAGE)", "phase8-acceptance"} {
+		if !strings.Contains(string(makefile), expected) {
+			t.Fatalf("Phase 8 Make contract is missing %q", expected)
+		}
+	}
+	tape, err := os.ReadFile(filepath.Join(root, "docs", "demonstrations", "phase8-zero-to-live.tape"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Output .artifacts/phase8/acceptance/phase8-zero-to-live.gif", "RESULT .* PASSED"} {
+		if !strings.Contains(string(tape), expected) {
+			t.Fatalf("Phase 8 tape is missing %q", expected)
+		}
+	}
+}

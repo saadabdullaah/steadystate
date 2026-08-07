@@ -737,7 +737,7 @@ func TestGitOpsCommandsAreMirrored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery", "verify-observability", "test-observability", "phase5-acceptance", "start-backup-store", "stop-backup-store", "verify-data", "test-data-recovery", "phase7-acceptance"} {
+	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery", "verify-observability", "test-observability", "phase5-acceptance", "start-backup-store", "stop-backup-store", "verify-data", "test-data-recovery", "phase7-acceptance", "phase8-acceptance"} {
 		if !strings.Contains(string(makefile), command) {
 			t.Errorf("Makefile is missing %s", command)
 		}

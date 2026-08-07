@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-templates','test-envtest','run','platformctl','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','start-backup-store','stop-backup-store','verify-data','test-data-recovery','phase7-foundation','phase7-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-templates','test-envtest','run','platformctl','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','start-backup-store','stop-backup-store','verify-data','test-data-recovery','phase7-foundation','phase7-acceptance','phase8-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -17,6 +17,8 @@ param(
     [string]$Phase6AcceptanceStage = $(if ($env:PHASE6_ACCEPTANCE_STAGE) { $env:PHASE6_ACCEPTANCE_STAGE } else { 'Test' }),
     [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
     [string]$Phase7AcceptanceStage = $(if ($env:PHASE7_ACCEPTANCE_STAGE) { $env:PHASE7_ACCEPTANCE_STAGE } else { 'Test' }),
+    [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
+    [string]$Phase8AcceptanceStage = $(if ($env:PHASE8_ACCEPTANCE_STAGE) { $env:PHASE8_ACCEPTANCE_STAGE } else { 'Test' }),
     [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' }),
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity,
@@ -655,6 +657,10 @@ try {
         'phase7-acceptance' {
             Assert-Cluster
             & (Join-Path $PSScriptRoot 'phase7-acceptance.ps1') -Stage $Phase7AcceptanceStage -HttpPort $HttpPort
+        }
+        'phase8-acceptance' {
+            Assert-Cluster
+            & (Join-Path $PSScriptRoot 'phase8-acceptance.ps1') -Stage $Phase8AcceptanceStage -HttpPort $HttpPort
         }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }
