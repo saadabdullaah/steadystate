@@ -56,7 +56,7 @@ func main() {
 		defer cancel()
 		_ = shutdown(flush)
 	}()
-	server := &http.Server{Addr: ":8080", Handler: otelhttp.NewHandler(newHandler("http://xyz-api:8080"), "http.server"), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
+	server := &http.Server{Addr: ":8080", Handler: otelhttp.NewHandler(newHandler("http://xyz-api"), "http.server"), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
 	errors := make(chan error, 1)
 	go func() { errors <- server.ListenAndServe() }()
 	slog.Info("web listening", "application", "xyz")
