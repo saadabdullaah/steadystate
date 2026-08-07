@@ -70,6 +70,13 @@ func TestFullStackScaffoldAndActivationAreDeterministic(t *testing.T) {
 	if err != nil || !strings.Contains(string(fallback), "Build the frontend") {
 		t.Fatalf("generated React server fallback is missing: %v", err)
 	}
+	webServer, err := os.ReadFile(filepath.Join(root, "services", "checkout", "web", "server", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(webServer), `http://checkout-api`) || strings.Contains(string(webServer), `http://checkout-api:8080`) {
+		t.Fatal("generated web proxy must use Kubernetes Service port 80, not the API container target port")
+	}
 	catalog, err := LoadCatalog(root)
 	if err != nil {
 		t.Fatal(err)

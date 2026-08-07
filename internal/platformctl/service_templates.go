@@ -181,7 +181,9 @@ ENTRYPOINT ["/service"]
 func reactTemplateFiles(name string, proxy bool) map[string]string {
 	proxyTarget := ""
 	if proxy {
-		proxyTarget = "http://" + name + "-api:8080"
+		// The API Service exposes port 80 and forwards to the container's 8080
+		// targetPort. In-cluster clients must address the Service port.
+		proxyTarget = "http://" + name + "-api"
 	}
 	return map[string]string{
 		"package.json":          fmt.Sprintf("{\n  \"name\": \"%s-web\",\n  \"private\": true,\n  \"version\": \"0.1.0\",\n  \"type\": \"module\",\n  \"scripts\": {\"build\": \"tsc -b && vite build\", \"dev\": \"vite --host 127.0.0.1\", \"test\": \"node --test test/*.test.js\"},\n  \"dependencies\": {\"@types/node\": \"24.13.3\", \"@types/react\": \"19.2.18\", \"@types/react-dom\": \"19.2.4\", \"@vitejs/plugin-react\": \"6.0.5\", \"vite\": \"8.1.5\", \"typescript\": \"7.0.2\", \"react\": \"19.2.8\", \"react-dom\": \"19.2.8\"},\n  \"devDependencies\": {}\n}\n", name),
