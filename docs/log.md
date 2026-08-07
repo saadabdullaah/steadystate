@@ -736,3 +736,15 @@
   bounded raw-API snapshots. This changes no local cluster or product
   contract; it removes host overcommit from the acceptance runner and makes a
   future infrastructure failure diagnosable.
+- Closeout CI run
+  [31203978644](https://github.com/saadabdullaah/steadystate/actions/runs/31203978644)
+  passed all five jobs. Acceptance run
+  [31203978827](https://github.com/saadabdullaah/steadystate/actions/runs/31203978827)
+  failed fast as designed and artifact `9004380242` retained complete host
+  evidence: the live control plane consumed 225% CPU while the workers used a
+  combined 305% during unfinished Argo sync waves. The harness now caps the
+  three exact kind containers to 3.5 aggregate CPUs, retains control-plane
+  scheduling priority, and waits for all fifteen required full-profile child
+  Applications plus stable API/RBAC probes before starting the Database and
+  golden-path clock. Raw failure snapshots also interpolate their API paths
+  correctly.

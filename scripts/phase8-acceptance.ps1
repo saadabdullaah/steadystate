@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Prepare','Stabilize','Test','Finalize','CaptureFailure')]
+    [ValidateSet('Prepare','Stabilize','AwaitFoundation','Test','Finalize','CaptureFailure')]
     [string]$Stage,
     [int]$HttpPort = 8080
 )
@@ -111,15 +111,47 @@ function Set-HostedControlPlanePriority {
     if ($LASTEXITCODE -ne 0 -or ($actual -join "`n") -cne (($expected | Sort-Object) -join "`n")) {
         throw "Refusing to tune unexpected kind containers: $($actual -join ', ')."
     }
-    & docker update --cpu-shares 2048 --memory-reservation 2g steadystate-control-plane | Out-Null
+    & docker update --cpus 1.5 --cpu-shares 2048 --memory-reservation 2g steadystate-control-plane | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not reserve hosted control-plane resources.' }
     foreach ($worker in @('steadystate-worker','steadystate-worker2')) {
-        & docker update --cpu-shares 768 $worker | Out-Null
+        & docker update --cpus 1 --cpu-shares 768 $worker | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not set hosted worker scheduling weight for $worker." }
     }
-    $snapshot = @(& docker inspect @($expected) --format '{{.Name}} cpuShares={{.HostConfig.CpuShares}} memoryReservation={{.HostConfig.MemoryReservation}}')
+    $snapshot = @(& docker inspect @($expected) --format '{{.Name}} nanoCpus={{.HostConfig.NanoCpus}} cpuShares={{.HostConfig.CpuShares}} memoryReservation={{.HostConfig.MemoryReservation}}')
     if ($LASTEXITCODE -ne 0) { throw 'Could not verify hosted kind resource stabilization.' }
     Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/hosted-kind-resources.txt') (($snapshot -join [Environment]::NewLine) + [Environment]::NewLine)
+}
+
+function Wait-PlatformFoundationReady([int]$TimeoutSeconds = 900) {
+    $required = @(
+        'argocd-configuration','monitoring','argo-rollouts','loki','tempo','otel-collector','alloy',
+        'kyverno','kyverno-policies','data-namespaces','local-path-storage','cert-manager',
+        'cloudnative-pg','barman-cloud','steadystate-operator'
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $pending = @($required)
+    do {
+        $raw = @(& kubectl --request-timeout=10s get --raw='/apis/argoproj.io/v1alpha1/namespaces/argocd/applications' 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $raw) {
+            $collection = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
+            $states = @{}
+            foreach ($application in @($collection.items)) {
+                $states[[string]$application.metadata.name] = [pscustomobject]@{
+                    sync = [string]$application.status.sync.status
+                    health = [string]$application.status.health.status
+                }
+            }
+            $pending = @($required | Where-Object {
+                -not $states.ContainsKey($_) -or $states[$_].sync -ne 'Synced' -or $states[$_].health -ne 'Healthy'
+            })
+            if ($pending.Count -eq 0) {
+                Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/platform-foundation-applications.json') (($collection | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
+                return
+            }
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw "Full-profile platform foundation did not settle before product acceptance: $($pending -join ', ')."
 }
 
 function Wait-ControlPlaneStable([int]$TimeoutSeconds = 300) {
@@ -294,7 +326,7 @@ function Capture-Cluster([string]$Prefix) {
         @{name='pods';path='/api/v1/pods'},
         @{name='services';path='/api/v1/services'}
     )) {
-        $lines = @(& kubectl --request-timeout=5s get --raw=$item.path 2>&1)
+        $lines = @(& kubectl --request-timeout=5s get --raw=$($item.path) 2>&1)
         Write-Utf8 (Join-Path $snapshot "$($item.name).json") (($lines -join [Environment]::NewLine) + [Environment]::NewLine)
         $global:LASTEXITCODE = 0
     }
@@ -376,6 +408,13 @@ switch ($Stage) {
     'Stabilize' {
         Set-HostedControlPlanePriority
         Write-Host 'Hosted kind control-plane resource priority is verified.'
+    }
+    'AwaitFoundation' {
+        $state = Get-State
+        Set-AcceptanceStage $state 'platform-foundation-readiness'
+        Wait-PlatformFoundationReady 900
+        Wait-ControlPlaneStable 300
+        Write-Host 'Full-profile platform foundation and control plane are stable.'
     }
     'Test' {
         $state = Get-State
