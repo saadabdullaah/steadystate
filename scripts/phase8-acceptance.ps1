@@ -111,6 +111,46 @@ function New-Proposal([string]$Operation, $Parameters, [string]$BaseSHA, [string
     return [pscustomobject]@{request=$request;encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))}
 }
 
+function Get-AppBotLogin {
+    if ([string]::IsNullOrWhiteSpace($env:APP_SLUG) -or $env:APP_SLUG -cnotmatch '^[a-z0-9][a-z0-9-]*$') {
+        throw 'The GitHub App slug is missing or invalid.'
+    }
+    return "$($env:APP_SLUG)[bot]"
+}
+
+function Get-PullRequestEvidence([int]$Number) {
+    $raw = @(& gh api "repos/$Repository/pulls/$Number" 2>&1)
+    $code = $LASTEXITCODE
+    if ($code -ne 0 -or -not $raw) { throw "Could not read pull request #$Number through the GitHub REST API." }
+    $pull = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
+    $filesRaw = @(& gh api --paginate "repos/$Repository/pulls/$Number/files?per_page=100" 2>&1)
+    $code = $LASTEXITCODE
+    if ($code -ne 0 -or -not $filesRaw) { throw "Could not read files for pull request #$Number." }
+    $files = ($filesRaw -join [Environment]::NewLine) | ConvertFrom-Json
+    return [pscustomobject]@{
+        number = [int]$pull.number
+        url = [string]$pull.html_url
+        title = [string]$pull.title
+        state = if ($pull.merged_at) { 'MERGED' } else { ([string]$pull.state).ToUpperInvariant() }
+        author = [pscustomobject]@{login=[string]$pull.user.login;type=[string]$pull.user.type}
+        mergedAt = [string]$pull.merged_at
+        mergedBy = [pscustomobject]@{login=[string]$pull.merged_by.login}
+        mergeCommit = [pscustomobject]@{oid=[string]$pull.merge_commit_sha}
+        baseRefName = [string]$pull.base.ref
+        headRefName = [string]$pull.head.ref
+        files = @($files | ForEach-Object {
+            [pscustomobject]@{path=[string]$_.filename;additions=[int]$_.additions;deletions=[int]$_.deletions;changeType=[string]$_.status}
+        })
+    }
+}
+
+function Assert-AppAuthoredPullRequest($PullRequest, [string]$Failure) {
+    $expected = Get-AppBotLogin
+    if ($PullRequest.author.type -cne 'Bot' -or $PullRequest.author.login -cne $expected) {
+        throw $Failure
+    }
+}
+
 function Assert-AcceptanceAutoMerge($State) {
     if ($env:GITHUB_ACTIONS -ne 'true' -or $env:PHASE8_ACCEPTANCE_AUTOMERGE -ne 'true') {
         throw 'Acceptance auto-merge is available only inside the Phase 8 hosted workflow.'
@@ -162,14 +202,16 @@ function Invoke-AcceptancePR($State, [string]$Operation, $Parameters, [string]$R
     $url = gh pr create --repo $Repository --base $State.branch --head $requestBranch --title "test(acceptance): $Operation $($RequestID.Substring(0,8))" --body $body
     if ($LASTEXITCODE -ne 0 -or -not $url) { throw 'Could not create the acceptance pull request.' }
     $number = [int]($url -replace '^.*/','')
-    $metadata = gh pr view $number --repo $Repository --json number,url,author,baseRefName,headRefName,state,title | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or $metadata.baseRefName -cne $State.branch -or $metadata.author.login -cne "${env:APP_SLUG}[bot]") {
+    $metadata = Get-PullRequestEvidence $number
+    Assert-AppAuthoredPullRequest $metadata 'Acceptance pull request identity or base branch is invalid.'
+    if ($metadata.baseRefName -cne $State.branch -or $metadata.state -cne 'OPEN') {
         throw 'Acceptance pull request identity or base branch is invalid.'
     }
     gh pr merge $number --repo $Repository --squash --delete-branch | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not auto-merge the acceptance-only pull request.' }
-    $merged = gh pr view $number --repo $Repository --json number,url,author,mergedAt,mergedBy,mergeCommit,baseRefName,headRefName,state,title | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or $merged.state -ne 'MERGED' -or -not $merged.mergeCommit.oid) { throw 'Acceptance pull request did not merge.' }
+    $merged = Get-PullRequestEvidence $number
+    Assert-AppAuthoredPullRequest $merged 'Acceptance pull request identity changed after merge.'
+    if ($merged.state -ne 'MERGED' -or -not $merged.mergeCommit.oid) { throw 'Acceptance pull request did not merge.' }
     Write-Utf8 (Join-Path $ArtifactRoot "pull-requests/$safe-$RequestID.json") (($merged | ConvertTo-Json -Depth 10) + [Environment]::NewLine)
     $State.pullRequests += [pscustomobject]@{operation=$Operation;requestID=$RequestID;proposalDigest=$validation.proposalDigest;renderDigest=$validation.renderDigest;number=$number;url=$merged.url;author=$merged.author.login;mergeActor=$merged.mergedBy.login;mergeCommit=$merged.mergeCommit.oid}
     $State.currentRevision = [string]$merged.mergeCommit.oid
@@ -236,8 +278,9 @@ switch ($Stage) {
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the Phase 8 acceptance branch.' }
         $humanPRs = @()
         foreach ($number in @(65,67)) {
-            $pr = gh pr view $number --repo $Repository --json number,url,title,state,author,mergedAt,mergedBy,mergeCommit,files | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or $pr.state -ne 'MERGED' -or $pr.author.login -cne "${env:APP_SLUG}[bot]") {
+            $pr = Get-PullRequestEvidence $number
+            Assert-AppAuthoredPullRequest $pr "Human-reviewed Phase 8 PR #$number is missing or was not App-authored."
+            if ($pr.state -ne 'MERGED' -or -not $pr.mergedAt -or -not $pr.mergeCommit.oid) {
                 throw "Human-reviewed Phase 8 PR #$number is missing or was not App-authored."
             }
             $humanPRs += $pr

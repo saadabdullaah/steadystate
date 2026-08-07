@@ -129,6 +129,7 @@ func TestPhase8AcceptanceSafetyAndEvidenceContract(t *testing.T) {
 		"^acceptance/phase8-[0-9]+-[0-9]+$", "Acceptance auto-merge refuses non-acceptance branches.",
 		"Acceptance auto-merge can never target main or a normal branch.",
 		"broker validate --proposal", "broker apply --proposal", "gh pr merge", "--base $State.branch",
+		"repos/$Repository/pulls/$Number", "author.type -cne 'Bot'", "Get-AppBotLogin",
 		"service.retire", "service.finalize", "Wait-ArgoRevision", "retained-object-inventory.txt",
 		"git branch -D acceptance-request", "Could not remove the temporary local acceptance branch.",
 		"TestApplicationDoctorFailureFixtures|TestBreakGlass", "app-authored-two-pr-finalizer-retirement",
