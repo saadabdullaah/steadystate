@@ -115,7 +115,7 @@ jobs:
           $identity = 'https://github.com/saadabdullaah/steadystate/.github/workflows/service-release.yml@refs/heads/main'
           $issuer = 'https://token.actions.githubusercontent.com'
           foreach ($component in @('xyz-web','xyz-api')) {
-            $reference = "ghcr.io/saadabdullaah/steadystate-services:$component-v0.1.0"
+            $reference = "ghcr.io/saadabdullaah/steadystate-services:$component-v0.1.1"
             cosign verify --certificate-identity $identity --certificate-oidc-issuer $issuer $reference |
               Out-File -Encoding utf8 ".artifacts/phase8/acceptance/registry/$component-signature.json"
             if ($LASTEXITCODE -ne 0) { throw "Signature verification failed for $reference." }

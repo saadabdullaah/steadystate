@@ -79,7 +79,8 @@ platformctl app doctor xyz-api
 ```
 
 The web route serves the embedded React application. `/api/` is a same-origin
-proxy to the internal API Service, so no new CORS or route-path API is required.
+proxy to the internal API Service on its declared port 80 (the Service forwards
+to container port 8080), so no new CORS or route-path API is required.
 The API receives the Database connection only through explicit SecretKeyRefs.
 Kyverno admits only the signed/attested images, Argo Rollouts executes the
 metric-gated canary, and status reports the active digest and Git revision.

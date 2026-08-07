@@ -248,7 +248,8 @@ function Capture-Logs([string]$Prefix) {
         @{name='operator';namespace='steadystate-system';selector='control-plane=controller-manager'},
         @{name='argo';namespace='argocd';selector='app.kubernetes.io/name=argocd-application-controller'},
         @{name='cnpg';namespace='cnpg-system';selector='app.kubernetes.io/name=cloudnative-pg'},
-        @{name='xyz';namespace='team-xyz';selector='app.kubernetes.io/instance=xyz'}
+        @{name='xyz-web';namespace='team-xyz';selector='app.kubernetes.io/instance=xyz'},
+        @{name='xyz-api';namespace='team-xyz';selector='app.kubernetes.io/instance=xyz-api'}
     )) {
         $lines = @(& kubectl --request-timeout=20s logs -n $target.namespace -l $target.selector --all-containers --tail=500 2>&1)
         Write-Utf8 (Join-Path $directory "$Prefix-$($target.name).log") (($lines -join [Environment]::NewLine) + [Environment]::NewLine)

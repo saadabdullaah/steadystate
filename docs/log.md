@@ -691,3 +691,23 @@
   errors, cluster snapshot, and cleanup evidence. Database monitoring now has
   type-qualified names with ownership-safe legacy cleanup, and the two exact
   release workflows are modeled as separate Kyverno attestors.
+- The next exact-branch acceptance run
+  [31172442924](https://github.com/saadabdullaah/steadystate/actions/runs/31172442924)
+  confirmed those corrections: Team, Database, both Applications, Rollouts,
+  provenance, backups, and the CLI health gate all passed. Its artifact
+  `8991992337` then isolated a 504 in the same-origin order request. The
+  generated web server addressed API container port `8080` directly even
+  though the Kubernetes Service exposes port `80`. The template and checked-in
+  `xyz` fixture now target the Service port, regression coverage rejects the
+  invalid target, and acceptance diagnostics capture web and API logs
+  separately. Focused PR #70 merged as
+  `68cf1ebaa2a38074b812cad11662cd31cf619210` after CI and all Platformctl
+  smoke targets passed. Generated service release run
+  [31175994689](https://github.com/saadabdullaah/steadystate/actions/runs/31175994689)
+  published, scanned, signed, SPDX-attested, and anonymously verified
+  `xyz-web-v0.1.1` (`sha256:0e1056f988ce212e4296749f10a3dea03a0392f9e30bd9eb04188b108536858f`)
+  and `xyz-api-v0.1.1`
+  (`sha256:9a202073551edd3236b318823a2c6471e5fcc335338be0730625a5bab8fc7714`).
+  App-authored activation PR #71 changed only the two image tags and catalog
+  version, passed all five checks, and merged as
+  `df97288f9d0d7d088be5ee02feca35c9900bc62e`.
