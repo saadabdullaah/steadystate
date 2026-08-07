@@ -32,6 +32,20 @@ func TestPhase8CatalogAndProtectedPruneContracts(t *testing.T) {
 	}
 }
 
+func TestPhase8AcceptanceCanRenderOneCatalogTenant(t *testing.T) {
+	root := repositoryRoot(t)
+	rendered := string(run(t, root, "helm", "template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--set-string", "gitRevision="+testRevision, "--set-string", "tenantFilter=xyz"))
+	if !strings.Contains(rendered, "name: xyz") || !strings.Contains(rendered, "path: gitops/teams/xyz") {
+		t.Fatal("filtered root render is missing the selected xyz tenant")
+	}
+	for _, excluded := range []string{"name: payments", "path: gitops/teams/payments", "path: gitops/databases/orders", "path: gitops/applications/demo"} {
+		if strings.Contains(rendered, excluded) {
+			t.Fatalf("filtered root render retained unselected tenant content %q", excluded)
+		}
+	}
+}
+
 func TestPhase8RetiringTeamEnablesExactArgoCascade(t *testing.T) {
 	root := repositoryRoot(t)
 	source := filepath.Join(root, "gitops", "clusters", "local")
@@ -104,6 +118,7 @@ func TestPhase8AcceptanceWorkflowContract(t *testing.T) {
 		"./scripts/phase8-acceptance.ps1 -Stage Finalize",
 		"./scripts/phase8-acceptance.ps1 -Stage CaptureFailure",
 		"PHASE8_ACCEPTANCE_AUTOMERGE: \"true\"",
+		"-TenantFilter xyz",
 		"vhs docs/demonstrations/phase8-zero-to-live.tape",
 		"phase8-acceptance-${{ env.PHASE8_SOURCE_SHA }}", "if-no-files-found: error",
 		"Capture failure evidence before cleanup", "Delete disposable acceptance branch",
@@ -131,6 +146,7 @@ func TestPhase8AcceptanceSafetyAndEvidenceContract(t *testing.T) {
 		"broker validate --proposal", "broker apply --proposal", "gh pr merge", "--base $State.branch",
 		"repos/$Repository/pulls/$Number", "author.type -cne 'Bot'", "Get-AppBotLogin",
 		"service.retire", "service.finalize", "Wait-ArgoRevision", "retained-object-inventory.txt",
+		"Wait-ControlPlaneStable 300", "control-plane-stability.txt",
 		"git branch -D acceptance-request", "Could not remove the temporary local acceptance branch.",
 		"TestApplicationDoctorFailureFixtures|TestBreakGlass", "app-authored-two-pr-finalizer-retirement",
 		"no-residual-live-or-request-resources", "Assert-NoSecrets", "schemaVersion=1;phase='8'",

@@ -91,6 +91,31 @@ function Wait-Ready([string]$Resource, [string]$Name, [string]$Namespace, [int]$
     }
 }
 
+function Wait-ControlPlaneStable([int]$TimeoutSeconds = 300) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $consecutive = 0
+    do {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $ready = @(& kubectl --request-timeout=10s get --raw='/readyz' 2>$null)
+        $readyCode = $LASTEXITCODE
+        $allowed = @(& kubectl --request-timeout=10s auth can-i get pods --all-namespaces 2>$null)
+        $allowedCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($readyCode -eq 0 -and ($ready -join '') -eq 'ok' -and $allowedCode -eq 0 -and ($allowed -join '').Trim() -eq 'yes') {
+            $consecutive++
+            if ($consecutive -ge 3) {
+                Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/control-plane-stability.txt') "readyz=ok$([Environment]::NewLine)clusterAdminAuthorization=yes$([Environment]::NewLine)consecutiveChecks=$consecutive$([Environment]::NewLine)"
+                return
+            }
+        } else {
+            $consecutive = 0
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    throw "Kubernetes API storage and authorization did not remain stable for three consecutive checks within $TimeoutSeconds seconds."
+}
+
 function Wait-ArgoRevision([string]$Revision, [int]$TimeoutSeconds = 420) {
     Wait-Until $TimeoutSeconds "Argo tenant xyz did not adopt revision $Revision." {
         $raw = @(& kubectl --request-timeout=10s get applications.argoproj.io xyz -n argocd -o json 2>$null)
@@ -302,6 +327,7 @@ switch ($Stage) {
         $state = Get-State
         try {
             Set-AcceptanceStage $state 'cli-and-live-golden-path'
+            Wait-ControlPlaneStable 300
             $started = Get-Date
             $version = Invoke-Platformctl @('version') (Join-Path $ArtifactRoot 'cli/version.json')
             $null = Invoke-Platformctl @('cluster','status') (Join-Path $ArtifactRoot 'cli/cluster-status.json')

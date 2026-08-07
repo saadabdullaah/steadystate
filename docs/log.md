@@ -711,3 +711,16 @@
   App-authored activation PR #71 changed only the two image tags and catalog
   version, passed all five checks, and merged as
   `df97288f9d0d7d088be5ee02feca35c9900bc62e`.
+- Closeout CI run
+  [31181163010](https://github.com/saadabdullaah/steadystate/actions/runs/31181163010)
+  passed all five jobs. Acceptance run
+  [31181164407](https://github.com/saadabdullaah/steadystate/actions/runs/31181164407)
+  verified the corrected packages and reached full-profile GitOps, but its
+  retained artifact `8995699995` showed the 4-vCPU runner deploying both the
+  historical payments data plane and the Phase 8 `xyz` data plane. etcd became
+  starved, the API server restarted, and authorization failed closed while its
+  storage caches reinitialized. Phase 8 acceptance now keeps every full-profile
+  platform component but filters the catalog render to its subject tenant,
+  `xyz`, and requires three consecutive API-storage/RBAC stability checks
+  before product assertions. Historical tenant coverage remains in Nightly and
+  the Phase 7 acceptance suite.

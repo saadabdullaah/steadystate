@@ -23,6 +23,7 @@ param(
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity,
     [switch]$DisableTenantWorkloads,
+    [ValidatePattern('^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')][string]$TenantFilter = '',
     [switch]$DisableMonitoringStateMetrics
 )
 
@@ -264,6 +265,7 @@ function Invoke-GitOpsCommand {
         -DisableTelemetryPipeline:$DisableTelemetryPipeline `
         -DisableSecurity:$DisableSecurity `
         -DisableTenantWorkloads:$DisableTenantWorkloads `
+        -TenantFilter $TenantFilter `
         -DisableMonitoringStateMetrics:$DisableMonitoringStateMetrics `
         -BackupStoreEndpoint $(if ($env:BACKUP_STORE_ENDPOINT) { $env:BACKUP_STORE_ENDPOINT } else { 'http://172.30.240.10:8333' }) `
         -Profile $Profile

@@ -161,7 +161,7 @@ jobs:
         shell: pwsh
         run: |
           $state = Get-Content -Raw .artifacts/phase8/acceptance/state.json | ConvertFrom-Json
-          ./scripts/dev.ps1 deploy-gitops -Profile full -GitRevision $state.branch
+          ./scripts/dev.ps1 deploy-gitops -Profile full -GitRevision $state.branch -TenantFilter xyz
 
       - name: Execute CLI golden path and two-PR retirement
         id: acceptance
