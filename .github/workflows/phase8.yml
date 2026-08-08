@@ -122,6 +122,15 @@ jobs:
             cosign verify-attestation --type spdxjson --certificate-identity $identity --certificate-oidc-issuer $issuer $reference |
               Out-File -Encoding utf8 ".artifacts/phase8/acceptance/registry/$component-attestation.json"
             if ($LASTEXITCODE -ne 0) { throw "SPDX verification failed for $reference." }
+            $envelope = Get-Content -Raw ".artifacts/phase8/acceptance/registry/$component-attestation.json" | ConvertFrom-Json
+            if ($envelope -is [array]) { $envelope = $envelope[0] }
+            if (-not $envelope.payload) { throw "Verified SPDX attestation for $reference has no DSSE payload." }
+            $statement = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$envelope.payload)) | ConvertFrom-Json
+            if (-not $statement.predicate -or [string]$statement.predicate.spdxVersion -cnotmatch '^SPDX-') {
+              throw "Verified SPDX attestation for $reference has no SPDX predicate."
+            }
+            $statement.predicate | ConvertTo-Json -Depth 100 |
+              Out-File -Encoding utf8 ".artifacts/phase8/acceptance/registry/$component-sbom.spdx.json"
             docker buildx imagetools inspect $reference --format '{{json .Manifest}}' |
               Out-File -Encoding utf8 ".artifacts/phase8/acceptance/registry/$component-manifest.json"
             if ($LASTEXITCODE -ne 0) { throw "Anonymous manifest lookup failed for $reference." }
@@ -240,12 +249,20 @@ jobs:
             '.artifacts/phase8/acceptance/telemetry/slo.json',
             '.artifacts/phase8/acceptance/security/policy.json',
             '.artifacts/phase8/acceptance/backup/retained-object-inventory.txt',
-            '.artifacts/phase8/acceptance/benchmarks/resource-usage.json'
+            '.artifacts/phase8/acceptance/benchmarks/resource-usage.json',
+            '.artifacts/phase8/acceptance/snapshots/tenant-filter-isolation.json'
           )
+          foreach ($state in @('baseline','retiring','finalized')) {
+            $required += @(
+              ".artifacts/phase8/acceptance/rendered/$state.yaml",
+              ".artifacts/phase8/acceptance/rendered/$state-catalog.yaml"
+            )
+          }
           foreach ($component in @('xyz-web','xyz-api')) {
             $required += @(
               ".artifacts/phase8/acceptance/registry/$component-signature.json",
               ".artifacts/phase8/acceptance/registry/$component-attestation.json",
+              ".artifacts/phase8/acceptance/registry/$component-sbom.spdx.json",
               ".artifacts/phase8/acceptance/registry/$component-manifest.json"
             )
           }

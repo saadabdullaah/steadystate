@@ -705,6 +705,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
 		"--set", "bootstrapRoot=true",
 		"--set-string", "rootTargetRevision=checkpoint-branch",
+		"--set-string", "tenantFilter=xyz",
 		"--show-only", "templates/root-application.yaml.tpl",
 	)
 	objects := decodeManifests(t, rendered)
@@ -712,7 +713,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 7 {
+	if len(parameters) != 8 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
@@ -721,6 +722,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 		"enableSecurity":                    "true",
 		"enableDataFoundation":              "false",
 		"enableTenantWorkloads":             "true",
+		"tenantFilter":                      "xyz",
 		"monitoringKubeStateMetricsEnabled": "true",
 		"backupStoreEndpoint":               "http://172.30.240.10:8333",
 	}

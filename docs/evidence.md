@@ -57,21 +57,24 @@ Phase 8 uploads `phase8-acceptance-<commit>` with:
   retirement PR C/D metadata;
 - exact CLI version, cluster, Team, Application, Database, backup, provenance,
   rollout, SLO, policy, and doctor output;
-- signed service-image manifests, Cosign verification, and SPDX-attestation
-  verification for the web and API components;
+- signed service-image manifests, Cosign verification, verified DSSE
+  attestation envelopes, and decoded SPDX JSON SBOMs for the web and API
+  components;
 - frontend/same-origin API/PostgreSQL results, canonical order checksum, and
   Prometheus/Loki/Tempo evidence;
 - healthy and failure-diagnosis fixtures, confirmed break-glass rejection
   output, rendered proposal results, and redacted audit-contract proof;
+- baseline, retiring, and finalized catalog plus deterministic GitOps renders;
 - Argo, Team, Application, Database, Rollout, AnalysisRun, route, Pod, Service,
-  backup-retention, and resource-usage snapshots;
+  tenant-filter isolation, backup-retention, and resource-usage snapshots;
 - success/failure component logs and common diagnostics captured before
   cleanup.
 
-Phase 8 schema version `1` requires six unique elapsed checks: exact CLI/live
-health, frontend/API/PostgreSQL behavior, canary/provenance/telemetry/policy and
-diagnosis, resource budget, two-PR finalizer retirement, and absence of
-residual live/request resources. Auto-merge is accepted only for PRs whose base
+Phase 8 schema version `1` requires seven unique elapsed checks: exact CLI/live
+health, live tenant-filter isolation, frontend/API/PostgreSQL behavior,
+canary/provenance/telemetry/policy and diagnosis, resource budget, two-PR
+finalizer retirement, and absence of residual live/request resources.
+Auto-merge is accepted only for PRs whose base
 is the exact disposable `acceptance/phase8-<run>-<attempt>` ref. The artifact
 must prove that no open acceptance PR or request branch remains, the Team
 namespace and CR graph disappeared, and the final Database archive stayed in

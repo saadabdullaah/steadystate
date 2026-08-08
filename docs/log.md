@@ -769,3 +769,20 @@
   protobuf JSON represents the same 16-byte `traceId` as Base64. Acceptance
   now validates the canonical hex ID, converts it byte-for-byte to Base64, and
   requires that exact value in Tempo evidence.
+- Acceptance run
+  [31277260107](https://github.com/saadabdullaah/steadystate/actions/runs/31277260107)
+  (artifact `9027649253`, GitHub SHA-256
+  `5b279d60159852f56dc404c3a2432dd39965e1a78f8c5e30169e0652716b7e95`)
+  failed during full-profile deployment before telemetry was exercised. Its
+  complete diagnostics exposed the underlying isolation defect: the local
+  preflight render received `tenantFilter=xyz`, but the bootstrap root
+  Application did not inherit that Helm parameter, so live Argo still created
+  both payments and xyz. Under the acceptance-only 1.5-CPU control-plane quota,
+  etcd and kube-apiserver then missed liveness deadlines while Argo waited for
+  `data-namespaces`. The root now propagates the exact tenant filter, acceptance
+  proves the excluded Argo child, Team, and namespace are absent, and baseline,
+  retiring, and finalized catalog/renders are mandatory evidence. Hosted
+  workers remain capped, while the control plane keeps scheduling priority and
+  may use the runner's remaining CPU. Early deployment failures are recorded
+  truthfully as `result=failed`, and verified DSSE envelopes are decoded into
+  retained SPDX JSON SBOMs rather than serving as a substitute for them.

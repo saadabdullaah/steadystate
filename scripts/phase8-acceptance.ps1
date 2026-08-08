@@ -110,9 +110,16 @@ function Wait-Ready([string]$Resource, [string]$Name, [string]$Namespace, [int]$
                 [int64]$_.observedGeneration -eq [int64]$object.metadata.generation
             }).Count -eq 1) { return }
         } else {
-            $apiFailures++
-            if ($apiFailures -ge 6) {
-                throw "Kubernetes API became unavailable while waiting for $Resource $Namespace/$Name."
+            $readyz = @(& kubectl --request-timeout=10s get --raw='/readyz' 2>$null)
+            if ($LASTEXITCODE -eq 0 -and ($readyz -join '').Trim() -eq 'ok') {
+                # A healthy API with an absent object is ordinary GitOps convergence,
+                # not an API outage. Only consecutive readyz failures fail fast.
+                $apiFailures = 0
+            } else {
+                $apiFailures++
+                if ($apiFailures -ge 6) {
+                    throw "Kubernetes API became unavailable while waiting for $Resource $Namespace/$Name."
+                }
             }
         }
         Start-Sleep -Seconds 5
@@ -129,15 +136,67 @@ function Set-HostedControlPlanePriority {
     if ($LASTEXITCODE -ne 0 -or ($actual -join "`n") -cne (($expected | Sort-Object) -join "`n")) {
         throw "Refusing to tune unexpected kind containers: $($actual -join ', ')."
     }
-    & docker update --cpus 1.5 --cpu-shares 2048 --memory-reservation 2g steadystate-control-plane | Out-Null
+    # Workers retain hard CPU ceilings, while the control plane receives the
+    # remaining hosted-runner CPU on demand. A hard control-plane quota caused
+    # kube-apiserver and etcd liveness failures during full-profile sync.
+    & docker update --cpus 0 --cpu-shares 2048 --memory-reservation 2g steadystate-control-plane | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not reserve hosted control-plane resources.' }
     foreach ($worker in @('steadystate-worker','steadystate-worker2')) {
         & docker update --cpus 1 --cpu-shares 768 $worker | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not set hosted worker scheduling weight for $worker." }
     }
+    $configuration = @(& docker inspect @($expected))
+    if ($LASTEXITCODE -ne 0 -or -not $configuration) { throw 'Could not inspect hosted kind resource stabilization.' }
+    $containers = @((($configuration -join [Environment]::NewLine) | ConvertFrom-Json))
+    $controlPlane = @($containers | Where-Object { $_.Name -eq '/steadystate-control-plane' }) | Select-Object -First 1
+    $workers = @($containers | Where-Object { $_.Name -in @('/steadystate-worker','/steadystate-worker2') })
+    if (-not $controlPlane -or [int64]$controlPlane.HostConfig.NanoCpus -ne 0 -or
+        [int64]$controlPlane.HostConfig.CpuShares -ne 2048 -or
+        [int64]$controlPlane.HostConfig.MemoryReservation -ne 2147483648 -or
+        $workers.Count -ne 2 -or @($workers | Where-Object {
+            [int64]$_.HostConfig.NanoCpus -ne 1000000000 -or [int64]$_.HostConfig.CpuShares -ne 768
+        }).Count -ne 0) {
+        throw 'Hosted kind resource stabilization differs from the exact expected contract.'
+    }
     $snapshot = @(& docker inspect @($expected) --format '{{.Name}} nanoCpus={{.HostConfig.NanoCpus}} cpuShares={{.HostConfig.CpuShares}} memoryReservation={{.HostConfig.MemoryReservation}}')
     if ($LASTEXITCODE -ne 0) { throw 'Could not verify hosted kind resource stabilization.' }
     Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/hosted-kind-resources.txt') (($snapshot -join [Environment]::NewLine) + [Environment]::NewLine)
+}
+
+function Capture-RenderedGitOps([ValidateSet('baseline','retiring','finalized')][string]$Name, [string]$Revision) {
+    if ($Revision -cnotmatch '^[0-9a-f]{40}$') { throw "Cannot render GitOps evidence for invalid revision $Revision." }
+    $directory = Join-Path $ArtifactRoot 'rendered'
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    $arguments = @(
+        'template','steadystate-root',(Join-Path $Root 'gitops/clusters/local'),
+        '--namespace','argocd',
+        '--set-string',"gitRevision=$Revision",
+        '--set','enableDataFoundation=true',
+        '--set-string','tenantFilter=xyz'
+    )
+    $rendered = @(& helm @arguments)
+    if ($LASTEXITCODE -ne 0 -or -not $rendered) { throw "Could not render $Name GitOps evidence." }
+    Write-Utf8 (Join-Path $directory "$Name.yaml") (($rendered -join [Environment]::NewLine) + [Environment]::NewLine)
+    Copy-Item -LiteralPath (Join-Path $Root 'gitops/clusters/local/catalog/tenants.yaml') -Destination (Join-Path $directory "$Name-catalog.yaml") -Force
+}
+
+function Assert-TenantFilterIsolation {
+    $queries = @(
+        @('applications.argoproj.io','payments','-n','argocd'),
+        @('teams.platform.steadystate.dev','payments'),
+        @('namespaces','team-payments')
+    )
+    $observed = @()
+    foreach ($query in $queries) {
+        $value = @(& kubectl --request-timeout=10s get @query --ignore-not-found -o name 2>$null)
+        if ($LASTEXITCODE -ne 0) { throw "Could not verify tenant isolation for $($query[0])/$($query[1])." }
+        $observed += @($value | Where-Object { $_ })
+    }
+    if ($observed.Count -ne 0) { throw "The Phase 8 tenant filter admitted unselected resources: $($observed -join ', ')." }
+    Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/tenant-filter-isolation.json') (([ordered]@{
+        selectedTenant='xyz';excludedTenant='payments';excludedArgoApplicationAbsent=$true
+        excludedTeamAbsent=$true;excludedNamespaceAbsent=$true
+    } | ConvertTo-Json) + [Environment]::NewLine)
 }
 
 function Wait-PlatformFoundationReady([int]$TimeoutSeconds = 900) {
@@ -445,6 +504,8 @@ switch ($Stage) {
             Wait-Ready 'databases.platform.steadystate.dev' 'xyz' $Namespace 900
             Wait-Ready 'applications.platform.steadystate.dev' 'xyz' $Namespace 600
             Wait-Ready 'applications.platform.steadystate.dev' 'xyz-api' $Namespace 600
+            Assert-TenantFilterIsolation
+            Capture-RenderedGitOps 'baseline' $state.currentRevision
             $null = Invoke-Platformctl @('team','status','xyz') (Join-Path $ArtifactRoot 'cli/team-status.json')
             $null = Invoke-Platformctl @('database','status','xyz','-n',$Namespace) (Join-Path $ArtifactRoot 'cli/database-status.json')
             $null = Invoke-Platformctl @('database','backups','xyz','-n',$Namespace) (Join-Path $ArtifactRoot 'cli/database-backups.json')
@@ -454,6 +515,8 @@ switch ($Stage) {
             $state.cli.statusLatencyMilliseconds = $status.elapsedMilliseconds
             Save-State $state
             Add-Check $state 'exact-cli-and-full-stack-healthy' $started 'The exact-revision CLI observed Team, Database, web, API, backups, and cluster health.'
+            $started = Get-Date
+            Add-Check $state 'tenant-filter-isolation' $started 'The live root rendered only xyz; the payments Argo child, Team, and namespace were absent.'
 
             Set-AcceptanceStage $state 'frontend-api-and-database'
             $started = Get-Date
@@ -542,9 +605,11 @@ switch ($Stage) {
                 }
                 return $true
             }
+            Capture-RenderedGitOps 'retiring' $state.currentRevision
             Capture-Cluster 'retiring'
             $finalizeID = [guid]::NewGuid().ToString()
             $null = Invoke-AcceptancePR $state 'service.finalize' ([ordered]@{team='xyz';name='xyz';deletionRequest=$approvalID;approvalRevision=$approval.mergeCommit.oid}) $finalizeID
+            Capture-RenderedGitOps 'finalized' $state.currentRevision
             Wait-Until 900 'Finalizer-driven Team retirement did not remove every live resource.' {
                 $team = @(& kubectl --request-timeout=10s get team xyz --ignore-not-found -o name 2>$null)
                 $namespace = @(& kubectl --request-timeout=10s get namespace $Namespace --ignore-not-found -o name 2>$null)
@@ -591,7 +656,7 @@ switch ($Stage) {
     'Finalize' {
         $state = Get-State
         $names = @($state.checks | ForEach-Object name)
-        $required = @('exact-cli-and-full-stack-healthy','frontend-same-origin-api-and-postgresql','canary-provenance-telemetry-policy-and-diagnosis','full-profile-and-cli-resource-budget','app-authored-two-pr-finalizer-retirement','no-residual-live-or-request-resources')
+        $required = @('exact-cli-and-full-stack-healthy','tenant-filter-isolation','frontend-same-origin-api-and-postgresql','canary-provenance-telemetry-policy-and-diagnosis','full-profile-and-cli-resource-budget','app-authored-two-pr-finalizer-retirement','no-residual-live-or-request-resources')
         if ($state.schemaVersion -ne 1 -or $state.phase -ne '8' -or $state.result -ne 'passed' -or $state.currentStage -ne 'completed' -or
             @($state.checks).Count -ne $required.Count -or @($names | Sort-Object -Unique).Count -ne $required.Count -or
             @($required | Where-Object { $_ -notin $names }).Count -ne 0 -or @($state.pullRequests).Count -ne 2 -or
@@ -609,6 +674,12 @@ switch ($Stage) {
         if (Test-Path -LiteralPath $StatePath) {
             $state = Get-State
             $state.failureMessage = if ($env:PHASE8_FAILURE_MESSAGE) { $env:PHASE8_FAILURE_MESSAGE } else { 'Phase 8 acceptance failed.' }
+            if ($state.result -ne 'passed') {
+                $state.result = 'failed'
+                if (-not $state.failedAt) { $state.failedAt = (Get-Date).ToUniversalTime().ToString('o') }
+                if (-not $state.lastError) { $state.lastError = [string]$state.failureMessage }
+                Write-Transcript "RESULT $($state.failedAt) FAILED stage=$($state.currentStage) error=$($state.lastError)"
+            }
             Save-State $state
             Copy-Item -LiteralPath $StatePath -Destination (Join-Path $ArtifactRoot 'failure-evidence.json') -Force
         } else {

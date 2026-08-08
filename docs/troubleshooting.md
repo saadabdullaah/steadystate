@@ -646,12 +646,21 @@ close any still-open acceptance-only PR, delete only those exact refs, run
 repository command. Never recursively delete Docker resources or repository
 directories. Normal `main` and automation PRs are outside this cleanup scope.
 
-The hosted full-profile job caps its exact kind containers at 1.5 CPUs for the
-control plane and one CPU per worker, gives the control plane a higher Docker
-scheduling weight, and reserves 2 GiB of soft memory before GitOps add-ons
-start. It then waits for every required platform child Application to settle
-before beginning product readiness assertions. This is runner stabilization,
-not a different platform profile. If the API returns repeated EOFs, inspect the
-artifact's `failure-capture-host` Docker stats, inspect data, and kind logs
-first; the acceptance wait fails after six consecutive API failures rather
-than spending the full Database timeout against a dead control plane.
+The hosted full-profile job caps each exact worker at one CPU, leaves the
+control plane without a hard CPU quota, gives it a higher Docker scheduling
+weight, and reserves 2 GiB of soft memory before GitOps add-ons start. This
+prevents worker startup bursts from starving etcd while letting the control
+plane claim the runner's remaining CPU during sync. It then waits for every
+required platform child Application to settle before beginning product
+readiness assertions. This is runner stabilization, not a different platform
+profile. If the API returns repeated EOFs, inspect the artifact's
+`failure-capture-host` Docker stats, inspect data, and kind logs first. A
+healthy API returning NotFound while a resource has not yet been created is
+normal convergence; `/readyz` is checked first. The acceptance wait fails only
+after six consecutive API failures rather than spending the full Database
+timeout against a dead control plane.
+
+The bootstrap root must also inherit `tenantFilter=xyz`. Otherwise the local
+preflight can look isolated while live Argo still deploys every catalog tenant.
+The tenant-isolation snapshot and baseline, retiring, and finalized renders in
+the acceptance artifact prove that live and offline desired state agree.
