@@ -759,3 +759,13 @@
   immediately. Phase 8 now waits up to four minutes for the actual request ID
   in Loki and then for the correlated trace ID in Tempo; transport success
   alone no longer satisfies either evidence gate.
+- Closeout CI run
+  [31274745239](https://github.com/saadabdullaah/steadystate/actions/runs/31274745239)
+  passed all five jobs. Acceptance run
+  [31274745274](https://github.com/saadabdullaah/steadystate/actions/runs/31274745274)
+  and artifact `9026965291` proved Loki correlation and retained the requested
+  Tempo trace, but exposed an encoding mismatch in the assertion: application
+  logs and the Tempo query path use 32-character hexadecimal IDs, while OTLP
+  protobuf JSON represents the same 16-byte `traceId` as Base64. Acceptance
+  now validates the canonical hex ID, converts it byte-for-byte to Base64, and
+  requires that exact value in Tempo evidence.

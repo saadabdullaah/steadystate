@@ -299,6 +299,11 @@ kubectl logs -n monitoring deployment/tempo --all-containers --tail=300
 
 For `traces=true`, the application container must have `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector.monitoring.svc.cluster.local:4317`, and the owned NetworkPolicy must allow only that collector destination. The collector drops spans without `service.name`. Health, readiness, and metrics endpoints are deliberately not instrumented.
 
+When comparing `platformctl app traces --trace-id` output with structured
+logs, remember that the query and log use lowercase hexadecimal while Tempo's
+OTLP/protobuf JSON encodes the `traceId` bytes field as Base64. Decode both to
+the same 16 bytes; a literal string comparison is not a correlation check.
+
 ## ServiceHealth is False while metrics are available
 
 `ServiceHealth` does not query Prometheus. Inspect the active workload and Gateway status directly:

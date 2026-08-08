@@ -26,6 +26,15 @@ function Write-Transcript([string]$Value) {
     [IO.File]::AppendAllText($TranscriptPath, "$Value$([Environment]::NewLine)", [Text.UTF8Encoding]::new($false))
 }
 
+function Convert-TraceHexToBase64([string]$TraceID) {
+    if ($TraceID -cnotmatch '^[0-9a-f]{32}$') { throw 'Trace ID is not canonical lowercase hexadecimal.' }
+    $bytes = [byte[]]::new(16)
+    for ($index = 0; $index -lt $bytes.Length; $index++) {
+        $bytes[$index] = [Convert]::ToByte($TraceID.Substring($index * 2, 2), 16)
+    }
+    return [Convert]::ToBase64String($bytes)
+}
+
 function Get-State {
     if (-not (Test-Path -LiteralPath $StatePath)) { throw 'Phase 8 acceptance state is missing.' }
     return Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json
@@ -485,9 +494,12 @@ switch ($Stage) {
             $state.requestTraceID = $traceID
             Save-State $state
             $tracesPath = Join-Path $ArtifactRoot 'telemetry/traces.json'
+            # Tempo's OTLP/protobuf JSON represents bytes fields as Base64 even
+            # though its query path and application logs use canonical hex.
+            $tempoTraceID = Convert-TraceHexToBase64 $traceID
             $null = Invoke-PlatformctlUntilMatch `
                 @('app','traces','xyz-api','-n',$Namespace,'--trace-id',$traceID) `
-                $tracesPath ([regex]::Escape($traceID)) 'Tempo did not return the correlated trace ID within four minutes.' 240
+                $tracesPath ([regex]::Escape($tempoTraceID)) 'Tempo did not return the correlated trace ID within four minutes.' 240
             $null = Invoke-Platformctl @('app','slo','xyz-api','-n',$Namespace) (Join-Path $ArtifactRoot 'telemetry/slo.json')
             $null = Invoke-Platformctl @('app','policy','xyz-api','-n',$Namespace) (Join-Path $ArtifactRoot 'security/policy.json')
             $null = Invoke-Platformctl @('app','doctor','xyz-api','-n',$Namespace) (Join-Path $ArtifactRoot 'doctor/healthy.json')

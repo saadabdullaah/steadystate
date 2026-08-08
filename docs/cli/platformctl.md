@@ -188,6 +188,10 @@ platformctl app traces NAME [flags]
       --trace-id string    fetch one exact trace ID
 ```
 
+`--trace-id` accepts the canonical 32-character lowercase hexadecimal ID used
+in application logs. Tempo's raw OTLP/protobuf JSON response represents its
+`traceId` bytes field as Base64; these are two encodings of the same 16 bytes.
+
 ## `platformctl app update`
 
 Update an Application through a reviewed Git proposal
