@@ -122,11 +122,12 @@ func TestPhase8AcceptanceWorkflowContract(t *testing.T) {
 		"PHASE8_ACCEPTANCE_AUTOMERGE: \"true\"",
 		"-TenantFilter xyz",
 		"component-sbom.spdx.json", "has no SPDX predicate",
-		"rendered/$state.yaml", "tenant-filter-isolation.json",
+		"rendered/$state.yaml", "tenant-filter-isolation.json", "snapshots/platform-foundation-progress.json",
 		"vhs docs/demonstrations/phase8-zero-to-live.tape",
 		"phase8-acceptance-${{ env.PHASE8_SOURCE_SHA }}", "if-no-files-found: error",
 		"Capture failure evidence before cleanup", "Delete disposable acceptance branch",
-		"Destroy disposable cluster through platformctl",
+		"Destroy disposable cluster through platformctl", "Stop exact disposable backup resources",
+		"Skipping API-driven GitOps teardown because the disposable API is unavailable.",
 	} {
 		if !strings.Contains(workflow, expected) {
 			t.Fatalf("Phase 8 workflow is missing %q", expected)
@@ -134,6 +135,11 @@ func TestPhase8AcceptanceWorkflowContract(t *testing.T) {
 	}
 	if strings.Contains(workflow, "permission-actions: write") || strings.Contains(workflow, "cancel-in-progress: true") {
 		t.Fatal("Phase 8 acceptance expands App permissions or permits cancellation")
+	}
+	destroy := strings.Index(workflow, "- name: Destroy disposable cluster through platformctl")
+	stopStore := strings.Index(workflow, "- name: Stop exact disposable backup resources")
+	if destroy < 0 || stopStore < 0 || destroy >= stopStore {
+		t.Fatal("Phase 8 cleanup must destroy kind before removing its attached backup network")
 	}
 }
 
@@ -152,8 +158,11 @@ func TestPhase8AcceptanceSafetyAndEvidenceContract(t *testing.T) {
 		"service.retire", "service.finalize", "Wait-ArgoRevision", "retained-object-inventory.txt",
 		"Wait-ControlPlaneStable 300", "control-plane-stability.txt",
 		"--cpus 0 --cpu-shares 2048 --memory-reservation 2g steadystate-control-plane",
+		"--cpus 0 --cpu-shares 1024 $worker",
 		"Hosted kind resource stabilization differs from the exact expected contract.",
-		"Wait-PlatformFoundationReady 900", "platform-foundation-applications.json",
+		"Wait-PlatformFoundationReady 1200", "platform-foundation-applications.json", "platform-foundation-progress.json",
+		"journalctl --no-pager -n 1000", "crictl ps -a",
+		"function Test-KubernetesAPI", "direct host journal and CRI evidence",
 		"Capture-RenderedGitOps", "tenant-filter-isolation.json", "tenant-filter-isolation",
 		"Invoke-PlatformctlUntilMatch", "The request ID did not appear in Loki within four minutes.",
 		"Tempo did not return the correlated trace ID within four minutes.",

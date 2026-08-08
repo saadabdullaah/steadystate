@@ -66,7 +66,10 @@ Phase 8 uploads `phase8-acceptance-<commit>` with:
   output, rendered proposal results, and redacted audit-contract proof;
 - baseline, retiring, and finalized catalog plus deterministic GitOps renders;
 - Argo, Team, Application, Database, Rollout, AnalysisRun, route, Pod, Service,
-  tenant-filter isolation, backup-retention, and resource-usage snapshots;
+  tenant-filter isolation, platform-foundation progress, backup-retention, and
+  resource-usage snapshots;
+- direct kind-container inspect, kubelet/containerd journal, and CRI state on
+  pre-product failures where the Kubernetes API is unavailable;
 - success/failure component logs and common diagnostics captured before
   cleanup.
 

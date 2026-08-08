@@ -136,13 +136,13 @@ function Set-HostedControlPlanePriority {
     if ($LASTEXITCODE -ne 0 -or ($actual -join "`n") -cne (($expected | Sort-Object) -join "`n")) {
         throw "Refusing to tune unexpected kind containers: $($actual -join ', ')."
     }
-    # Workers retain hard CPU ceilings, while the control plane receives the
-    # remaining hosted-runner CPU on demand. A hard control-plane quota caused
-    # kube-apiserver and etcd liveness failures during full-profile sync.
+    # Use relative scheduling weights without hard quotas. The control plane
+    # receives half of contended CPU while a busy worker can borrow capacity
+    # from an idle peer. Per-worker quotas previously stranded that capacity.
     & docker update --cpus 0 --cpu-shares 2048 --memory-reservation 2g steadystate-control-plane | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not reserve hosted control-plane resources.' }
     foreach ($worker in @('steadystate-worker','steadystate-worker2')) {
-        & docker update --cpus 1 --cpu-shares 768 $worker | Out-Null
+        & docker update --cpus 0 --cpu-shares 1024 $worker | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not set hosted worker scheduling weight for $worker." }
     }
     $configuration = @(& docker inspect @($expected))
@@ -154,7 +154,7 @@ function Set-HostedControlPlanePriority {
         [int64]$controlPlane.HostConfig.CpuShares -ne 2048 -or
         [int64]$controlPlane.HostConfig.MemoryReservation -ne 2147483648 -or
         $workers.Count -ne 2 -or @($workers | Where-Object {
-            [int64]$_.HostConfig.NanoCpus -ne 1000000000 -or [int64]$_.HostConfig.CpuShares -ne 768
+            [int64]$_.HostConfig.NanoCpus -ne 0 -or [int64]$_.HostConfig.CpuShares -ne 1024
         }).Count -ne 0) {
         throw 'Hosted kind resource stabilization differs from the exact expected contract.'
     }
@@ -199,7 +199,7 @@ function Assert-TenantFilterIsolation {
     } | ConvertTo-Json) + [Environment]::NewLine)
 }
 
-function Wait-PlatformFoundationReady([int]$TimeoutSeconds = 900) {
+function Wait-PlatformFoundationReady([int]$TimeoutSeconds = 1200) {
     $required = @(
         'argocd-configuration','monitoring','argo-rollouts','loki','tempo','otel-collector','alloy',
         'kyverno','kyverno-policies','data-namespaces','local-path-storage','cert-manager',
@@ -207,17 +207,29 @@ function Wait-PlatformFoundationReady([int]$TimeoutSeconds = 900) {
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $pending = @($required)
+    $lastStates = @{}
+    $apiFailures = 0
     do {
         $raw = @(& kubectl --request-timeout=10s get --raw='/apis/argoproj.io/v1alpha1/namespaces/argocd/applications' 2>$null)
         if ($LASTEXITCODE -eq 0 -and $raw) {
+            $apiFailures = 0
             $collection = ($raw -join [Environment]::NewLine) | ConvertFrom-Json
             $states = @{}
             foreach ($application in @($collection.items)) {
                 $states[[string]$application.metadata.name] = [pscustomobject]@{
                     sync = [string]$application.status.sync.status
                     health = [string]$application.status.health.status
+                    message = [string]$application.status.health.message
                 }
             }
+            $lastStates = $states
+            Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/platform-foundation-progress.json') (([ordered]@{
+                capturedAt=(Get-Date).ToUniversalTime().ToString('o')
+                applications=@($required | ForEach-Object {
+                    $current = if ($states.ContainsKey($_)) { $states[$_] } else { [pscustomobject]@{sync='Missing';health='Missing';message='Application has not been created.'} }
+                    [ordered]@{name=$_;sync=$current.sync;health=$current.health;message=$current.message}
+                })
+            } | ConvertTo-Json -Depth 8) + [Environment]::NewLine)
             $pending = @($required | Where-Object {
                 -not $states.ContainsKey($_) -or $states[$_].sync -ne 'Synced' -or $states[$_].health -ne 'Healthy'
             })
@@ -225,10 +237,20 @@ function Wait-PlatformFoundationReady([int]$TimeoutSeconds = 900) {
                 Write-Utf8 (Join-Path $ArtifactRoot 'snapshots/platform-foundation-applications.json') (($collection | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
                 return
             }
+        } else {
+            $readyz = @(& kubectl --request-timeout=10s get --raw='/readyz' 2>$null)
+            if ($LASTEXITCODE -eq 0 -and ($readyz -join '').Trim() -eq 'ok') { $apiFailures = 0 } else { $apiFailures++ }
+            if ($apiFailures -ge 6) {
+                throw "Kubernetes API became unavailable during platform foundation readiness; pending: $($pending -join ', ')."
+            }
         }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)
-    throw "Full-profile platform foundation did not settle before product acceptance: $($pending -join ', ')."
+    $details = @($pending | ForEach-Object {
+        if ($lastStates.ContainsKey($_)) { "$_(sync=$($lastStates[$_].sync),health=$($lastStates[$_].health),message=$($lastStates[$_].message))" }
+        else { "$_(missing)" }
+    })
+    throw "Full-profile platform foundation did not settle before product acceptance: $($details -join '; ')."
 }
 
 function Wait-ControlPlaneStable([int]$TimeoutSeconds = 300) {
@@ -389,9 +411,20 @@ function Invoke-AcceptancePR($State, [string]$Operation, $Parameters, [string]$R
     return $merged
 }
 
+function Test-KubernetesAPI {
+    $ready = @(& kubectl --request-timeout=5s get --raw='/readyz' 2>$null)
+    $available = $LASTEXITCODE -eq 0 -and ($ready -join '').Trim() -eq 'ok'
+    $global:LASTEXITCODE = 0
+    return $available
+}
+
 function Capture-Cluster([string]$Prefix) {
     $snapshot = Join-Path $ArtifactRoot "snapshots/$Prefix"
     New-Item -ItemType Directory -Force -Path $snapshot | Out-Null
+    if (-not (Test-KubernetesAPI)) {
+        Write-Utf8 (Join-Path $snapshot 'api-unavailable.txt') "Kubernetes API unavailable; use the direct host journal and CRI evidence.$([Environment]::NewLine)"
+        return
+    }
     foreach ($item in @(
         @{name='argo';path='/apis/argoproj.io/v1alpha1/namespaces/argocd/applications'},
         @{name='teams';path='/apis/platform.steadystate.dev/v1alpha1/teams'},
@@ -421,6 +454,10 @@ function Capture-Host([string]$Prefix) {
         Write-Utf8 (Join-Path $snapshot "$name-inspect.json") (($inspect -join [Environment]::NewLine) + [Environment]::NewLine)
         $logs = @(& docker logs --tail 500 $name 2>&1)
         Write-Utf8 (Join-Path $snapshot "$name.log") (($logs -join [Environment]::NewLine) + [Environment]::NewLine)
+        $journal = @(& docker exec $name journalctl --no-pager -n 1000 -u kubelet.service -u containerd.service 2>&1)
+        Write-Utf8 (Join-Path $snapshot "$name-journal.log") (($journal -join [Environment]::NewLine) + [Environment]::NewLine)
+        $runtime = @(& docker exec $name crictl ps -a 2>&1)
+        Write-Utf8 (Join-Path $snapshot "$name-crictl.txt") (($runtime -join [Environment]::NewLine) + [Environment]::NewLine)
     }
     $global:LASTEXITCODE = 0
 }
@@ -428,6 +465,10 @@ function Capture-Host([string]$Prefix) {
 function Capture-Logs([string]$Prefix) {
     $directory = Join-Path $ArtifactRoot 'logs'
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    if (-not (Test-KubernetesAPI)) {
+        Write-Utf8 (Join-Path $directory "$Prefix-api-unavailable.txt") "Kubernetes API unavailable; component logs could not be queried safely.$([Environment]::NewLine)"
+        return
+    }
     foreach ($target in @(
         @{name='operator';namespace='steadystate-system';selector='control-plane=controller-manager'},
         @{name='argo';namespace='argocd';selector='app.kubernetes.io/name=argocd-application-controller'},
@@ -489,7 +530,7 @@ switch ($Stage) {
     'AwaitFoundation' {
         $state = Get-State
         Set-AcceptanceStage $state 'platform-foundation-readiness'
-        Wait-PlatformFoundationReady 900
+        Wait-PlatformFoundationReady 1200
         Wait-ControlPlaneStable 300
         Write-Host 'Full-profile platform foundation and control plane are stable.'
     }

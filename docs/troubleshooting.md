@@ -646,11 +646,13 @@ close any still-open acceptance-only PR, delete only those exact refs, run
 repository command. Never recursively delete Docker resources or repository
 directories. Normal `main` and automation PRs are outside this cleanup scope.
 
-The hosted full-profile job caps each exact worker at one CPU, leaves the
-control plane without a hard CPU quota, gives it a higher Docker scheduling
-weight, and reserves 2 GiB of soft memory before GitOps add-ons start. This
-prevents worker startup bursts from starving etcd while letting the control
-plane claim the runner's remaining CPU during sync. It then waits for every
+The hosted full-profile job uses no hard CPU quota on its exact three kind
+containers. It gives the control plane twice each worker's Docker scheduling
+weight and reserves 2 GiB of soft control-plane memory before GitOps add-ons
+start. Under contention the API receives half the available container CPU,
+while a busy worker can borrow capacity from an idle peer. This avoids both
+control-plane starvation and the stranded capacity caused by per-worker hard
+caps. The harness then waits for every
 required platform child Application to settle before beginning product
 readiness assertions. This is runner stabilization, not a different platform
 profile. If the API returns repeated EOFs, inspect the artifact's
@@ -664,3 +666,9 @@ The bootstrap root must also inherit `tenantFilter=xyz`. Otherwise the local
 preflight can look isolated while live Argo still deploys every catalog tenant.
 The tenant-isolation snapshot and baseline, retiring, and finalized renders in
 the acceptance artifact prove that live and offline desired state agree.
+`platform-foundation-progress.json` retains every child's final sync, health,
+and message. If the API itself fails, the host snapshot also includes bounded
+kubelet/containerd journals and CRI container state from every exact kind
+node. Cleanup skips API-driven teardown when `/readyz` is unavailable, destroys
+kind before detaching the backup network, and removes only exact named Docker
+resources.

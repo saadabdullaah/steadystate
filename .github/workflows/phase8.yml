@@ -220,7 +220,15 @@ jobs:
         run: |
           $clusters = @(& kind get clusters 2>$null)
           if ($LASTEXITCODE -eq 0 -and $clusters -contains 'steadystate') {
-            ./scripts/dev.ps1 diagnostics
+            $ready = @(& kubectl --request-timeout=5s get --raw='/readyz' 2>$null)
+            if ($LASTEXITCODE -eq 0 -and ($ready -join '').Trim() -eq 'ok') {
+              ./scripts/dev.ps1 diagnostics
+            } else {
+              New-Item -ItemType Directory -Force .artifacts/diagnostics | Out-Null
+              'The disposable cluster existed, but its API was unavailable. Direct kind-container evidence is retained by Phase 8 failure capture.' |
+                Set-Content -Encoding utf8 .artifacts/diagnostics/api-unavailable.txt
+              $global:LASTEXITCODE = 0
+            }
           } else {
             New-Item -ItemType Directory -Force .artifacts/diagnostics | Out-Null
             'Phase 8 failed before the disposable cluster was available.' | Set-Content -Encoding utf8 .artifacts/diagnostics/pre-cluster-failure.txt
@@ -250,7 +258,8 @@ jobs:
             '.artifacts/phase8/acceptance/security/policy.json',
             '.artifacts/phase8/acceptance/backup/retained-object-inventory.txt',
             '.artifacts/phase8/acceptance/benchmarks/resource-usage.json',
-            '.artifacts/phase8/acceptance/snapshots/tenant-filter-isolation.json'
+            '.artifacts/phase8/acceptance/snapshots/tenant-filter-isolation.json',
+            '.artifacts/phase8/acceptance/snapshots/platform-foundation-progress.json'
           )
           foreach ($state in @('baseline','retiring','finalized')) {
             $required += @(
@@ -312,15 +321,11 @@ jobs:
         shell: pwsh
         run: |
           $clusters = @(& kind get clusters 2>$null)
-          if ($LASTEXITCODE -eq 0 -and $clusters -contains 'steadystate') { ./scripts/dev.ps1 undeploy-gitops }
-          else { $global:LASTEXITCODE = 0 }
-
-      - name: Stop exact disposable backup resources
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 5
-        shell: pwsh
-        run: ./scripts/backup-store.ps1 -Action Stop -PurgeData
+          if ($LASTEXITCODE -eq 0 -and $clusters -contains 'steadystate') {
+            $ready = @(& kubectl --request-timeout=5s get --raw='/readyz' 2>$null)
+            if ($LASTEXITCODE -eq 0 -and ($ready -join '').Trim() -eq 'ok') { ./scripts/dev.ps1 undeploy-gitops }
+            else { Write-Host 'Skipping API-driven GitOps teardown because the disposable API is unavailable.'; $global:LASTEXITCODE = 0 }
+          } else { $global:LASTEXITCODE = 0 }
 
       - name: Destroy disposable cluster through platformctl
         if: always()
@@ -329,3 +334,9 @@ jobs:
         run: |
           if (Test-Path .artifacts/platformctl) { ./.artifacts/platformctl --output json --timeout 5m cluster down }
           else { ./scripts/dev.ps1 destroy }
+
+      - name: Stop exact disposable backup resources
+        if: always()
+        timeout-minutes: 2
+        shell: pwsh
+        run: ./scripts/backup-store.ps1 -Action Stop -PurgeData

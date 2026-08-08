@@ -786,3 +786,19 @@
   may use the runner's remaining CPU. Early deployment failures are recorded
   truthfully as `result=failed`, and verified DSSE envelopes are decoded into
   retained SPDX JSON SBOMs rather than serving as a substitute for them.
+- At `7022d2a`, CI run
+  [31279448745](https://github.com/saadabdullaah/steadystate/actions/runs/31279448745)
+  passed all five jobs and Platformctl smoke run
+  [31279448762](https://github.com/saadabdullaah/steadystate/actions/runs/31279448762)
+  passed all six target/packaging contracts. Phase 8 run
+  [31279448756](https://github.com/saadabdullaah/steadystate/actions/runs/31279448756)
+  and artifact `9028361989` (GitHub SHA-256
+  `02a8988b38a3a3a258ca61139e105aedae6fcada74719b097ff42ce0649ff255`)
+  confirmed the tenant/SBOM/failure-state corrections, then exposed scheduler
+  imbalance: one hard-capped worker was saturated while its peer used about
+  one fifth of a CPU, leaving six controllers unsettled. The harness now uses
+  quota-free relative weights: the control plane receives twice each worker's
+  share, and a busy worker can borrow idle capacity. Foundation waits retain
+  exact per-Application state and fail fast on API loss. Failure diagnostics
+  retain node journals/CRI state, and cleanup no longer runs long API teardown
+  or backup-network detachment in the wrong order when the API is unavailable.
