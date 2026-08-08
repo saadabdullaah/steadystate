@@ -151,6 +151,8 @@ func TestPhase8AcceptanceSafetyAndEvidenceContract(t *testing.T) {
 		"Wait-ControlPlaneStable 300", "control-plane-stability.txt",
 		"--cpus 1.5 --cpu-shares 2048 --memory-reservation 2g steadystate-control-plane",
 		"Wait-PlatformFoundationReady 900", "platform-foundation-applications.json",
+		"Invoke-PlatformctlUntilMatch", "The request ID did not appear in Loki within four minutes.",
+		"Tempo did not return the correlated trace ID within four minutes.",
 		"Kubernetes API became unavailable while waiting for", "Capture-Host 'failure-capture'",
 		"git branch -D acceptance-request", "Could not remove the temporary local acceptance branch.",
 		"TestApplicationDoctorFailureFixtures|TestBreakGlass", "app-authored-two-pr-finalizer-retirement",

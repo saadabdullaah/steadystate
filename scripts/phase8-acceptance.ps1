@@ -69,14 +69,23 @@ function Invoke-Platformctl([string[]]$Arguments, [string]$OutputPath, [switch]$
     return [pscustomobject]@{exitCode=$code;elapsedMilliseconds=[Math]::Round(((Get-Date)-$started).TotalMilliseconds,3);output=$lines}
 }
 
-function Invoke-PlatformctlEventually([string[]]$Arguments, [string]$OutputPath, [int]$TimeoutSeconds = 180) {
+function Invoke-PlatformctlUntilMatch(
+    [string[]]$Arguments,
+    [string]$OutputPath,
+    [string]$Pattern,
+    [string]$Failure,
+    [int]$TimeoutSeconds = 180
+) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         $result = Invoke-Platformctl $Arguments $OutputPath -AllowFailure
-        if ($result.exitCode -eq 0) { return $result }
+        if ($result.exitCode -eq 0) {
+            $content = Get-Content -Raw -LiteralPath $OutputPath
+            if ($content -match $Pattern) { return $content }
+        }
         Start-Sleep -Seconds 10
     } while ((Get-Date) -lt $deadline)
-    throw "platformctl $($Arguments -join ' ') did not succeed within $TimeoutSeconds seconds."
+    throw $Failure
 }
 
 function Wait-Ready([string]$Resource, [string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 600) {
@@ -463,8 +472,10 @@ switch ($Stage) {
             $null = Invoke-Platformctl @('app','provenance','xyz-api','-n',$Namespace) (Join-Path $ArtifactRoot 'cli/api-provenance.json')
             $null = Invoke-Platformctl @('app','rollout','xyz-api','-n',$Namespace) (Join-Path $ArtifactRoot 'cli/api-rollout.json')
             $logsPath = Join-Path $ArtifactRoot 'telemetry/logs.json'
-            $null = Invoke-PlatformctlEventually @('app','logs','xyz-api','-n',$Namespace,'--historical','--since','15m','--tail','100') $logsPath 240
-            $logResponse = Get-Content -Raw $logsPath | ConvertFrom-Json
+            $logJSON = Invoke-PlatformctlUntilMatch `
+                @('app','logs','xyz-api','-n',$Namespace,'--historical','--since','15m','--tail','100') `
+                $logsPath ([regex]::Escape($requestID)) 'The request ID did not appear in Loki within four minutes.' 240
+            $logResponse = $logJSON | ConvertFrom-Json
             $logLines = @($logResponse.data.result | ForEach-Object { $_.values | ForEach-Object { [string]$_[1] } })
             $requestLog = @($logLines | Where-Object { $_ -like "*$requestID*" }) | Select-Object -First 1
             if (-not $requestLog) { throw 'The request ID was not present in Loki.' }
@@ -474,8 +485,9 @@ switch ($Stage) {
             $state.requestTraceID = $traceID
             Save-State $state
             $tracesPath = Join-Path $ArtifactRoot 'telemetry/traces.json'
-            $null = Invoke-PlatformctlEventually @('app','traces','xyz-api','-n',$Namespace,'--trace-id',$traceID) $tracesPath 240
-            if ((Get-Content -Raw $tracesPath) -notmatch [regex]::Escape($traceID)) { throw 'Tempo did not return the correlated trace ID.' }
+            $null = Invoke-PlatformctlUntilMatch `
+                @('app','traces','xyz-api','-n',$Namespace,'--trace-id',$traceID) `
+                $tracesPath ([regex]::Escape($traceID)) 'Tempo did not return the correlated trace ID within four minutes.' 240
             $null = Invoke-Platformctl @('app','slo','xyz-api','-n',$Namespace) (Join-Path $ArtifactRoot 'telemetry/slo.json')
             $null = Invoke-Platformctl @('app','policy','xyz-api','-n',$Namespace) (Join-Path $ArtifactRoot 'security/policy.json')
             $null = Invoke-Platformctl @('app','doctor','xyz-api','-n',$Namespace) (Join-Path $ArtifactRoot 'doctor/healthy.json')

@@ -748,3 +748,14 @@
   Applications plus stable API/RBAC probes before starting the Database and
   golden-path clock. Raw failure snapshots also interpolate their API paths
   correctly.
+- Closeout CI run
+  [31208867226](https://github.com/saadabdullaah/steadystate/actions/runs/31208867226)
+  passed all five jobs. Acceptance run
+  [31208866752](https://github.com/saadabdullaah/steadystate/actions/runs/31208866752)
+  and artifact `9006433856` verified the resource cap and sequencing fix: all
+  platform children settled, the Database and both Applications became
+  healthy, and frontend/API/PostgreSQL passed. It then exposed a telemetry
+  assertion race because a successful but empty Loki response ended the retry
+  immediately. Phase 8 now waits up to four minutes for the actual request ID
+  in Loki and then for the correlated trace ID in Tempo; transport success
+  alone no longer satisfies either evidence gate.
