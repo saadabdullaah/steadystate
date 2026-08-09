@@ -641,3 +641,209 @@
   contains the exact-main GIF, evidence JSON, RTO/RPO report, transcript, and
   SHA-256 manifest. No Phase 7 branch remains. Dependabot PRs #42 and #49 are
   deliberately deferred because their current validation is failing.
+
+## 2026-08-07 - Phase 8 developer golden path closeout candidate
+
+- CLI foundation PR #53 (`e721d9e`) established `platformctl`, stable
+  configuration/output/exit contracts, catalog-driven root rendering, and
+  cluster/telemetry/data read paths. Broker PRs #54/#55 (`0b066a3`, `86a2690`)
+  added the typed four-input workflow, GitHub App trust boundary, protected
+  prune, and two-PR lifecycle renderer. Broker smoke run `30996324120` passed
+  and its harmless temporary PR/ref were removed.
+- Golden-template PR #57 (`e956723`) added Go API, embedded React static, and
+  full-stack React/Go/PostgreSQL templates plus signed generic service
+  delivery. Operations/release PR #59 (`921b638`) added ordered application
+  diagnosis, confirmed break glass, six-target archives, SBOM/checksum
+  signature/provenance contracts, installers, reference, man pages, and
+  completions. Focused correctness PRs #61/#62/#64 (`cefea9b`, `b094d87`,
+  `f3c85ae`) fixed catalog-aware scaffolding, embedded-asset ownership, and
+  generated Go/fixture determinism.
+- App-authored scaffold PR #65 merged as
+  `b6d9e6bb5df2f289e36d8d48c6be83443645b8eb`. It added the `xyz` full-stack
+  source, Team, and Database desired state without active Applications. Service
+  release recovery run `31114158974` then built, scanned, signed, SPDX-attested,
+  and anonymously verified the public `xyz-web-v0.1.0` and `xyz-api-v0.1.0`
+  images. Activation PR #67 passed all five checks and merged as `ded9b43`,
+  adding only the generated Application/catalog activation state.
+- Release recovery PR #66 (`b992c67`) made absent immutable tags an expected
+  preflight result and separated historical image source from the current
+  activation base. Cleanup PR #68 (`a3cc284`) corrected the ephemeral runner's
+  checked-out branch deletion order. GitHub-hosted runner allocation degraded
+  during #68; after service recovery, CI run `31159912958` passed all five jobs
+  and the PR merged.
+- The closeout branch adds the dedicated 90-minute staged Phase 8 acceptance,
+  schema-versioned evidence, real transcript/GIF contract, exact-revision CLI
+  interactions, App-authored acceptance-only retirement PRs, final-backup and
+  retained-archive proof, redacted diagnostics, ADR-0011, and synchronized
+  product/runbook/evidence documentation. Final run, artifact ID/checksum,
+  exact-main regression links, GIF checksum, tag, and release remain to be
+  recorded after hosted acceptance succeeds.
+- Closeout CI run
+  [31169160234](https://github.com/saadabdullaah/steadystate/actions/runs/31169160234)
+  passed all five jobs. Phase 8 acceptance run
+  [31169160225](https://github.com/saadabdullaah/steadystate/actions/runs/31169160225)
+  passed package verification, exact App-authored PR evidence, full-profile
+  bootstrap, image load, and exact-branch GitOps deployment before exposing
+  two product integration defects. A same-named `Database` and `Application`
+  both requested `xyz-monitor`, while Kyverno `1.18.2` rejected the policy's
+  two keyless identities inside one Cosign attestor. Artifact `8990939264`
+  retained the CR conditions, exact controller errors, Kyverno verification
+  errors, cluster snapshot, and cleanup evidence. Database monitoring now has
+  type-qualified names with ownership-safe legacy cleanup, and the two exact
+  release workflows are modeled as separate Kyverno attestors.
+- The next exact-branch acceptance run
+  [31172442924](https://github.com/saadabdullaah/steadystate/actions/runs/31172442924)
+  confirmed those corrections: Team, Database, both Applications, Rollouts,
+  provenance, backups, and the CLI health gate all passed. Its artifact
+  `8991992337` then isolated a 504 in the same-origin order request. The
+  generated web server addressed API container port `8080` directly even
+  though the Kubernetes Service exposes port `80`. The template and checked-in
+  `xyz` fixture now target the Service port, regression coverage rejects the
+  invalid target, and acceptance diagnostics capture web and API logs
+  separately. Focused PR #70 merged as
+  `68cf1ebaa2a38074b812cad11662cd31cf619210` after CI and all Platformctl
+  smoke targets passed. Generated service release run
+  [31175994689](https://github.com/saadabdullaah/steadystate/actions/runs/31175994689)
+  published, scanned, signed, SPDX-attested, and anonymously verified
+  `xyz-web-v0.1.1` (`sha256:0e1056f988ce212e4296749f10a3dea03a0392f9e30bd9eb04188b108536858f`)
+  and `xyz-api-v0.1.1`
+  (`sha256:9a202073551edd3236b318823a2c6471e5fcc335338be0730625a5bab8fc7714`).
+  App-authored activation PR #71 changed only the two image tags and catalog
+  version, passed all five checks, and merged as
+  `df97288f9d0d7d088be5ee02feca35c9900bc62e`.
+- Closeout CI run
+  [31181163010](https://github.com/saadabdullaah/steadystate/actions/runs/31181163010)
+  passed all five jobs. Acceptance run
+  [31181164407](https://github.com/saadabdullaah/steadystate/actions/runs/31181164407)
+  verified the corrected packages and reached full-profile GitOps, but its
+  retained artifact `8995699995` showed the 4-vCPU runner deploying both the
+  historical payments data plane and the Phase 8 `xyz` data plane. etcd became
+  starved, the API server restarted, and authorization failed closed while its
+  storage caches reinitialized. Phase 8 acceptance now keeps every full-profile
+  platform component but filters the catalog render to its subject tenant,
+  `xyz`, and requires three consecutive API-storage/RBAC stability checks
+  before product assertions. Historical tenant coverage remains in Nightly and
+  the Phase 7 acceptance suite.
+- Closeout CI run
+  [31184905034](https://github.com/saadabdullaah/steadystate/actions/runs/31184905034)
+  passed all five jobs at `72e6fc8`. Phase 8 acceptance run
+  [31184909671](https://github.com/saadabdullaah/steadystate/actions/runs/31184909671)
+  confirmed the filtered `xyz` render but artifact `8997945445` showed the
+  kind API again returning EOF while the Database provisioned. The hosted
+  harness now reserves Docker scheduling priority and soft memory for the
+  exact control-plane container before add-ons start, fails early after six
+  consecutive API outages, and captures Docker stats/inspect/kind logs before
+  bounded raw-API snapshots. This changes no local cluster or product
+  contract; it removes host overcommit from the acceptance runner and makes a
+  future infrastructure failure diagnosable.
+- Closeout CI run
+  [31203978644](https://github.com/saadabdullaah/steadystate/actions/runs/31203978644)
+  passed all five jobs. Acceptance run
+  [31203978827](https://github.com/saadabdullaah/steadystate/actions/runs/31203978827)
+  failed fast as designed and artifact `9004380242` retained complete host
+  evidence: the live control plane consumed 225% CPU while the workers used a
+  combined 305% during unfinished Argo sync waves. The harness now caps the
+  three exact kind containers to 3.5 aggregate CPUs, retains control-plane
+  scheduling priority, and waits for all fifteen required full-profile child
+  Applications plus stable API/RBAC probes before starting the Database and
+  golden-path clock. Raw failure snapshots also interpolate their API paths
+  correctly.
+- Closeout CI run
+  [31208867226](https://github.com/saadabdullaah/steadystate/actions/runs/31208867226)
+  passed all five jobs. Acceptance run
+  [31208866752](https://github.com/saadabdullaah/steadystate/actions/runs/31208866752)
+  and artifact `9006433856` verified the resource cap and sequencing fix: all
+  platform children settled, the Database and both Applications became
+  healthy, and frontend/API/PostgreSQL passed. It then exposed a telemetry
+  assertion race because a successful but empty Loki response ended the retry
+  immediately. Phase 8 now waits up to four minutes for the actual request ID
+  in Loki and then for the correlated trace ID in Tempo; transport success
+  alone no longer satisfies either evidence gate.
+- Closeout CI run
+  [31274745239](https://github.com/saadabdullaah/steadystate/actions/runs/31274745239)
+  passed all five jobs. Acceptance run
+  [31274745274](https://github.com/saadabdullaah/steadystate/actions/runs/31274745274)
+  and artifact `9026965291` proved Loki correlation and retained the requested
+  Tempo trace, but exposed an encoding mismatch in the assertion: application
+  logs and the Tempo query path use 32-character hexadecimal IDs, while OTLP
+  protobuf JSON represents the same 16-byte `traceId` as Base64. Acceptance
+  now validates the canonical hex ID, converts it byte-for-byte to Base64, and
+  requires that exact value in Tempo evidence.
+- Acceptance run
+  [31277260107](https://github.com/saadabdullaah/steadystate/actions/runs/31277260107)
+  (artifact `9027649253`, GitHub SHA-256
+  `5b279d60159852f56dc404c3a2432dd39965e1a78f8c5e30169e0652716b7e95`)
+  failed during full-profile deployment before telemetry was exercised. Its
+  complete diagnostics exposed the underlying isolation defect: the local
+  preflight render received `tenantFilter=xyz`, but the bootstrap root
+  Application did not inherit that Helm parameter, so live Argo still created
+  both payments and xyz. Under the acceptance-only 1.5-CPU control-plane quota,
+  etcd and kube-apiserver then missed liveness deadlines while Argo waited for
+  `data-namespaces`. The root now propagates the exact tenant filter, acceptance
+  proves the excluded Argo child, Team, and namespace are absent, and baseline,
+  retiring, and finalized catalog/renders are mandatory evidence. Hosted
+  workers remain capped, while the control plane keeps scheduling priority and
+  may use the runner's remaining CPU. Early deployment failures are recorded
+  truthfully as `result=failed`, and verified DSSE envelopes are decoded into
+  retained SPDX JSON SBOMs rather than serving as a substitute for them.
+- At `7022d2a`, CI run
+  [31279448745](https://github.com/saadabdullaah/steadystate/actions/runs/31279448745)
+  passed all five jobs and Platformctl smoke run
+  [31279448762](https://github.com/saadabdullaah/steadystate/actions/runs/31279448762)
+  passed all six target/packaging contracts. Phase 8 run
+  [31279448756](https://github.com/saadabdullaah/steadystate/actions/runs/31279448756)
+  and artifact `9028361989` (GitHub SHA-256
+  `02a8988b38a3a3a258ca61139e105aedae6fcada74719b097ff42ce0649ff255`)
+  confirmed the tenant/SBOM/failure-state corrections, then exposed scheduler
+  imbalance: one hard-capped worker was saturated while its peer used about
+  one fifth of a CPU, leaving six controllers unsettled. The harness now uses
+  quota-free relative weights: the control plane receives twice each worker's
+  share, and a busy worker can borrow idle capacity. Foundation waits retain
+  exact per-Application state and fail fast on API loss. Failure diagnostics
+  retain node journals/CRI state, and cleanup no longer runs long API teardown
+  or backup-network detachment in the wrong order when the API is unavailable.
+- At `3aba636`, CI run
+  [31282232391](https://github.com/saadabdullaah/steadystate/actions/runs/31282232391)
+  passed all five jobs and Platformctl smoke run
+  [31282232388](https://github.com/saadabdullaah/steadystate/actions/runs/31282232388)
+  passed all six contracts. Phase 8 run
+  [31282232398](https://github.com/saadabdullaah/steadystate/actions/runs/31282232398)
+  passed the complete live CLI, full-stack, PostgreSQL, canary, provenance,
+  telemetry, policy, diagnosis, and resource-budget path. Artifact `9029132915`
+  (GitHub SHA-256
+  `88c3290a531bd5f9c5ab17a35922b42a46a3529e2cfc9a0dd6d6dff1bb3bdc36`)
+  exposed one final lifecycle defect: the retiring render contained the tenant
+  Argo cascade finalizer, but the bootstrap root ignored child finalizers, so
+  deletion removed the Argo child without pruning its four managed CRs. The
+  root now reconciles child finalizers while still ignoring status, and hosted
+  acceptance requires the live cascade finalizer before merging finalization.
+- At `91fa533`, CI run
+  [31316241573](https://github.com/saadabdullaah/steadystate/actions/runs/31316241573)
+  passed all five jobs and Platformctl smoke run
+  [31316241554](https://github.com/saadabdullaah/steadystate/actions/runs/31316241554)
+  passed all six contracts. Phase 8 run
+  [31316241574](https://github.com/saadabdullaah/steadystate/actions/runs/31316241574)
+  proved the cascade finalizer was live and removed both Application CRs.
+  Artifact `9039245988` (GitHub SHA-256
+  `7329918f70c5c92eb44bd020953bd30d4c0afa33ea114aa772aaf8fe395a9991`)
+  then showed foreground propagation delete the CNPG Cluster seven seconds
+  after `xyz-final` began, correctly leaving the Database blocked with
+  `BackupHealthy=False`. The tenant child now uses Argo's pinned background
+  cascade so Database and Team finalizers retain their dependencies while
+  completing the final backup and ordered namespace cleanup.
+- At `10a6de2`, CI run
+  [31322270318](https://github.com/saadabdullaah/steadystate/actions/runs/31322270318)
+  passed all five jobs, Platformctl smoke run
+  [31322270333](https://github.com/saadabdullaah/steadystate/actions/runs/31322270333)
+  passed all six release contracts, and Phase 8 acceptance run
+  [31322270309](https://github.com/saadabdullaah/steadystate/actions/runs/31322270309)
+  passed all seven golden-path checks in 25m53s. Artifact `9040790659`
+  (GitHub SHA-256
+  `0cf90f4e884c06fca495fea76d9d93118b7ecc0c556c36bca429ed9589835935`)
+  retained complete evidence and diagnostics. Evidence SHA-256 is
+  `19815d2fc16226a8124bde20f599d22d3c3f113e936fb5a590445632246cdfad`;
+  the tracked hosted GIF SHA-256 is
+  `1107d264753429ef6bfabbbcd9816b9accc54156b3310a7e067ab01ecf06e194`.
+  The two reviewed retirement PRs completed in 193.787 seconds, retained 12
+  external backup objects, and left no Team, namespace, CR, Argo child,
+  generated workload, acceptance PR, or request branch behind.

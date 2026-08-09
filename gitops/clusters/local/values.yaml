@@ -6,6 +6,7 @@ enableTelemetryPipeline: true
 enableSecurity: true
 enableDataFoundation: false
 enableTenantWorkloads: true
+tenantFilter: ""
 monitoringKubeStateMetricsEnabled: true
 backupStoreEndpoint: http://172.30.240.10:8333
 operatorImage: ghcr.io/saadabdullaah/steadystate-operator:v0.3.0

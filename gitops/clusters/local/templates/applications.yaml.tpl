@@ -447,6 +447,7 @@ spec:
 {{- if .Values.enableTenantWorkloads }}
 {{- $catalog := .Files.Get "catalog/tenants.yaml" | fromYaml }}
 {{- range $tenant := $catalog.tenants }}
+{{- if or (eq $.Values.tenantFilter "") (eq $tenant.name $.Values.tenantFilter) }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -455,7 +456,7 @@ metadata:
   namespace: argocd
 {{- if eq $tenant.lifecycle "Retiring" }}
   finalizers:
-    - resources-finalizer.argocd.argoproj.io
+    - resources-finalizer.argocd.argoproj.io/background
 {{- end }}
   annotations:
     argocd.argoproj.io/sync-wave: "0"
@@ -527,5 +528,6 @@ spec:
       jsonPointers:
         - /metadata/finalizers
         - /status
+{{- end }}
 {{- end }}
 {{- end }}

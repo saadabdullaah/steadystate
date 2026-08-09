@@ -9,6 +9,7 @@ param(
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity,
     [switch]$DisableTenantWorkloads,
+    [ValidatePattern('^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')][string]$TenantFilter = '',
     [switch]$DisableMonitoringStateMetrics,
     [string]$BackupStoreEndpoint = $(if ($env:BACKUP_STORE_ENDPOINT) { $env:BACKUP_STORE_ENDPOINT } else { 'http://172.30.240.10:8333' }),
     [ValidateSet('minimal','standard','full')][string]$Profile = 'standard'
@@ -185,6 +186,7 @@ function Render-RootTemplate {
         '--set', "enableSecurity=$security",
         '--set', "enableDataFoundation=$dataFoundation",
         '--set', "enableTenantWorkloads=$tenantWorkloads",
+        '--set-string', "tenantFilter=$TenantFilter",
         '--set', "monitoringKubeStateMetricsEnabled=$monitoringStateMetrics",
         '--set-string', "backupStoreEndpoint=$BackupStoreEndpoint",
         '--show-only', $Template

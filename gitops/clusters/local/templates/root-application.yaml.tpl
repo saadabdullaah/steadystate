@@ -22,6 +22,8 @@ spec:
           value: {{ .Values.enableDataFoundation | quote }}
         - name: enableTenantWorkloads
           value: {{ .Values.enableTenantWorkloads | quote }}
+        - name: tenantFilter
+          value: {{ .Values.tenantFilter | quote }}
         - name: monitoringKubeStateMetricsEnabled
           value: {{ .Values.monitoringKubeStateMetricsEnabled | quote }}
         - name: backupStoreEndpoint
@@ -45,6 +47,5 @@ spec:
     - group: argoproj.io
       kind: Application
       jsonPointers:
-        - /metadata/finalizers
         - /status
 {{- end }}

@@ -600,12 +600,35 @@ func TestKyvernoEnforcementContracts(t *testing.T) {
 	imagePolicyText := string(readFile(t, filepath.Join(policyPath, "verify-team-images.yaml")))
 	for _, identity := range []string{
 		"https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main",
+		"https://github.com/saadabdullaah/steadystate/.github/workflows/service-release.yml@refs/heads/main",
 		"https://token.actions.githubusercontent.com",
 		"https://rekor.sigstore.dev",
 		"exclude-cloudnative-pg",
 	} {
 		if !strings.Contains(imagePolicyText, identity) {
 			t.Errorf("ImageValidatingPolicy is missing trust contract %q", identity)
+		}
+	}
+	attestors := nestedSlice(t, imagePolicy, "spec", "attestors")
+	if len(attestors) != 2 {
+		t.Fatalf("ImageValidatingPolicy has %d attestors, want one per release workflow", len(attestors))
+	}
+	for _, raw := range attestors {
+		attestor, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("ImageValidatingPolicy attestor has unexpected type %T", raw)
+		}
+		identities := nestedSlice(t, attestor, "cosign", "keyless", "identities")
+		if len(identities) != 1 {
+			t.Fatalf("Kyverno 1.18 requires one keyless identity per attestor, got %d", len(identities))
+		}
+	}
+	for _, expression := range []string{
+		"verifyImageSignatures(image, [attestors.demoDelivery, attestors.serviceDelivery])",
+		"verifyAttestationSignatures(image, attestations.spdxSBOM, [attestors.demoDelivery, attestors.serviceDelivery])",
+	} {
+		if !strings.Contains(imagePolicyText, expression) {
+			t.Errorf("ImageValidatingPolicy is missing split-authority expression %q", expression)
 		}
 	}
 	rendered := string(run(t, root, "kustomize", "build", policyPath))
@@ -682,6 +705,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
 		"--set", "bootstrapRoot=true",
 		"--set-string", "rootTargetRevision=checkpoint-branch",
+		"--set-string", "tenantFilter=xyz",
 		"--show-only", "templates/root-application.yaml.tpl",
 	)
 	objects := decodeManifests(t, rendered)
@@ -689,7 +713,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 7 {
+	if len(parameters) != 8 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
@@ -698,6 +722,7 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 		"enableSecurity":                    "true",
 		"enableDataFoundation":              "false",
 		"enableTenantWorkloads":             "true",
+		"tenantFilter":                      "xyz",
 		"monitoringKubeStateMetricsEnabled": "true",
 		"backupStoreEndpoint":               "http://172.30.240.10:8333",
 	}
@@ -737,7 +762,7 @@ func TestGitOpsCommandsAreMirrored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery", "verify-observability", "test-observability", "phase5-acceptance", "start-backup-store", "stop-backup-store", "verify-data", "test-data-recovery", "phase7-acceptance"} {
+	for _, command := range []string{"deploy-gitops", "test-gitops", "undeploy-gitops", "verify-gitops", "verify-progressive-delivery", "test-progressive-delivery", "verify-observability", "test-observability", "phase5-acceptance", "start-backup-store", "stop-backup-store", "verify-data", "test-data-recovery", "phase7-acceptance", "phase8-acceptance"} {
 		if !strings.Contains(string(makefile), command) {
 			t.Errorf("Makefile is missing %s", command)
 		}

@@ -299,6 +299,11 @@ kubectl logs -n monitoring deployment/tempo --all-containers --tail=300
 
 For `traces=true`, the application container must have `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector.monitoring.svc.cluster.local:4317`, and the owned NetworkPolicy must allow only that collector destination. The collector drops spans without `service.name`. Health, readiness, and metrics endpoints are deliberately not instrumented.
 
+When comparing `platformctl app traces --trace-id` output with structured
+logs, remember that the query and log use lowercase hexadecimal while Tempo's
+OTLP/protobuf JSON encodes the `traceId` bytes field as Base64. Decode both to
+the same 16 bytes; a literal string comparison is not a correlation check.
+
 ## ServiceHealth is False while metrics are available
 
 `ServiceHealth` does not query Prometheus. Inspect the active workload and Gateway status directly:
@@ -343,6 +348,12 @@ Verify the immutable digest and exact certificate identity:
 cosign verify --certificate-identity 'https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' ghcr.io/saadabdullaah/steadystate-demo-app:v0.6.0
 cosign verify-attestation --type spdxjson --certificate-identity 'https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' ghcr.io/saadabdullaah/steadystate-demo-app:v0.6.0
 ```
+
+For a generated service, substitute the exact
+`service-release.yml@refs/heads/main` certificate identity and its immutable
+`steadystate-services` tag. The Kyverno policy keeps demo and generic service
+workflows as separate Cosign attestors because Kyverno `1.18.2` does not
+support multiple keyless identities inside one attestor.
 
 A valid signature from a branch, another workflow, or the Phase 6 acceptance workflow is intentionally denied. A Sigstore/Rekor or GHCR outage fails closed and must not be worked around by disabling `failurePolicy: Fail`. Wait for the dependency to recover, retain the last healthy workload, and rerun delivery.
 
@@ -555,3 +566,117 @@ is not fabricated application health. Follow the named evidence reference and
 remediation. Restore the unavailable Argo, Kyverno, Prometheus, Loki, Tempo,
 CloudNativePG, or Barman dependency and rerun the command. Confirmed unhealthy
 application state is reported as `Fail` and exits with code 5.
+
+## platformctl cannot find the checkout or configuration
+
+Run `platformctl config view` and verify that the selected context points to
+the repository root, not a generated service subdirectory. On Windows the file
+is under `%AppData%\SteadyState`; on Linux/macOS it is under
+`$XDG_CONFIG_HOME/steadystate` or `~/.config/steadystate`. Configuration is
+non-secret. If migration is required, preserve the automatic backup and never
+copy tokens, kubeconfig contents, SOPS keys, or database credentials into the
+file.
+
+## A broker request is stale, missing, or changed
+
+`platformctl` requires a clean tracked checkout whose HEAD equals current
+`origin/main`. Pull the reviewed changes, rerun with `--plan`, compare the new
+diff, and submit a new request. Do not reuse the old request UUID. A broker run
+that reports a proposal/render digest mismatch or unexpected file fails closed;
+inspect its URL with `platformctl request status REQUEST_ID` and do not edit the
+automation branch manually.
+
+If dispatch succeeds but the CLI cannot discover the run within 60 seconds,
+use the printed request UUID in GitHub Actions. GitHub runner degradation may
+delay the run without invalidating the proposal. Do not repeatedly dispatch the
+same intent with different UUIDs until the Actions queue is understood.
+
+## Generated service publication or activation fails
+
+Open the service release artifact and compare component/version/SHA tags. All
+tags absent is a new release; all expected tags resolving to their recorded
+digests is an idempotent rerun. Partial tags or mismatched digests require
+maintainer investigation and intentionally fail closed. Verify that the shared
+`steadystate-services` package is public before anonymous manifest, signature,
+or attestation checks.
+
+Activation PR B must change only the generated Application leaves/catalog
+version expected by the renderer. Its author must be the repository delivery
+App, and its body must record both component digests, source SHA, workflow, and
+SPDX verification. Never activate a tag manually to bypass a failed release.
+
+## A generated frontend or same-origin API is unavailable
+
+Run `platformctl app doctor WEB_NAME`, then inspect the web and API Applications
+separately. The embedded Go web server serves the React build and proxies
+`/api/` to the deterministic same-Team API Service. A frontend route can be
+healthy while the API or Database is not. Check the API's `DatabaseReady`,
+`SecurityPolicyReady`, Rollout, Service endpoints, and Database backup status;
+do not add CORS or a public second route as an ad-hoc fix.
+
+## Historical logs, traces, SLO, or policy output is empty
+
+Confirm the Application opted into the relevant telemetry and is labeled for
+Alloy/OTel discovery. Make one request with a known `X-Request-ID`, allow the
+bounded ingestion interval, and retry `app logs --historical`, `app traces`, or
+`app slo`. `Unknown` is the correct result for an unavailable backend. Restore
+Prometheus, Loki, Tempo, OTel, Alloy, or Kyverno rather than weakening the
+doctor result.
+
+## Service retirement is blocked
+
+Retirement requires two distinct reviewed proposals. Merge the approval PR,
+wait until the tenant Argo Application reports that exact revision, and verify
+the live resource carries the approval deletion UUID. Then run
+`platformctl service finalize NAME --team TEAM --deletion-request UUID
+--approval-revision SHA`. A one-step manifest removal remains OutOfSync because
+`Prune=false`; that is protection, not a reason to patch the live CR.
+Before finalization, the live tenant Argo Application must contain
+`resources-finalizer.argocd.argoproj.io/background`. The bootstrap root owns
+this lifecycle finalizer and ignores only child status. Background propagation
+is intentional: foreground propagation can delete the CNPG Cluster and backup
+dependencies while the Database final backup is running. If the desired
+retiring render contains the finalizer but the live child does not, inspect the
+root Application's `ignoreDifferences`; never bypass the missing cascade
+boundary by deleting the child or tenant CRs manually.
+
+Database finalization can remain pending while the deterministic final Barman
+Backup runs. Inspect `platformctl database backups NAME` and external-store
+health. Use force deletion only through a new reviewed proposal with both
+`--force` and `--acknowledge-data-loss`; external archives remain retained.
+
+## Phase 8 acceptance cleanup was interrupted
+
+Acceptance is restricted to `acceptance/phase8-<run>-<attempt>` and
+`automation/platform/acceptance/...` refs. Capture diagnostics before cleanup,
+close any still-open acceptance-only PR, delete only those exact refs, run
+`platformctl cluster down`, and stop the exact SeaweedFS resources with the
+repository command. Never recursively delete Docker resources or repository
+directories. Normal `main` and automation PRs are outside this cleanup scope.
+
+The hosted full-profile job uses no hard CPU quota on its exact three kind
+containers. It gives the control plane twice each worker's Docker scheduling
+weight and reserves 2 GiB of soft control-plane memory before GitOps add-ons
+start. Under contention the API receives half the available container CPU,
+while a busy worker can borrow capacity from an idle peer. This avoids both
+control-plane starvation and the stranded capacity caused by per-worker hard
+caps. The harness then waits for every
+required platform child Application to settle before beginning product
+readiness assertions. This is runner stabilization, not a different platform
+profile. If the API returns repeated EOFs, inspect the artifact's
+`failure-capture-host` Docker stats, inspect data, and kind logs first. A
+healthy API returning NotFound while a resource has not yet been created is
+normal convergence; `/readyz` is checked first. The acceptance wait fails only
+after six consecutive API failures rather than spending the full Database
+timeout against a dead control plane.
+
+The bootstrap root must also inherit `tenantFilter=xyz`. Otherwise the local
+preflight can look isolated while live Argo still deploys every catalog tenant.
+The tenant-isolation snapshot and baseline, retiring, and finalized renders in
+the acceptance artifact prove that live and offline desired state agree.
+`platform-foundation-progress.json` retains every child's final sync, health,
+and message. If the API itself fails, the host snapshot also includes bounded
+kubelet/containerd journals and CRI container state from every exact kind
+node. Cleanup skips API-driven teardown when `/readyz` is unavailable, destroys
+kind before detaching the backup network, and removes only exact named Docker
+resources.

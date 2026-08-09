@@ -123,11 +123,69 @@ flowchart TB
 
 Every profile disables kindnet and installs Calico, making NetworkPolicy behavior observable. Envoy Gateway provides the maintained Gateway API implementation for north-south traffic.
 
-Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Phase 4 adds pinned Argo Rollouts, the Gateway API traffic-router plugin, a trimmed Prometheus stack, operator-generated analysis/monitoring resources, reversible strategy migration, and automatic metric-gated promotion or rollback. Phase 5 extends that monitoring plane with logs, traces, SLO rules, dashboards, and truthful service health. Phase 6 adds OIDC-signed/SBOM-attested images, stable CEL admission policy, SOPS/age secret custody, security status, and network isolation. Phase 7 adds declarative PostgreSQL, external backup durability, database binding, and measured whole-cluster recovery.
+Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Phase 4 adds pinned Argo Rollouts, the Gateway API traffic-router plugin, a trimmed Prometheus stack, operator-generated analysis/monitoring resources, reversible strategy migration, and automatic metric-gated promotion or rollback. Phase 5 extends that monitoring plane with logs, traces, SLO rules, dashboards, and truthful service health. Phase 6 adds OIDC-signed/SBOM-attested images, stable CEL admission policy, SOPS/age secret custody, security status, and network isolation. Phase 7 adds declarative PostgreSQL, external backup durability, database binding, and measured whole-cluster recovery. Phase 8 adds a local-owner CLI, deterministic catalog and proposal schemas, a GitHub App broker, generated service sources, generic signed delivery, ordered diagnosis, and protected retirement without adding an in-cluster CLI service or a second control plane.
+
+## Developer CLI, broker, and catalog boundary
+
+`platformctl` is a client of the existing repository and cluster contracts. Its
+configuration names the checkout, repository, kube context, cluster profile,
+and host ports; it never stores GitHub tokens, App keys, SOPS identities, image
+credentials, or Database Secrets. Cluster reads use Kubernetes APIs and
+service proxying to Prometheus, Loki, and Tempo. Local cluster lifecycle is
+delegated to the existing bounded PowerShell commands instead of reproducing
+host cleanup logic.
+
+Normal writes are `ChangeRequest` values, not Kubernetes patches. The CLI
+renders the proposal locally, shows its deterministic diff, and dispatches the
+four-field `platform-change.yml` broker using the developer's active `gh`
+authentication. The workflow validates schema, request UUID, base SHA, size,
+path allowlist, proposal digest, and render digest before minting the
+repository-scoped GitHub App token. After authentication it re-renders and
+opens an `automation/platform/...` pull request. The workflow trusts
+`github.actor`, not actor data in the proposal. The App has only Metadata read,
+Contents read/write, and Pull Requests read/write.
+
+`TenantCatalog` is the deterministic index for Teams, Applications, Databases,
+generated services, and lifecycle. The root Helm chart iterates it while
+preserving the established Argo names, waves, revision inheritance, and
+source annotations. Generated workload children remain operator-owned; the
+catalog never makes Argo own Deployments, Rollouts, Services, routes, analysis,
+monitoring, or CloudNativePG children.
+
+Generated service source stays in the monorepo. A scaffold merge contains no
+active Application. The generic release workflow tests each changed component,
+builds immutable public-package tags, scans them, generates SPDX JSON, signs and
+attests exact digests with the main-branch workflow identity, and only then
+opens an activation PR. Full-stack web/API images share a source version but
+retain separate digests and attestations.
+
+Deletion is also Git state. Active Team, Application, and Database manifests
+carry `Prune=false`. The approval proposal marks only selected catalog entries
+Retiring, records one deletion UUID, and makes those exact CRs pruneable. The
+finalization proposal is rejected until the approval revision is merged and
+visible in Argo. Argo then prunes the CRs; SteadyState finalizers order workload
+cleanup, the Database final backup, and Team namespace deletion. The bootstrap
+root ignores child Application status, but deliberately reconciles child Argo
+finalizers so the Retiring lifecycle can install the exact cascade boundary
+before finalization removes the child. That boundary uses Argo's background
+cascade: managed CR deletion proceeds while the Database and Team custom
+finalizers keep their backing resources alive for the final backup and ordered
+namespace teardown. A foreground cascade would delete those dependencies before
+the final backup finishes. Only the
+hosted Phase 8 workflow may auto-merge these two proposal shapes, and only when
+the PR base matches `acceptance/phase8-<run>-<attempt>`; `main` and normal
+branches fail closed.
+
+Break glass is deliberately outside normal Git delivery. Promote/abort require
+an active canary, a human reason, exact name confirmation, and a current
+Rollout resource version. Attempted/completed/failed Events and a private local
+JSON record make the laptop action reviewable, but do not claim immutable
+enterprise audit guarantees. A recovery Git proposal is still required when
+desired state remains unhealthy.
 
 ## Supply-chain trust and admission contract
 
-The Demo release workflow is the only trusted image issuer. GitHub OIDC keylessly signs the immutable good and bad digests and attaches separate SPDX JSON attestations. Kyverno accepts a signature only when its certificate subject is the exact `demo-release.yml@refs/heads/main` workflow and its issuer is GitHub Actions. Tags are mutated to verified digests at admission. A signature from any other repository, workflow, or ref remains untrusted even when cryptographically valid.
+The Demo and generic service release workflows are the only trusted image issuers. GitHub OIDC keylessly signs immutable digests and attaches SPDX JSON attestations. Kyverno accepts a signature only when its certificate subject is the exact `demo-release.yml@refs/heads/main` or `service-release.yml@refs/heads/main` workflow and its issuer is GitHub Actions. Because Kyverno `1.18.2` accepts one keyless identity per Cosign attestor, each workflow is represented by a separate authority and verification requires at least one exact match. Tags are mutated to verified digests at admission. A signature from any other repository, workflow, or ref remains untrusted even when cryptographically valid.
 
 Stable Kyverno `ValidatingPolicy` resources enforce universal Team safety and the stricter SteadyState application Pod contract. The `ImageValidatingPolicy` applies to every unmanaged Team Pod and to managed Applications labeled `steadystate.dev/require-signed-image=true`. Platform namespaces are selected out explicitly; Team users cannot create native workloads or forge the trusted operator path through their namespaced RBAC.
 

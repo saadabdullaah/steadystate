@@ -52,12 +52,21 @@ spec:
     required: true
     verifyDigest: true
   attestors:
-    - name: steadystateDelivery
+    # Kyverno 1.18 rejects multiple keyless identities in one Cosign attestor.
+    # Keep each release workflow as an independent authority and require at
+    # least one successful authority for every image/signature pair.
+    - name: demoDelivery
       cosign:
         keyless:
           identities:
             - subject: https://github.com/saadabdullaah/steadystate/.github/workflows/demo-release.yml@refs/heads/main
               issuer: https://token.actions.githubusercontent.com
+        ctlog:
+          url: https://rekor.sigstore.dev
+    - name: serviceDelivery
+      cosign:
+        keyless:
+          identities:
             - subject: https://github.com/saadabdullaah/steadystate/.github/workflows/service-release.yml@refs/heads/main
               issuer: https://token.actions.githubusercontent.com
         ctlog:
@@ -69,11 +78,11 @@ spec:
   validations:
     - expression: >-
         images.containers.map(image,
-          verifyImageSignatures(image, [attestors.steadystateDelivery])
+          verifyImageSignatures(image, [attestors.demoDelivery, attestors.serviceDelivery])
         ).all(results, results > 0)
       message: Images must be signed by an approved SteadyState main-branch release workflow.
     - expression: >-
         images.containers.map(image,
-          verifyAttestationSignatures(image, attestations.spdxSBOM, [attestors.steadystateDelivery])
+          verifyAttestationSignatures(image, attestations.spdxSBOM, [attestors.demoDelivery, attestors.serviceDelivery])
         ).all(results, results > 0)
       message: Images must carry a verified SPDX SBOM attestation from an approved SteadyState main-branch release workflow.

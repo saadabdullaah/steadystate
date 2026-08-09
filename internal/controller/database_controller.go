@@ -171,6 +171,13 @@ func (r *DatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return r.databaseReconcileFailure(ctx, database, err)
 		}
 	}
+	for _, legacy := range resources.LegacyDatabaseMonitoringResources(database) {
+		changed, err = r.deleteDatabaseObjectIfControlledBy(ctx, database, legacy)
+		mutated = mutated || changed
+		if err != nil {
+			return r.databaseReconcileFailure(ctx, database, err)
+		}
+	}
 
 	cluster := resources.DatabaseCluster(database)
 	if err := r.Get(ctx, client.ObjectKeyFromObject(cluster), cluster); err != nil {
@@ -270,6 +277,22 @@ func (r *DatabaseReconciler) deleteDatabaseObject(ctx context.Context, object cl
 		return false, nil
 	} else if err != nil {
 		return false, err
+	}
+	return true, client.IgnoreNotFound(r.Delete(ctx, current))
+}
+
+func (r *DatabaseReconciler) deleteDatabaseObjectIfControlledBy(ctx context.Context, database *platformv1alpha1.Database, object client.Object) (bool, error) {
+	current := object.DeepCopyObject().(client.Object)
+	if unstructuredObject, ok := object.(*unstructured.Unstructured); ok {
+		current.(*unstructured.Unstructured).SetGroupVersionKind(unstructuredObject.GroupVersionKind())
+	}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(object), current); apierrors.IsNotFound(err) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	if !metav1.IsControlledBy(current, database) {
+		return false, nil
 	}
 	return true, client.IgnoreNotFound(r.Delete(ctx, current))
 }
