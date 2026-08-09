@@ -167,7 +167,11 @@ visible in Argo. Argo then prunes the CRs; SteadyState finalizers order workload
 cleanup, the Database final backup, and Team namespace deletion. The bootstrap
 root ignores child Application status, but deliberately reconciles child Argo
 finalizers so the Retiring lifecycle can install the exact cascade boundary
-before finalization removes the child. Only the
+before finalization removes the child. That boundary uses Argo's background
+cascade: managed CR deletion proceeds while the Database and Team custom
+finalizers keep their backing resources alive for the final backup and ordered
+namespace teardown. A foreground cascade would delete those dependencies before
+the final backup finishes. Only the
 hosted Phase 8 workflow may auto-merge these two proposal shapes, and only when
 the PR base matches `acceptance/phase8-<run>-<attempt>`; `main` and normal
 branches fail closed.

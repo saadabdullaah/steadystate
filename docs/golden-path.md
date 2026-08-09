@@ -109,7 +109,8 @@ platformctl service finalize xyz --team xyz `
 ```
 
 Finalization PR D removes the catalog entry, leaves, and generated source. After
-review and merge, Argo prunes the CRs. The platform deletes Applications,
+review and merge, Argo background-prunes the CRs so SteadyState finalizers can
+keep backup dependencies available. The platform deletes Applications,
 completes the Database final backup, removes the Team namespace, and retains the
 external archive. Do not manually remove `Prune=false`, patch finalizers, or use
 force deletion to accelerate a normal backup.

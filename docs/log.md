@@ -817,3 +817,17 @@
   deletion removed the Argo child without pruning its four managed CRs. The
   root now reconciles child finalizers while still ignoring status, and hosted
   acceptance requires the live cascade finalizer before merging finalization.
+- At `91fa533`, CI run
+  [31316241573](https://github.com/saadabdullaah/steadystate/actions/runs/31316241573)
+  passed all five jobs and Platformctl smoke run
+  [31316241554](https://github.com/saadabdullaah/steadystate/actions/runs/31316241554)
+  passed all six contracts. Phase 8 run
+  [31316241574](https://github.com/saadabdullaah/steadystate/actions/runs/31316241574)
+  proved the cascade finalizer was live and removed both Application CRs.
+  Artifact `9039245988` (GitHub SHA-256
+  `7329918f70c5c92eb44bd020953bd30d4c0afa33ea114aa772aaf8fe395a9991`)
+  then showed foreground propagation delete the CNPG Cluster seven seconds
+  after `xyz-final` began, correctly leaving the Database blocked with
+  `BackupHealthy=False`. The tenant child now uses Argo's pinned background
+  cascade so Database and Team finalizers retain their dependencies while
+  completing the final backup and ordered namespace cleanup.

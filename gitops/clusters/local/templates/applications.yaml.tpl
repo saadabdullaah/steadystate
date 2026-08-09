@@ -456,7 +456,7 @@ metadata:
   namespace: argocd
 {{- if eq $tenant.lifecycle "Retiring" }}
   finalizers:
-    - resources-finalizer.argocd.argoproj.io
+    - resources-finalizer.argocd.argoproj.io/background
 {{- end }}
   annotations:
     argocd.argoproj.io/sync-wave: "0"

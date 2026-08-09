@@ -65,8 +65,8 @@ Phase 8 uploads `phase8-acceptance-<commit>` with:
 - healthy and failure-diagnosis fixtures, confirmed break-glass rejection
   output, rendered proposal results, and redacted audit-contract proof;
 - baseline, retiring, and finalized catalog plus deterministic GitOps renders;
-- the live tenant Argo cascade finalizer at the retiring revision, before the
-  finalization proposal is allowed to proceed;
+- the live tenant Argo background-cascade finalizer at the retiring revision,
+  before the finalization proposal is allowed to proceed;
 - Argo, Team, Application, Database, Rollout, AnalysisRun, route, Pod, Service,
   tenant-filter isolation, platform-foundation progress, backup-retention, and
   resource-usage snapshots;

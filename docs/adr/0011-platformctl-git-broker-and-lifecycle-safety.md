@@ -80,7 +80,11 @@ Database carries `argocd.argoproj.io/sync-options: Prune=false`.
    Team retirement also puts the Argo resources finalizer on the exact tenant
    child Application. The bootstrap root continues to ignore child status but
    does not ignore child finalizers; otherwise this Git-owned cascade boundary
-   would render without ever reaching the live object.
+   would render without ever reaching the live object. The exact finalizer is
+   `resources-finalizer.argocd.argoproj.io/background`: foreground propagation
+   can garbage-collect CloudNativePG dependencies while the Database final
+   backup is still running, whereas background propagation lets SteadyState's
+   Database and Team finalizers complete their ordered cleanup.
 2. A finalization PR is valid only after the approval commit is in `main`, the
    expected Argo revision is visible, and the live resource carries that UUID.
    It removes the catalog entry and deterministic leaf. Argo prunes the CR;

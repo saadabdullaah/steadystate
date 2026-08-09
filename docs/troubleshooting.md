@@ -632,11 +632,13 @@ the live resource carries the approval deletion UUID. Then run
 --approval-revision SHA`. A one-step manifest removal remains OutOfSync because
 `Prune=false`; that is protection, not a reason to patch the live CR.
 Before finalization, the live tenant Argo Application must contain
-`resources-finalizer.argocd.argoproj.io`. The bootstrap root owns this
-lifecycle finalizer and ignores only child status. If the desired retiring
-render contains the finalizer but the live child does not, inspect the root
-Application's `ignoreDifferences`; never bypass the missing cascade boundary by
-deleting the child or tenant CRs manually.
+`resources-finalizer.argocd.argoproj.io/background`. The bootstrap root owns
+this lifecycle finalizer and ignores only child status. Background propagation
+is intentional: foreground propagation can delete the CNPG Cluster and backup
+dependencies while the Database final backup is running. If the desired
+retiring render contains the finalizer but the live child does not, inspect the
+root Application's `ignoreDifferences`; never bypass the missing cascade
+boundary by deleting the child or tenant CRs manually.
 
 Database finalization can remain pending while the deterministic final Barman
 Backup runs. Inspect `platformctl database backups NAME` and external-store

@@ -647,7 +647,7 @@ switch ($Stage) {
                 $argoRaw = @(& kubectl --request-timeout=10s get applications.argoproj.io xyz -n argocd -o json 2>$null)
                 if ($LASTEXITCODE -ne 0 -or -not $argoRaw) { return $false }
                 $argoApplication = ($argoRaw -join [Environment]::NewLine) | ConvertFrom-Json
-                if (-not (@($argoApplication.metadata.finalizers) -contains 'resources-finalizer.argocd.argoproj.io')) { return $false }
+                if (-not (@($argoApplication.metadata.finalizers) -contains 'resources-finalizer.argocd.argoproj.io/background')) { return $false }
                 return $true
             }
             Capture-RenderedGitOps 'retiring' $state.currentRevision
