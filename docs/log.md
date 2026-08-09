@@ -831,3 +831,19 @@
   `BackupHealthy=False`. The tenant child now uses Argo's pinned background
   cascade so Database and Team finalizers retain their dependencies while
   completing the final backup and ordered namespace cleanup.
+- At `10a6de2`, CI run
+  [31322270318](https://github.com/saadabdullaah/steadystate/actions/runs/31322270318)
+  passed all five jobs, Platformctl smoke run
+  [31322270333](https://github.com/saadabdullaah/steadystate/actions/runs/31322270333)
+  passed all six release contracts, and Phase 8 acceptance run
+  [31322270309](https://github.com/saadabdullaah/steadystate/actions/runs/31322270309)
+  passed all seven golden-path checks in 25m53s. Artifact `9040790659`
+  (GitHub SHA-256
+  `0cf90f4e884c06fca495fea76d9d93118b7ecc0c556c36bca429ed9589835935`)
+  retained complete evidence and diagnostics. Evidence SHA-256 is
+  `19815d2fc16226a8124bde20f599d22d3c3f113e936fb5a590445632246cdfad`;
+  the tracked hosted GIF SHA-256 is
+  `1107d264753429ef6bfabbbcd9816b9accc54156b3310a7e067ab01ecf06e194`.
+  The two reviewed retirement PRs completed in 193.787 seconds, retained 12
+  external backup objects, and left no Team, namespace, CR, Argo child,
+  generated workload, acceptance PR, or request branch behind.
