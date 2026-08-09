@@ -5,6 +5,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -286,6 +287,31 @@ var _ = Describe("Application reconciler", Ordered, func() {
 		Expect(app.Status.Phase).To(Equal(platformv1alpha1.ApplicationPhaseProgressing))
 	})
 
+	It("retries an HTTPRoute conflict after Service recreation", func(ctx SpecContext) {
+		app := validApplication("route-conflict", namespace)
+		Expect(k8sClient.Create(ctx, app)).To(Succeed())
+		reconcile(ctx, k8sClient, app)
+
+		key := types.NamespacedName{Name: app.Name, Namespace: namespace}
+		service := &corev1.Service{}
+		Expect(k8sClient.Get(ctx, key, service)).To(Succeed())
+		oldUID := service.UID
+		Expect(k8sClient.Delete(ctx, service)).To(Succeed())
+
+		wrapped := &conflictRouteClient{Client: k8sClient}
+		reconcile(ctx, wrapped, app)
+		Expect(wrapped.attempts.Load()).To(BeNumerically(">=", 2))
+
+		Expect(k8sClient.Get(ctx, key, service)).To(Succeed())
+		Expect(service.UID).NotTo(Equal(oldUID))
+		route := &gatewayv1.HTTPRoute{}
+		Expect(k8sClient.Get(ctx, key, route)).To(Succeed())
+		Expect(route.Annotations).To(HaveKeyWithValue(
+			backendServiceUIDsAnnotation,
+			fmt.Sprintf("%s/%s=%s", namespace, app.Name, service.UID),
+		))
+	})
+
 	It("performs zero writes after reconciliation settles", func(ctx SpecContext) {
 		app := validApplication("settled", namespace)
 		Expect(k8sClient.Create(ctx, app)).To(Succeed())
@@ -374,6 +400,18 @@ func (w *countingStatusWriter) Patch(ctx context.Context, obj client.Object, pat
 type conflictStatusClient struct {
 	client.Client
 	attempts atomic.Int64
+}
+
+type conflictRouteClient struct {
+	client.Client
+	attempts atomic.Int64
+}
+
+func (c *conflictRouteClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	if _, ok := obj.(*gatewayv1.HTTPRoute); ok && c.attempts.Add(1) == 1 {
+		return apierrors.NewConflict(schema.GroupResource{Group: gatewayv1.GroupVersion.Group, Resource: "httproutes"}, obj.GetName(), errors.New("injected route status conflict"))
+	}
+	return c.Client.Update(ctx, obj, opts...)
 }
 
 func (c *conflictStatusClient) Status() client.SubResourceWriter {

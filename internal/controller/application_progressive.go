@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -512,28 +513,38 @@ func (r *ApplicationReconciler) reconcileUnstructured(ctx context.Context, app *
 }
 
 func (r *ApplicationReconciler) reconcileRoute(ctx context.Context, app *platformv1alpha1.Application, canary bool) (*gatewayv1.HTTPRoute, bool, error) {
-	desired := resources.HTTPRoute(app)
+	desiredTemplate := resources.HTTPRoute(app)
 	if canary {
-		desired = resources.CanaryHTTPRoute(app)
+		desiredTemplate = resources.CanaryHTTPRoute(app)
 	}
-	backendServiceUIDs, err := r.routeBackendServiceUIDs(ctx, desired)
+	backendServiceUIDs, err := r.routeBackendServiceUIDs(ctx, desiredTemplate)
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve HTTP route backends: %w", err)
 	}
-	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace}}
-	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, route, func() error {
-		if canary {
-			if route.Labels[gatewayPluginInProgressLabel] == gatewayPluginInProgressValue {
-				preserveRouteWeights(desired, route)
+	var route *gatewayv1.HTTPRoute
+	op := controllerutil.OperationResultNone
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		desired := desiredTemplate.DeepCopy()
+		current := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace}}
+		attemptOp, updateErr := controllerutil.CreateOrUpdate(ctx, r.Client, current, func() error {
+			if canary {
+				if current.Labels[gatewayPluginInProgressLabel] == gatewayPluginInProgressValue {
+					preserveRouteWeights(desired, current)
+				}
 			}
+			mergeLabels(&current.ObjectMeta, desired.Labels)
+			if current.Annotations == nil {
+				current.Annotations = map[string]string{}
+			}
+			current.Annotations[backendServiceUIDsAnnotation] = backendServiceUIDs
+			current.Spec = desired.Spec
+			return controllerutil.SetControllerReference(app, current, r.Scheme)
+		})
+		if updateErr == nil {
+			route = current
+			op = attemptOp
 		}
-		mergeLabels(&route.ObjectMeta, desired.Labels)
-		if route.Annotations == nil {
-			route.Annotations = map[string]string{}
-		}
-		route.Annotations[backendServiceUIDsAnnotation] = backendServiceUIDs
-		route.Spec = desired.Spec
-		return controllerutil.SetControllerReference(app, route, r.Scheme)
+		return updateErr
 	})
 	if err != nil {
 		return nil, false, fmt.Errorf("HTTP route: %w", err)

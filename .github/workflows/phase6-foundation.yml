@@ -40,7 +40,7 @@ jobs:
       - name: Deploy exact-revision GitOps foundation
         timeout-minutes: 15
         shell: pwsh
-        run: ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA
+        run: ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -TenantFilter payments
 
       - name: Verify Kyverno compatibility and enforcement behavior
         id: foundation

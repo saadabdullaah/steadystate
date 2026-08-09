@@ -847,3 +847,26 @@
   The two reviewed retirement PRs completed in 193.787 seconds, retained 12
   external backup objects, and left no Team, namespace, CR, Argo child,
   generated workload, acceptance PR, or request branch behind.
+- Phase 8 closeout PR #69 squash-merged to exact `main` commit
+  `fc8e49fc52d55394c8b3730ae9e3c6ebe46a3903`. Exact-main CI run
+  [31327852872](https://github.com/saadabdullaah/steadystate/actions/runs/31327852872),
+  CodeQL run
+  [31327852877](https://github.com/saadabdullaah/steadystate/actions/runs/31327852877),
+  Platformctl smoke run
+  [31327912602](https://github.com/saadabdullaah/steadystate/actions/runs/31327912602),
+  Phase 7 run
+  [31327915695](https://github.com/saadabdullaah/steadystate/actions/runs/31327915695),
+  and Phase 8 run
+  [31327915321](https://github.com/saadabdullaah/steadystate/actions/runs/31327915321)
+  passed. The exact-main regression sweep also found two cross-phase defects:
+  Nightly run
+  [31327915917](https://github.com/saadabdullaah/steadystate/actions/runs/31327915917)
+  reproduced an HTTPRoute resource-version race after Service self-healing,
+  while Phase 4/5/6 runs
+  [31327914014](https://github.com/saadabdullaah/steadystate/actions/runs/31327914014),
+  [31327915341](https://github.com/saadabdullaah/steadystate/actions/runs/31327915341),
+  and [31327915599](https://github.com/saadabdullaah/steadystate/actions/runs/31327915599)
+  unintentionally rendered the Phase 8 `xyz` catalog tenant into their
+  payments-only historical suites. The operator now retries HTTPRoute
+  conflicts from a fresh object, and the Phase 3–6 historical suites pass an
+  explicit `payments` tenant filter. Focused tests lock both contracts.
