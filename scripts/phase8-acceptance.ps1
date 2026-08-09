@@ -632,7 +632,7 @@ switch ($Stage) {
             $approvalID = [guid]::NewGuid().ToString()
             $approval = Invoke-AcceptancePR $state 'service.retire' ([ordered]@{team='xyz';name='xyz'}) $approvalID
             Wait-ArgoRevision $state.currentRevision 480
-            Wait-Until 240 'Retirement annotations were not visible on all live resources.' {
+            Wait-Until 240 'Retirement annotations or the tenant Argo cascade finalizer were not visible.' {
                 $resources = @(
                     @('team','xyz','',''),
                     @('applications.platform.steadystate.dev','xyz','-n',$Namespace),
@@ -644,6 +644,10 @@ switch ($Stage) {
                     $value = @(& kubectl --request-timeout=10s @args 2>$null)
                     if ($LASTEXITCODE -ne 0 -or ($value -join '') -cne $approvalID) { return $false }
                 }
+                $argoRaw = @(& kubectl --request-timeout=10s get applications.argoproj.io xyz -n argocd -o json 2>$null)
+                if ($LASTEXITCODE -ne 0 -or -not $argoRaw) { return $false }
+                $argoApplication = ($argoRaw -join [Environment]::NewLine) | ConvertFrom-Json
+                if (-not (@($argoApplication.metadata.finalizers) -contains 'resources-finalizer.argocd.argoproj.io')) { return $false }
                 return $true
             }
             Capture-RenderedGitOps 'retiring' $state.currentRevision

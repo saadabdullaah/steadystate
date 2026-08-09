@@ -71,6 +71,15 @@ func TestPhase8RetiringTeamEnablesExactArgoCascade(t *testing.T) {
 	if strings.Count(rendered, "resources-finalizer.argocd.argoproj.io") != 1 {
 		t.Fatal("retiring Team must enable exactly one tenant-child cascade finalizer")
 	}
+	bootstrap := string(run(t, root, "helm", "template", "steadystate-root", chart,
+		"--set", "bootstrapRoot=true", "--set-string", "rootTargetRevision="+testRevision,
+		"--show-only", "templates/root-application.yaml.tpl"))
+	if strings.Contains(bootstrap, "- /metadata/finalizers") {
+		t.Fatal("bootstrap root must reconcile the lifecycle-owned tenant Application finalizer")
+	}
+	if !strings.Contains(bootstrap, "- /status") {
+		t.Fatal("bootstrap root must continue ignoring child Application status")
+	}
 }
 
 func TestPhase8BrokerWorkflowTrustBoundary(t *testing.T) {
@@ -163,6 +172,7 @@ func TestPhase8AcceptanceSafetyAndEvidenceContract(t *testing.T) {
 		"Wait-PlatformFoundationReady 1200", "platform-foundation-applications.json", "platform-foundation-progress.json",
 		"journalctl --no-pager -n 1000", "crictl ps -a",
 		"function Test-KubernetesAPI", "direct host journal and CRI evidence",
+		"resources-finalizer.argocd.argoproj.io", "tenant Argo cascade finalizer were not visible",
 		"Capture-RenderedGitOps", "tenant-filter-isolation.json", "tenant-filter-isolation",
 		"Invoke-PlatformctlUntilMatch", "The request ID did not appear in Loki within four minutes.",
 		"Tempo did not return the correlated trace ID within four minutes.",

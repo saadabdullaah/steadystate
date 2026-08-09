@@ -802,3 +802,18 @@
   exact per-Application state and fail fast on API loss. Failure diagnostics
   retain node journals/CRI state, and cleanup no longer runs long API teardown
   or backup-network detachment in the wrong order when the API is unavailable.
+- At `3aba636`, CI run
+  [31282232391](https://github.com/saadabdullaah/steadystate/actions/runs/31282232391)
+  passed all five jobs and Platformctl smoke run
+  [31282232388](https://github.com/saadabdullaah/steadystate/actions/runs/31282232388)
+  passed all six contracts. Phase 8 run
+  [31282232398](https://github.com/saadabdullaah/steadystate/actions/runs/31282232398)
+  passed the complete live CLI, full-stack, PostgreSQL, canary, provenance,
+  telemetry, policy, diagnosis, and resource-budget path. Artifact `9029132915`
+  (GitHub SHA-256
+  `88c3290a531bd5f9c5ab17a35922b42a46a3529e2cfc9a0dd6d6dff1bb3bdc36`)
+  exposed one final lifecycle defect: the retiring render contained the tenant
+  Argo cascade finalizer, but the bootstrap root ignored child finalizers, so
+  deletion removed the Argo child without pruning its four managed CRs. The
+  root now reconciles child finalizers while still ignoring status, and hosted
+  acceptance requires the live cascade finalizer before merging finalization.

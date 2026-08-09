@@ -164,7 +164,10 @@ carry `Prune=false`. The approval proposal marks only selected catalog entries
 Retiring, records one deletion UUID, and makes those exact CRs pruneable. The
 finalization proposal is rejected until the approval revision is merged and
 visible in Argo. Argo then prunes the CRs; SteadyState finalizers order workload
-cleanup, the Database final backup, and Team namespace deletion. Only the
+cleanup, the Database final backup, and Team namespace deletion. The bootstrap
+root ignores child Application status, but deliberately reconciles child Argo
+finalizers so the Retiring lifecycle can install the exact cascade boundary
+before finalization removes the child. Only the
 hosted Phase 8 workflow may auto-merge these two proposal shapes, and only when
 the PR base matches `acceptance/phase8-<run>-<attempt>`; `main` and normal
 branches fail closed.

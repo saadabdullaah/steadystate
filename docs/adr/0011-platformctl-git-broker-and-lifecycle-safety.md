@@ -78,7 +78,9 @@ Database carries `argocd.argoproj.io/sync-options: Prune=false`.
 1. An approval PR adds one deletion-request UUID, marks the selected catalog
    entries Retiring, and removes prune protection only from those resources.
    Team retirement also puts the Argo resources finalizer on the exact tenant
-   child Application.
+   child Application. The bootstrap root continues to ignore child status but
+   does not ignore child finalizers; otherwise this Git-owned cascade boundary
+   would render without ever reaching the live object.
 2. A finalization PR is valid only after the approval commit is in `main`, the
    expected Argo revision is visible, and the live resource carries that UUID.
    It removes the catalog entry and deterministic leaf. Argo prunes the CR;

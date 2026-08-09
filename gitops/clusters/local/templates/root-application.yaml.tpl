@@ -47,6 +47,5 @@ spec:
     - group: argoproj.io
       kind: Application
       jsonPointers:
-        - /metadata/finalizers
         - /status
 {{- end }}
