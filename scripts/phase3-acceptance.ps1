@@ -479,7 +479,7 @@ try {
     $timestamps.baselinePushedAt = (Get-Date).ToUniversalTime().ToString('o')
 
     $deployStarted = Get-Date
-    & (Join-Path $Root 'scripts/dev.ps1') deploy-gitops -Profile $Profile -GitRevision $BranchName -DisableTelemetryPipeline -DisableSecurity
+    & (Join-Path $Root 'scripts/dev.ps1') deploy-gitops -Profile $Profile -GitRevision $BranchName -DisableTelemetryPipeline -DisableSecurity -TenantFilter payments
     if ($LASTEXITCODE -ne 0) { throw 'GitOps deployment failed.' }
     Assert-DexAbsent
     foreach ($name in @('argocd-configuration','monitoring','argo-rollouts','steadystate-operator','payments','steadystate-root')) {

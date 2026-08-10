@@ -83,8 +83,8 @@ jobs:
         timeout-minutes: 15
         shell: pwsh
         run: |
-          ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -DisableSecurity
-          ./scripts/dev.ps1 test-gitops -Profile standard -DisableSecurity
+          ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -DisableSecurity -TenantFilter payments
+          ./scripts/dev.ps1 test-gitops -Profile standard -DisableSecurity -TenantFilter payments
 
       - name: Verify hosted observability foundation
         id: prepare

@@ -46,6 +46,41 @@ func TestPhase8AcceptanceCanRenderOneCatalogTenant(t *testing.T) {
 	}
 }
 
+func TestHistoricalAcceptanceUsesPaymentsCatalogIsolation(t *testing.T) {
+	t.Parallel()
+	root := repositoryRoot(t)
+	contracts := map[string][]string{
+		"scripts/phase3-acceptance.ps1": {
+			"deploy-gitops -Profile $Profile -GitRevision $BranchName -DisableTelemetryPipeline -DisableSecurity -TenantFilter payments",
+		},
+		"scripts/phase4-acceptance.ps1": {
+			"deploy-gitops -Profile standard -GitRevision $BranchName -DisableTelemetryPipeline -DisableSecurity -TenantFilter payments",
+		},
+		".github/workflows/phase5.yml": {
+			"deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -DisableSecurity -TenantFilter payments",
+			"test-gitops -Profile standard -DisableSecurity -TenantFilter payments",
+		},
+		".github/workflows/phase6.yml": {
+			"deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -TenantFilter payments",
+			"test-gitops -Profile standard -TenantFilter payments",
+		},
+		".github/workflows/phase6-foundation.yml": {
+			"deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -TenantFilter payments",
+		},
+	}
+	for name, required := range contracts {
+		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, expected := range required {
+			if !strings.Contains(string(content), expected) {
+				t.Errorf("%s is missing payments-only catalog isolation %q", name, expected)
+			}
+		}
+	}
+}
+
 func TestPhase8RetiringTeamEnablesExactArgoCascade(t *testing.T) {
 	root := repositoryRoot(t)
 	source := filepath.Join(root, "gitops", "clusters", "local")

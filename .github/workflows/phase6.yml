@@ -200,8 +200,8 @@ jobs:
         timeout-minutes: 15
         shell: pwsh
         run: |
-          ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA
-          ./scripts/dev.ps1 test-gitops -Profile standard
+          ./scripts/dev.ps1 deploy-gitops -Profile standard -GitRevision $env:GITHUB_SHA -TenantFilter payments
+          ./scripts/dev.ps1 test-gitops -Profile standard -TenantFilter payments
 
       - name: Prepare security acceptance
         id: prepare
