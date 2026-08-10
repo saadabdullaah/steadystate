@@ -40,4 +40,7 @@ func TestCommandDocumentationGeneration(t *testing.T) {
 			t.Fatalf("reference omitted %s", command)
 		}
 	}
+	if !strings.Contains(string(reference), "Tempo's raw OTLP/protobuf JSON response") {
+		t.Fatal("reference omitted the trace ID encoding contract")
+	}
 }

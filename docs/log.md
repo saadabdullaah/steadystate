@@ -889,3 +889,12 @@
   `719d40a7899a88e398a62ba2066f2e6147e3ed22b55b46bd09e9885afbd234b0`,
   `ef7ea89ef110362b775a08890113d88cc57bc97ccae87673eea47639dbdeae2f`,
   and `69ac92b3f7861e2a68306344b8c7a44609dd8206b98f71641454f4d1c2b9df6d`.
+- Exact-main commit `7c5a15013b36a2da73079ea03c00ac52437864e3`
+  passed CI, CodeQL, Platformctl smoke, Nightly Integration, and Phase 4–8
+  acceptance. The first `v0.8.0` packaging run
+  [31384745322](https://github.com/saadabdullaah/steadystate/actions/runs/31384745322)
+  correctly stopped before producing release assets because the tracked CLI
+  reference contained a useful Tempo trace-ID encoding note that was not
+  emitted by the documentation generator. The command help now owns that
+  contract, generation tests require it, and failed pre-build runs no longer
+  report a second misleading missing-`dist` artifact error.
