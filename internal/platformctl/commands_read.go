@@ -266,8 +266,17 @@ func newApplicationLogsCommand(options *Options) *cobra.Command {
 func newApplicationTracesCommand(options *Options) *cobra.Command {
 	var namespace, traceID string
 	var limit int
+	const traceIDDescription = "`--trace-id` accepts the canonical 32-character lowercase hexadecimal ID used\n" +
+		"in application logs. Tempo's raw OTLP/protobuf JSON response represents its\n" +
+		"`traceId` bytes field as Base64; these are two encodings of the same 16 bytes."
 	command := &cobra.Command{
-		Use: "traces NAME", Short: "Query application traces from Tempo", Args: cobra.ExactArgs(1),
+		Use:   "traces NAME",
+		Short: "Query application traces from Tempo",
+		Long:  traceIDDescription,
+		Annotations: map[string]string{
+			docsDetailsAnnotation: traceIDDescription,
+		},
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, resolvedNamespace, client, ctx, cancel, err := commandClusterContext(cmd, options, namespace, "Application", args[0])
 			if err != nil {
