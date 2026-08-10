@@ -898,3 +898,9 @@
   emitted by the documentation generator. The command help now owns that
   contract, generation tests require it, and failed pre-build runs no longer
   report a second misleading missing-`dist` artifact error.
+- Corrected tag run
+  [31421862732](https://github.com/saadabdullaah/steadystate/actions/runs/31421862732)
+  passed tests and generated-document verification, then stopped before
+  building any archive because GoReleaser's publishing step had not received
+  `GITHUB_TOKEN`. The tag step now maps the job-scoped token explicitly, and
+  the GitOps contract suite prevents removing that tag-only requirement.

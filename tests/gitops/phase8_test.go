@@ -190,6 +190,30 @@ func TestPhase8AcceptanceWorkflowContract(t *testing.T) {
 	}
 }
 
+func TestPlatformctlReleaseWorkflowTokenContract(t *testing.T) {
+	root := repositoryRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "platformctl-release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	tagBuild := strings.Index(workflow, "- name: Build draft release archives")
+	signing := strings.Index(workflow, "- name: Sign checksum manifest with GitHub OIDC")
+	if tagBuild < 0 || signing < 0 || tagBuild >= signing {
+		t.Fatal("tag archive build must precede signing")
+	}
+	tagBlock := workflow[tagBuild:signing]
+	for _, expected := range []string{
+		"if: github.ref_type == 'tag'",
+		"GITHUB_TOKEN: ${{ github.token }}",
+		"args: release --clean",
+	} {
+		if !strings.Contains(tagBlock, expected) {
+			t.Fatalf("tag release step is missing %q", expected)
+		}
+	}
+}
+
 func TestPhase8AcceptanceSafetyAndEvidenceContract(t *testing.T) {
 	root := repositoryRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "scripts", "phase8-acceptance.ps1"))
