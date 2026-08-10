@@ -870,3 +870,22 @@
   payments-only historical suites. The operator now retries HTTPRoute
   conflicts from a fresh object, and the Phase 3–6 historical suites pass an
   explicit `payments` tenant filter. Focused tests lock both contracts.
+- Regression-fix commit `6539d58` passed all five jobs in CI run
+  [31338950523](https://github.com/saadabdullaah/steadystate/actions/runs/31338950523).
+  Nightly run
+  [31338965298](https://github.com/saadabdullaah/steadystate/actions/runs/31338965298)
+  passed the corrected Service/HTTPRoute self-heal and complete Phase 1–3
+  sequence; its Phase 1/2/3 artifacts are `9045335118`, `9045350218`, and
+  `9045446257`, with GitHub SHA-256 digests
+  `50707b97979c456303fbf8197274cbd4e2771faeebe4e61789ed7e6a5b44fd80`,
+  `38d4eee01da07354bee4192218a3d314965accb8fa94faf221b5c3e659d6e353`,
+  and `1e24a7856200017dfc1c9461ab266a4160d20348c86f01dc2eba74f7fff5862e`.
+  Payments-isolated Phase 4/5/6 runs
+  [31338962854](https://github.com/saadabdullaah/steadystate/actions/runs/31338962854),
+  [31338964831](https://github.com/saadabdullaah/steadystate/actions/runs/31338964831),
+  and [31338965000](https://github.com/saadabdullaah/steadystate/actions/runs/31338965000)
+  passed with artifacts `9045517644`, `9045380578`, and `9045367194` and
+  GitHub SHA-256 digests
+  `719d40a7899a88e398a62ba2066f2e6147e3ed22b55b46bd09e9885afbd234b0`,
+  `ef7ea89ef110362b775a08890113d88cc57bc97ccae87673eea47639dbdeae2f`,
+  and `69ac92b3f7861e2a68306344b8c7a44609dd8206b98f71641454f4d1c2b9df6d`.
