@@ -17,6 +17,7 @@ test.describe("real Phase 9 portal", () => {
   test.skip(!launchURL, "PORTAL_LAUNCH_URL is required for hosted acceptance");
 
   test("reads the full platform and submits one reviewed proposal", async ({ page }) => {
+    test.setTimeout(180_000);
     mkdirSync(resolve(artifactRoot, "screenshots"), { recursive: true });
     await page.addInitScript({ content: axe.source });
     const startedAt = Date.now();

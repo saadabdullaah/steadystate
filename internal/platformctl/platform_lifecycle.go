@@ -105,7 +105,7 @@ func platformUpStages(profile string) []platformStage {
 	if profile == "full" {
 		stages = append(stages, platformStage{"Start retained backup store", "start-backup-store", 5 * time.Minute})
 	}
-	stages = append(stages, platformStage{"Build platform images", "build-images", 15 * time.Minute}, platformStage{"Load platform images", "load-images", 10 * time.Minute}, platformStage{"Deploy GitOps", "deploy-gitops", 30 * time.Minute}, platformStage{"Verify GitOps", "verify-gitops", 10 * time.Minute})
+	stages = append(stages, platformStage{"Build platform images", "build-images", 15 * time.Minute}, platformStage{"Load platform images", "load-images", 10 * time.Minute}, platformStage{"Deploy GitOps", "deploy-gitops", 30 * time.Minute}, platformStage{"Verify platform readiness", "test-gitops", 20 * time.Minute})
 	if profile == "full" {
 		stages = append(stages, platformStage{"Verify data platform", "verify-data", 10 * time.Minute})
 	}
@@ -152,7 +152,7 @@ func newPlatformVerifyCommand(options *Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		stages := []platformStage{{"Verify GitOps", "verify-gitops", 10 * time.Minute}}
+		stages := []platformStage{{"Verify platform readiness", "test-gitops", 20 * time.Minute}}
 		if selected.Profile == "full" {
 			stages = append(stages, platformStage{"Verify data platform", "verify-data", 10 * time.Minute})
 		}
