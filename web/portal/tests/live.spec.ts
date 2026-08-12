@@ -78,7 +78,7 @@ test.describe("real Phase 9 portal", () => {
     await page.getByLabel("Owner identity").fill("platform-team");
     await page.getByLabel("Allowed repository").fill("ghcr.io/saadabdullaah/steadystate-services");
     await page.getByRole("button", { name: "Generate deterministic plan" }).click();
-    await expect(page.getByText("Review boundary")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Review boundary" })).toBeVisible();
     await expect(page.locator(".diff")).toContainText(team);
     await page.screenshot({ path: resolve(artifactRoot, "screenshots/07-reviewed-plan.png") });
     await page.getByRole("button", { name: "Submit through GitHub" }).click();
