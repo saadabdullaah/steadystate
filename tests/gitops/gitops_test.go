@@ -908,6 +908,10 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		!strings.Contains(installTools, "for ($attempt = 1; $attempt -le 5; $attempt++)") {
 		t.Fatal("PowerShell checksum downloads must use bounded retries")
 	}
+	if !strings.Contains(installTools, "for ($attempt = 1; $attempt -le 4; $attempt++)") ||
+		!strings.Contains(installTools, "Failed to install $Name $Version after 4 attempts") {
+		t.Fatal("PowerShell Go tool installation must tolerate transient module proxy failures with bounded retries")
+	}
 	phase7Foundation := string(readFile(t, filepath.Join(root, "scripts", "phase7-foundation.ps1")))
 	if !strings.Contains(phase7Foundation, "Wait-ArgoApplicationsHealthy @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')") ||
 		strings.Contains(phase7Foundation, `Invoke-Kubectl wait -n argocd "--for=jsonpath={.status.health.status}=Healthy"`) {

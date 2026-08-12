@@ -124,8 +124,19 @@ function Install-GoTool {
     try {
         $env:GOBIN = $BinDir
         $env:PATH = "$(Join-Path $goRoot 'bin')$([IO.Path]::PathSeparator)$env:PATH"
-        & $goBinary install "$Package@v$Version"
-        if ($LASTEXITCODE -ne 0) { throw "Failed to install $Name $Version" }
+        $installed = $false
+        for ($attempt = 1; $attempt -le 4; $attempt++) {
+            & $goBinary install "$Package@v$Version"
+            if ($LASTEXITCODE -eq 0) {
+                $installed = $true
+                break
+            }
+            if ($attempt -lt 4) {
+                Write-Warning "Go module download failed for $Name $Version (attempt $attempt of 4); retrying."
+                Start-Sleep -Seconds ([Math]::Min(2 * $attempt, 6))
+            }
+        }
+        if (-not $installed) { throw "Failed to install $Name $Version after 4 attempts" }
         [IO.File]::WriteAllText($marker, "$Version`n", [Text.UTF8Encoding]::new($false))
     } finally {
         $env:GOBIN = $previousGoBin
