@@ -261,4 +261,5 @@ jobs:
             .artifacts/phase9/acceptance
             .artifacts/phase9/playwright-report
             .artifacts/phase9/acceptance-version.json
+            .artifacts/gitops
             .artifacts/diagnostics

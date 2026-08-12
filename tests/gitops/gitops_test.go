@@ -1566,7 +1566,7 @@ func TestPhase5ObservabilityFoundationContracts(t *testing.T) {
 		}
 	}
 	script := string(readFile(t, filepath.Join(root, "scripts", "gitops.ps1")))
-	for _, token := range []string{"Assert-ChartChecksum", "Invoke-WithRetry", "MaximumAttempts = 6", "helm pull", "LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256"} {
+	for _, token := range []string{"Assert-ChartChecksum", "Invoke-WithRetry", "MaximumAttempts = 6", "helm pull", "Wait-ArgoApplications", "--request-timeout=10s", "readiness-progress.json", "LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256"} {
 		if !strings.Contains(script, token) {
 			t.Errorf("GitOps verification is missing %q", token)
 		}
