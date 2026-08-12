@@ -18,10 +18,11 @@ type platformStage struct {
 }
 
 type platformLifecycleResult struct {
-	Action  string          `json:"action" yaml:"action"`
-	Profile string          `json:"profile" yaml:"profile"`
-	Stages  []platformStage `json:"stages" yaml:"stages"`
-	State   string          `json:"state" yaml:"state"`
+	Action      string          `json:"action" yaml:"action"`
+	Profile     string          `json:"profile" yaml:"profile"`
+	GitRevision string          `json:"gitRevision,omitempty" yaml:"gitRevision,omitempty"`
+	Stages      []platformStage `json:"stages" yaml:"stages"`
+	State       string          `json:"state" yaml:"state"`
 }
 
 func newPlatformCommand(options *Options) *cobra.Command {
@@ -48,12 +49,22 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 			if action == "down" {
 				stages = platformDownStages(selected.Profile)
 			}
-			result := platformLifecycleResult{Action: action, Profile: selected.Profile, Stages: stages, State: "Completed"}
+			gitRevision := ""
+			if action == "up" {
+				gitRevision, err = checkoutHeadRevision(cmd.Context(), selected.CheckoutPath)
+				if err != nil {
+					return err
+				}
+			}
+			result := platformLifecycleResult{Action: action, Profile: selected.Profile, GitRevision: gitRevision, Stages: stages, State: "Completed"}
 			errors := []string{}
 			for _, stage := range stages {
 				_, _ = fmt.Fprintf(options.Stderr, "[%s] %s\n", time.Now().UTC().Format(time.RFC3339), stage.Name)
 				stageCtx, cancel := context.WithTimeout(cmd.Context(), stage.Timeout)
 				arguments := []string{"-NoProfile", "-File", selected.CheckoutPath + "/scripts/dev.ps1", stage.Command, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort)}
+				if gitRevision != "" {
+					arguments = append(arguments, "-GitRevision", gitRevision)
+				}
 				_, stageErr := runExternal(stageCtx, selected.CheckoutPath, "pwsh", arguments...)
 				cancel()
 				if stageErr != nil {
@@ -71,9 +82,22 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 			if action == "up" && !options.Quiet {
 				_, _ = fmt.Fprintln(options.Stderr, "Platform is ready. Run 'platformctl portal'.")
 			}
-			return options.printer().Table([]string{"ACTION", "PROFILE", "STATE"}, [][]string{{action, selected.Profile, result.State}}, result)
+			return options.printer().Table([]string{"ACTION", "PROFILE", "REVISION", "STATE"}, [][]string{{action, selected.Profile, gitRevision, result.State}}, result)
 		},
 	}
+}
+
+func checkoutHeadRevision(ctx context.Context, checkoutPath string) (string, error) {
+	revisionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	revision, err := runExternal(revisionCtx, checkoutPath, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return "", exitError(ExitRemote, "resolve exact checkout revision: %v", err)
+	}
+	if !gitObjectPattern.MatchString(revision) {
+		return "", exitError(ExitRemote, "Git returned an invalid checkout revision")
+	}
+	return revision, nil
 }
 
 func platformUpStages(profile string) []platformStage {
@@ -134,7 +158,12 @@ func newPlatformVerifyCommand(options *Options) *cobra.Command {
 		}
 		for _, stage := range stages {
 			ctx, cancel := context.WithTimeout(cmd.Context(), stage.Timeout)
-			_, err = runExternal(ctx, selected.CheckoutPath, "pwsh", "-NoProfile", "-File", selected.CheckoutPath+"/scripts/dev.ps1", stage.Command, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort))
+			revision, revisionErr := checkoutHeadRevision(ctx, selected.CheckoutPath)
+			if revisionErr != nil {
+				cancel()
+				return revisionErr
+			}
+			_, err = runExternal(ctx, selected.CheckoutPath, "pwsh", "-NoProfile", "-File", selected.CheckoutPath+"/scripts/dev.ps1", stage.Command, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort), "-GitRevision", revision)
 			cancel()
 			if err != nil {
 				return exitError(ExitUnhealthy, "%s failed: %v", stage.Name, err)

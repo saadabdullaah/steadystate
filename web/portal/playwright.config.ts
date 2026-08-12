@@ -7,6 +7,7 @@ export default defineConfig({
   timeout: 30_000,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
+  workers: allBrowsers ? 1 : undefined,
   reporter: process.env.CI ? [["html", { outputFolder: "../../.artifacts/phase9/playwright-report", open: "never" }], ["list"]] : "list",
   use: {
     baseURL: "http://127.0.0.1:4173",

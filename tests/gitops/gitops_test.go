@@ -1738,10 +1738,13 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	}
 }
 
-func TestCodeQLWorkflowAllowsHostedAnalysisToFinish(t *testing.T) {
+func TestCodeQLWorkflowRunsBoundedParallelLanguageAnalysis(t *testing.T) {
 	workflow := string(readFile(t, filepath.Join(repositoryRoot(t), ".github", "workflows", "codeql.yml")))
-	if !strings.Contains(workflow, "timeout-minutes: 60") {
-		t.Fatal("CodeQL must retain the empirically required 60-minute job timeout")
+	if !strings.Contains(workflow, "language: [go, javascript-typescript]") {
+		t.Fatal("CodeQL must analyze Go and JavaScript/TypeScript independently")
+	}
+	if !strings.Contains(workflow, "timeout-minutes: 40") {
+		t.Fatal("each CodeQL language analysis must retain the bounded 40-minute timeout")
 	}
 }
 

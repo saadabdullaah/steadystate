@@ -189,6 +189,7 @@ func (s *portalServer) handler() http.Handler {
 	mux.HandleFunc("/api/v1/", s.auth(s.handleAPI))
 	assets, _ := fs.Sub(portalAssets, "portalassets")
 	fileServer := http.FileServer(http.FS(assets))
+	index, _ := fs.ReadFile(assets, "index.html")
 	mux.Handle("/", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method is not allowed", "Use the documented portal route.")
@@ -201,8 +202,12 @@ func (s *portalServer) handler() http.Handler {
 				return
 			}
 		}
-		r.URL.Path = "/index.html"
-		fileServer.ServeHTTP(w, r)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(index)
+		}
 	}))
 	return s.securityHeaders(mux)
 }

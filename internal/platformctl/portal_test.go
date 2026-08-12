@@ -87,6 +87,23 @@ func TestPortalMetaContainsNoCredentialMaterial(t *testing.T) {
 	}
 }
 
+func TestPortalServesEmbeddedIndexWithoutCanonicalRedirect(t *testing.T) {
+	server := testPortalServer(t)
+	for _, path := range []string{"/", "/teams/payments"} {
+		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1"+path, nil)
+		request.Host = "127.0.0.1"
+		request.AddCookie(&http.Cookie{Name: "steadystate_portal_session", Value: server.session})
+		response := httptest.NewRecorder()
+		server.handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK || response.Header().Get("Location") != "" {
+			t.Fatalf("path %s status=%d location=%q", path, response.Code, response.Header().Get("Location"))
+		}
+		if !strings.Contains(response.Body.String(), "<!doctype html>") {
+			t.Fatalf("path %s did not return the embedded portal index", path)
+		}
+	}
+}
+
 func TestPortalSessionExpiresServerSide(t *testing.T) {
 	server := testPortalServer(t)
 	server.sessionUntil = time.Now().Add(-time.Second)
