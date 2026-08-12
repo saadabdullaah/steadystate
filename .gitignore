@@ -6,6 +6,10 @@ m-plan.md
 .artifacts/
 bin/
 dist/
+**/node_modules/
+**/test-results/
+**/playwright-report/
+*.tsbuildinfo
 cover.out
 coverage.*
 *.test
