@@ -1,0 +1,243 @@
+name: Phase 9 acceptance
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - .github/workflows/phase9.yml
+      - scripts/phase9-acceptance.ps1
+      - internal/platformctl/**
+      - web/portal/**
+      - cmd/portal-gif/**
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: phase9-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  browser-contract:
+    name: portal-browser-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.17.0
+          cache: npm
+          cache-dependency-path: web/portal/package-lock.json
+
+      - name: Verify Chromium, Firefox, and WebKit portal contracts
+        working-directory: web/portal
+        env:
+          FULL_BROWSER_MATRIX: "true"
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          npx playwright install --with-deps chromium firefox webkit
+          npx playwright test tests/portal.spec.ts
+
+      - name: Upload browser contract report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase9-browser-contract-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: .artifacts/phase9/playwright-report
+
+  acceptance:
+    name: refined-local-portal-and-ga
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+      XDG_CONFIG_HOME: ${{ github.workspace }}/.artifacts/phase9/config-home
+      PHASE9_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.PHASE9_SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.17.0
+          cache: npm
+          cache-dependency-path: web/portal/package-lock.json
+
+      - name: Install and verify full-profile tools
+        timeout-minutes: 12
+        shell: pwsh
+        run: |
+          ./scripts/install-tools.ps1 -BaseOnly -IncludeSecurity
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE/.tools/go/linux-amd64/bin"
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE/.tools/bin/linux-amd64"
+          ./scripts/dev.ps1 check-versions
+
+      - name: Verify portal source and deterministic assets
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          Push-Location web/portal
+          npm ci --ignore-scripts
+          npm run typecheck
+          npm test
+          npm run build
+          npx playwright install --with-deps chromium
+          Pop-Location
+          git diff --exit-code -- internal/platformctl/portalassets
+          go test ./internal/platformctl/...
+          go test ./cmd/portal-gif/...
+
+      - name: Build and configure exact-revision CLI
+        timeout-minutes: 4
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .artifacts/phase9/private | Out-Null
+          go build -trimpath -ldflags "-X main.version=v1.0.0 -X main.commit=$env:PHASE9_SOURCE_SHA -X main.buildDate=$((Get-Date).ToUniversalTime().ToString('o')) -X main.dirty=false" -o .artifacts/platformctl ./cmd/platformctl
+          if ($LASTEXITCODE -ne 0) { throw 'Exact-revision platformctl build failed.' }
+          ./.artifacts/platformctl --output json config init --name acceptance --checkout $PWD --repository $env:GITHUB_REPOSITORY --branch main --profile full --cluster steadystate --kube-context kind-steadystate --http-port 8080 --https-port 8443
+          ./.artifacts/platformctl --output json version | Out-File -Encoding utf8 .artifacts/phase9/acceptance-version.json
+          ./scripts/phase9-acceptance.ps1 -Stage Prepare
+
+      - name: Start the complete full-profile platform
+        id: platform
+        timeout-minutes: 45
+        shell: pwsh
+        run: ./.artifacts/platformctl --output json --timeout 44m platform up
+
+      - name: Exercise the real portal through Playwright
+        id: browser
+        timeout-minutes: 12
+        shell: pwsh
+        env:
+          RECORD_VIDEO: "true"
+        run: |
+          $private = Join-Path $PWD '.artifacts/phase9/private'
+          $stdout = Join-Path $private 'portal-ready.json'
+          $stderr = Join-Path $private 'portal-launch.txt'
+          $process = Start-Process -FilePath (Join-Path $PWD '.artifacts/platformctl') -ArgumentList @('--output','json','portal','--no-open') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(30)
+            do {
+              Start-Sleep -Milliseconds 500
+              $content = if (Test-Path -LiteralPath $stderr) { Get-Content -Raw -LiteralPath $stderr } else { '' }
+              if ($content -match '(http://127\.0\.0\.1:\d+/launch/[0-9a-f]{64})') { $launch = $Matches[1]; break }
+            } while ((Get-Date) -lt $deadline -and -not $process.HasExited)
+            if (-not $launch) { throw 'The portal did not produce a private launch URL.' }
+            Write-Output "::add-mask::$launch"
+            $env:PORTAL_LAUNCH_URL = $launch
+            $state = Get-Content -Raw .artifacts/phase9/acceptance/state.json | ConvertFrom-Json
+            $env:PHASE9_SMOKE_TEAM = $state.smokeTeam
+            Push-Location web/portal
+            npx playwright test tests/live.spec.ts --project chromium
+            Pop-Location
+            $memory = (Get-Process -Id $process.Id).WorkingSet64
+            [ordered]@{ workingSetBytes=$memory; limitBytes=157286400; passed=($memory -le 157286400) } | ConvertTo-Json | Out-File -Encoding utf8 .artifacts/phase9/acceptance/portal-memory.json
+            if ($memory -gt 157286400) { throw 'Portal process exceeded the 150 MiB working-set budget.' }
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - name: Verify the portal-dispatched broker run
+        id: broker
+        timeout-minutes: 15
+        shell: pwsh
+        run: ./scripts/phase9-acceptance.ps1 -Stage VerifyBroker
+
+      - name: Create fresh cleanup GitHub App token
+        id: app-token
+        if: always()
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.STEADYSTATE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.STEADYSTATE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Finalize evidence and clean temporary GitHub resources
+        id: finalize
+        timeout-minutes: 6
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: ./scripts/phase9-acceptance.ps1 -Stage Finalize
+
+      - name: Capture failure evidence before cleanup
+        if: always() && steps.finalize.outcome != 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        shell: pwsh
+        env:
+          PHASE9_FAILURE_MESSAGE: platform=${{ steps.platform.outcome }}, browser=${{ steps.browser.outcome }}, broker=${{ steps.broker.outcome }}, finalize=${{ steps.finalize.outcome }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: ./scripts/phase9-acceptance.ps1 -Stage CaptureFailure
+
+      - name: Capture cluster diagnostics before cleanup
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 4
+        shell: pwsh
+        run: |
+          if ((kind get clusters 2>$null) -contains 'steadystate') { ./scripts/dev.ps1 diagnostics }
+          else { New-Item -ItemType Directory -Force .artifacts/diagnostics | Out-Null; 'Cluster was not available.' | Set-Content .artifacts/diagnostics/no-cluster.txt }
+
+      - name: Shut down exact disposable platform
+        if: always() && steps.platform.outcome != 'skipped'
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./.artifacts/platformctl --output json --timeout 9m platform down
+
+      - name: Verify required evidence
+        if: always() && steps.finalize.outcome == 'success'
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $required = @(
+            '.artifacts/phase9/acceptance/evidence.json',
+            '.artifacts/phase9/acceptance/phase9-portal-golden-path.gif',
+            '.artifacts/phase9/acceptance/phase9-portal-golden-path.webm',
+            '.artifacts/phase9/acceptance/portal-assets.json',
+            '.artifacts/phase9/acceptance/proposal.json',
+            '.artifacts/phase9/acceptance/portal-memory.json',
+            '.artifacts/phase9/acceptance/accessibility.json',
+            '.artifacts/phase9/acceptance/browser-performance.json',
+            '.artifacts/diagnostics'
+          )
+          foreach ($path in $required) { if (-not (Test-Path -LiteralPath $path)) { throw "Missing Phase 9 evidence: $path" } }
+          if ((Get-Item .artifacts/phase9/acceptance/phase9-portal-golden-path.gif).Length -le 0) { throw 'Portal GIF is empty.' }
+
+      - name: Upload Phase 9 acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: phase9-acceptance-${{ env.PHASE9_SOURCE_SHA }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            .artifacts/phase9/acceptance
+            .artifacts/phase9/playwright-report
+            .artifacts/phase9/acceptance-version.json
+            .artifacts/diagnostics

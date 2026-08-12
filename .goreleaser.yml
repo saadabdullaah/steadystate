@@ -59,7 +59,7 @@ sboms:
       - "${artifact}.spdx.json"
 
 snapshot:
-  version_template: 0.8.0-next
+  version_template: 1.0.0-next
 
 changelog:
   use: github

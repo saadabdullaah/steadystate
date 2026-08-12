@@ -16,12 +16,18 @@ jobs:
   quality:
     name: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+      - name: Install pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.17.0
+          cache: npm
+          cache-dependency-path: web/portal/package-lock.json
       - name: Install pinned project tools
         shell: pwsh
         run: ./scripts/install-tools.ps1
@@ -50,6 +56,18 @@ jobs:
           ./scripts/dev.ps1 verify-gitops
           ./scripts/dev.ps1 lint
           ./scripts/dev.ps1 test
+      - name: Portal type, unit, and deterministic asset checks
+        shell: pwsh
+        run: |
+          Push-Location web/portal
+          npm ci --ignore-scripts
+          npm run typecheck
+          npm test
+          npm run build
+          npx playwright install --with-deps chromium
+          npx playwright test tests/portal.spec.ts --project chromium
+          Pop-Location
+          git diff --exit-code -- internal/platformctl/portalassets
       - name: Demo race tests
         shell: pwsh
         run: go test -race ./apps/demo-app/...
@@ -77,6 +95,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.17.0
+          cache: npm
+          cache-dependency-path: web/portal/package-lock.json
       - name: Install and verify Windows toolchain
         shell: pwsh
         run: |
@@ -91,6 +115,11 @@ jobs:
           ./scripts/dev.ps1 platformctl
           ./bin/platformctl.exe --output json version
           ./bin/platformctl.exe --output json profile list
+          Push-Location web/portal
+          npm ci --ignore-scripts
+          npm run build
+          Pop-Location
+          git diff --exit-code -- internal/platformctl/portalassets
 
   envtest:
     name: envtest
