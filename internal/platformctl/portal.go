@@ -105,7 +105,7 @@ func newPortalCommand(options *Options) *cobra.Command {
 			if err != nil {
 				return exitError(ExitConflict, "portal loopback port is unavailable: %v", err)
 			}
-			defer listener.Close()
+			defer func() { _ = listener.Close() }()
 			server, err := newPortalServer(options, selected, contextName)
 			if err != nil {
 				return err

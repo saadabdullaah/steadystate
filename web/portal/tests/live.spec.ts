@@ -14,6 +14,7 @@ async function runAxe(page: import("@playwright/test").Page) {
 }
 
 test.describe("real Phase 9 portal", () => {
+  test.describe.configure({ retries: 0 });
   test.skip(!launchURL, "PORTAL_LAUNCH_URL is required for hosted acceptance");
 
   test("reads the full platform and submits one reviewed proposal", async ({ page }) => {
@@ -33,11 +34,11 @@ test.describe("real Phase 9 portal", () => {
     await expect(page.getByRole("heading", { name: "Readiness" })).toBeVisible();
     await page.screenshot({ path: resolve(artifactRoot, "screenshots/03-readiness.png") });
 
-    await page.getByRole("button", { name: "Teams" }).click();
+    await page.getByRole("button", { name: "Teams", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Teams" })).toBeVisible();
-    await page.getByRole("button", { name: "Services" }).click();
+    await page.getByRole("button", { name: "Services", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Services" })).toBeVisible();
-    await page.getByRole("button", { name: "Requests" }).click();
+    await page.getByRole("button", { name: "Requests", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Requests" })).toBeVisible();
 
     const accessibility: Record<string, unknown> = {};
@@ -69,7 +70,7 @@ test.describe("real Phase 9 portal", () => {
     writeFileSync(resolve(artifactRoot, "browser-performance.json"), `${JSON.stringify({ initialRenderMilliseconds, initialRenderBudgetMilliseconds: 2_000, sseState: "Live" }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.getByRole("button", { name: "Changes" }).click();
+    await page.getByRole("button", { name: "Changes", exact: true }).click();
     await page.getByLabel("Operation").selectOption("team.create");
     const team = process.env.PHASE9_SMOKE_TEAM ?? "portal-smoke";
     await page.getByLabel("Resource name").fill(team);

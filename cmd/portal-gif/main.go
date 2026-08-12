@@ -26,7 +26,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	defer frameRoot.Close()
+	defer func() { _ = frameRoot.Close() }()
 	animation := &gif.GIF{LoopCount: 0}
 	var bounds image.Rectangle
 	for _, name := range frameNames {
@@ -55,7 +55,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	defer outputRoot.Close()
+	defer func() { _ = outputRoot.Close() }()
 	output, err := outputRoot.Create("phase9-portal-golden-path.gif")
 	if err != nil {
 		fatal(err)
