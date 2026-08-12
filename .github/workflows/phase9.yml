@@ -135,6 +135,18 @@ jobs:
           RECORD_VIDEO: "true"
         run: |
           $private = Join-Path $PWD '.artifacts/phase9/private'
+          $brokerCheckout = Join-Path $private 'broker-checkout'
+          git worktree add --detach $brokerCheckout origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Creating the clean main-branch broker checkout failed.' }
+          ./.artifacts/platformctl --output json context set acceptance `
+            --checkout $brokerCheckout `
+            --repository $env:GITHUB_REPOSITORY `
+            --branch main `
+            --profile full `
+            --cluster steadystate `
+            --kube-context kind-steadystate `
+            --http-port 8080 `
+            --https-port 8443
           $stdout = Join-Path $private 'portal-ready.json'
           $stderr = Join-Path $private 'portal-launch.txt'
           $process = Start-Process -FilePath (Join-Path $PWD '.artifacts/platformctl') -ArgumentList @('--output','json','portal','--no-open') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru

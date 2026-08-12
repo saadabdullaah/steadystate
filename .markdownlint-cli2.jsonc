@@ -5,5 +5,5 @@
     "MD033": false,
     "MD041": false
   },
-  "ignores": ["m-plan.md", ".tools/**", ".artifacts/**"]
+  "ignores": ["m-plan.md", ".tools/**", ".artifacts/**", "**/node_modules/**"]
 }

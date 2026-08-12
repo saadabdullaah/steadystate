@@ -7,7 +7,6 @@ const launchURL = process.env.PORTAL_LAUNCH_URL;
 const artifactRoot = resolve(process.cwd(), "../../.artifacts/phase9/acceptance");
 
 async function runAxe(page: import("@playwright/test").Page) {
-  await page.addScriptTag({ content: axe.source });
   const result = await page.evaluate(async () => await (window as any).axe.run());
   expect(result.violations.filter((item: any) => ["serious", "critical"].includes(item.impact ?? ""))).toEqual([]);
   return result;
@@ -19,6 +18,7 @@ test.describe("real Phase 9 portal", () => {
 
   test("reads the full platform and submits one reviewed proposal", async ({ page }) => {
     mkdirSync(resolve(artifactRoot, "screenshots"), { recursive: true });
+    await page.addInitScript({ content: axe.source });
     const startedAt = Date.now();
     await page.goto(launchURL!);
     await expect(page).toHaveURL(/http:\/\/127\.0\.0\.1:\d+\/$/);
