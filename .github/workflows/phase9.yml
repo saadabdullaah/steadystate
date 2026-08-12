@@ -220,7 +220,16 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         shell: pwsh
-        run: ./.artifacts/platformctl --output json --timeout 9m platform down
+        run: |
+          ./.artifacts/platformctl --output json --timeout 9m platform down
+          $downExit = $LASTEXITCODE
+          $private = Join-Path $PWD '.artifacts/phase9/private'
+          $brokerCheckout = Join-Path $private 'broker-checkout'
+          if (Test-Path -LiteralPath $brokerCheckout) {
+            git worktree remove --force $brokerCheckout
+          }
+          Remove-Item -LiteralPath $private -Recurse -Force -ErrorAction SilentlyContinue
+          if ($downExit -ne 0) { exit $downExit }
 
       - name: Verify required evidence
         if: always() && steps.finalize.outcome == 'success'

@@ -107,7 +107,7 @@ switch ($Stage) {
         $prJSON = gh pr view $number --repo $env:GITHUB_REPOSITORY --json number,url,author,headRefName,baseRefName,title,files
         if ($LASTEXITCODE -ne 0 -or -not $prJSON) { throw 'The GitHub App smoke pull request could not be inspected.' }
         $pull = $prJSON | ConvertFrom-Json
-        if (-not $pull -or $pull.author.login -cnotmatch '\[bot\]$' -or $pull.baseRefName -cne 'main') { throw 'The smoke pull request identity or base is invalid.' }
+        if (-not $pull -or -not $pull.author.is_bot -or $pull.author.login -cne 'app/steadystate-delivery' -or $pull.baseRefName -cne 'main') { throw 'The smoke pull request identity or base is invalid.' }
         $expected = @('gitops/clusters/local/catalog/tenants.yaml', "gitops/teams/$($state.smokeTeam)/kustomization.yaml", "gitops/teams/$($state.smokeTeam)/team.yaml")
         $actual = @($pull.files.path | Sort-Object)
         if (($actual -join "`n") -cne (($expected | Sort-Object) -join "`n")) { throw "Smoke pull request changed unexpected paths: $($actual -join ', ')." }
@@ -144,7 +144,6 @@ switch ($Stage) {
         $state.status = 'passed'
         Save-State $state
         Copy-Item -LiteralPath $StatePath -Destination $EvidencePath -Force
-        Remove-Item -LiteralPath (Join-Path $Root '.artifacts/phase9/private') -Recurse -Force -ErrorAction SilentlyContinue
     }
     'CaptureFailure' {
         New-Item -ItemType Directory -Force $ArtifactRoot | Out-Null
@@ -157,6 +156,5 @@ switch ($Stage) {
         Write-Utf8 (Join-Path $ArtifactRoot 'failure.json') (($failure | ConvertTo-Json) + [Environment]::NewLine)
         try { Capture-SafeSnapshots } catch { Write-Utf8 (Join-Path $ArtifactRoot 'snapshot-error.txt') $_.Exception.Message }
         try { Remove-SmokeGitHubResources } catch { Write-Utf8 (Join-Path $ArtifactRoot 'github-cleanup-error.txt') "Temporary GitHub resource cleanup failed; inspect the workflow run.\n" }
-        Remove-Item -LiteralPath (Join-Path $Root '.artifacts/phase9/private') -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

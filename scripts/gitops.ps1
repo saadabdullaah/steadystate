@@ -47,7 +47,7 @@ function Invoke-WithRetry {
     param(
         [Parameter(Mandatory)][scriptblock]$Operation,
         [Parameter(Mandatory)][string]$Description,
-        [int]$MaximumAttempts = 3
+        [int]$MaximumAttempts = 6
     )
     for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
         try {
