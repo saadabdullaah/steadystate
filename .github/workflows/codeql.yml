@@ -17,7 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [go, javascript-typescript]
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -27,6 +31,7 @@ jobs:
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
           languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
       - name: Install pinned Node.js
         if: matrix.language == 'javascript-typescript'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -34,12 +39,6 @@ jobs:
           node-version: 24.17.0
           cache: npm
           cache-dependency-path: web/portal/package-lock.json
-      - name: Install and build Go
-        if: matrix.language == 'go'
-        shell: pwsh
-        run: |
-          ./scripts/install-tools.ps1 -BaseOnly
-          ./scripts/dev.ps1 test
       - name: Install and build portal
         if: matrix.language == 'javascript-typescript'
         shell: pwsh

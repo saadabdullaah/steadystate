@@ -1740,8 +1740,11 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 
 func TestCodeQLWorkflowRunsBoundedParallelLanguageAnalysis(t *testing.T) {
 	workflow := string(readFile(t, filepath.Join(repositoryRoot(t), ".github", "workflows", "codeql.yml")))
-	if !strings.Contains(workflow, "language: [go, javascript-typescript]") {
+	if !strings.Contains(workflow, "language: go") || !strings.Contains(workflow, "language: javascript-typescript") {
 		t.Fatal("CodeQL must analyze Go and JavaScript/TypeScript independently")
+	}
+	if !strings.Contains(workflow, "build-mode: autobuild") || !strings.Contains(workflow, "build-mode: none") {
+		t.Fatal("CodeQL must autobuild Go without tracing the test suite and analyze JavaScript/TypeScript directly")
 	}
 	if !strings.Contains(workflow, "timeout-minutes: 40") {
 		t.Fatal("each CodeQL language analysis must retain the bounded 40-minute timeout")

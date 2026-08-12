@@ -119,6 +119,6 @@ function ErrorPanel({message,remediation,requestID}:{message:string;remediation?
 function Empty({title,detail}:{title:string;detail:string}){return <div className="empty"><strong>{title}</strong><p>{detail}</p></div>}
 function Back({onClick,children}:{onClick:()=>void;children:ReactNode}){return <button className="back" onClick={onClick}>← {children}</button>}
 function Centered({title,detail}:{title:string;detail:string}){return <main className="centered"><Logo/><h1>{title}</h1><p>{detail}</p></main>}
-function PageSkeleton(){return <div className="skeleton" aria-label="Loading"><i/><i/><i/></div>}
+function PageSkeleton(){return <div className="skeleton" role="status" aria-label="Loading portal data"><i aria-hidden="true"/><i aria-hidden="true"/><i aria-hidden="true"/></div>}
 function Logo(){return <span className="logo" aria-hidden="true"><i/><i/><i/></span>}
 function Icon({name}:{name:string}){const icons:Record<string,string>={overview:"◫",teams:"◇",services:"▣",changes:"＋",requests:"↗",readiness:"✓"};return <span aria-hidden="true">{icons[name]||"·"}</span>}
