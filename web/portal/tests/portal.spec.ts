@@ -67,3 +67,12 @@ test("keyboard shortcut focuses catalog search", async ({ page }) => {
   await page.keyboard.press("Control+K");
   await expect(page.getByLabel("Search catalog")).toBeFocused();
 });
+
+test("scrollable operational data is keyboard accessible", async ({ page }) => {
+  await page.goto("/applications/payments/demo");
+  await page.getByRole("tab", { name: "Doctor" }).click();
+  const data = page.getByLabel("Operational data");
+  await expect(data).toHaveAttribute("tabindex", "0");
+  await data.focus();
+  await expect(data).toBeFocused();
+});
