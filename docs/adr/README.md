@@ -13,3 +13,4 @@
 | [0009](0009-supply-chain-security-and-secret-custody.md) | Define OIDC image trust, stable admission policy, and SOPS/age secret custody |
 | [0010](0010-database-ownership-and-recovery.md) | Define Database ownership, SeaweedFS compatibility, final backups, and declarative recovery |
 | [0011](0011-platformctl-git-broker-and-lifecycle-safety.md) | Use platformctl with a typed Git broker, signed monorepo templates, protected prune, and confirmed break glass |
+| [0012](0012-local-owner-portal-and-ga.md) | Embed a secure local-owner portal in platformctl without adding a second control plane |

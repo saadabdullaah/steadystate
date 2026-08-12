@@ -21,6 +21,9 @@ SteadyState's limits are acceptance boundaries for a disposable laptop-scale pla
 | Phase 7 | Confirmed archive RPO boundary | `<=5m` | 0 minutes in run `30910727236` |
 | Phase 8 | Full-profile in-cluster total | `<=8 GiB` | 6172.121 MiB in run `31322270309` |
 | Phase 8 | CLI status latency and binary size | informational | 25.31 ms and 37,915,296 bytes in run `31322270309` |
+| Phase 9 | Portal process working set | `<=150 MiB` | pending branch acceptance |
+| Phase 9 | Compressed JavaScript / CSS | `<=250 KiB` / `<=80 KiB` | 66.75 KiB / 3.38 KiB in deterministic branch build |
+| Phase 9 | In-cluster increase | `0` | embedded host-process architecture |
 
 Phase 5 measures `container_memory_working_set_bytes` from Prometheus after telemetry and SLO checks have run. To distinguish the bounded steady working set from the intentional fast-burn load spike, both budgets must hold for three consecutive samples 15 seconds apart within a five-minute window. Zero/absent measurements and a budget that never stabilizes fail acceptance. Evidence records every sample, the final raw byte counts, timestamps, and a per-container observability breakdown; diagnostics capture the corresponding Pods and resource declarations.
 
@@ -37,3 +40,7 @@ component. Acceptance records the exact `platformctl` binary size and one
 Application-status command latency beside the Prometheus working-set result.
 These CLI measurements are diagnostic baselines, not hard performance promises;
 the 8 GiB full-profile ceiling remains a blocking release gate.
+
+Phase 9 retains that ceiling. Acceptance measures the embedded portal process
+after real-cluster browser navigation and fails above 150 MiB. The tracked
+asset manifest records sizes and SHA-256 values, and CI rejects build drift.

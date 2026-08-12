@@ -1226,16 +1226,44 @@ _platformctl_config_init()
     flags_with_completion=()
     flags_completion=()
 
+    flags+=("--branch=")
+    two_word_flags+=("--branch")
+    local_nonpersistent_flags+=("--branch")
+    local_nonpersistent_flags+=("--branch=")
     flags+=("--checkout=")
     two_word_flags+=("--checkout")
     local_nonpersistent_flags+=("--checkout")
     local_nonpersistent_flags+=("--checkout=")
+    flags+=("--cluster=")
+    two_word_flags+=("--cluster")
+    local_nonpersistent_flags+=("--cluster")
+    local_nonpersistent_flags+=("--cluster=")
     flags+=("--force")
     local_nonpersistent_flags+=("--force")
+    flags+=("--http-port=")
+    two_word_flags+=("--http-port")
+    local_nonpersistent_flags+=("--http-port")
+    local_nonpersistent_flags+=("--http-port=")
+    flags+=("--https-port=")
+    two_word_flags+=("--https-port")
+    local_nonpersistent_flags+=("--https-port")
+    local_nonpersistent_flags+=("--https-port=")
+    flags+=("--kube-context=")
+    two_word_flags+=("--kube-context")
+    local_nonpersistent_flags+=("--kube-context")
+    local_nonpersistent_flags+=("--kube-context=")
     flags+=("--name=")
     two_word_flags+=("--name")
     local_nonpersistent_flags+=("--name")
     local_nonpersistent_flags+=("--name=")
+    flags+=("--profile=")
+    two_word_flags+=("--profile")
+    local_nonpersistent_flags+=("--profile")
+    local_nonpersistent_flags+=("--profile=")
+    flags+=("--repository=")
+    two_word_flags+=("--repository")
+    local_nonpersistent_flags+=("--repository")
+    local_nonpersistent_flags+=("--repository=")
     flags+=("--context=")
     two_word_flags+=("--context")
     flags+=("--no-color")
@@ -2001,6 +2029,196 @@ _platformctl_init()
     noun_aliases=()
 }
 
+_platformctl_platform_down()
+{
+    last_command="platformctl_platform_down"
+
+    command_aliases=()
+
+    commands=()
+
+    flags=()
+    two_word_flags=()
+    local_nonpersistent_flags=()
+    flags_with_completion=()
+    flags_completion=()
+
+    flags+=("--context=")
+    two_word_flags+=("--context")
+    flags+=("--no-color")
+    flags+=("--output=")
+    two_word_flags+=("--output")
+    two_word_flags+=("-o")
+    flags+=("--quiet")
+    flags+=("-q")
+    flags+=("--timeout=")
+    two_word_flags+=("--timeout")
+
+    must_have_one_flag=()
+    must_have_one_noun=()
+    noun_aliases=()
+}
+
+_platformctl_platform_status()
+{
+    last_command="platformctl_platform_status"
+
+    command_aliases=()
+
+    commands=()
+
+    flags=()
+    two_word_flags=()
+    local_nonpersistent_flags=()
+    flags_with_completion=()
+    flags_completion=()
+
+    flags+=("--context=")
+    two_word_flags+=("--context")
+    flags+=("--no-color")
+    flags+=("--output=")
+    two_word_flags+=("--output")
+    two_word_flags+=("-o")
+    flags+=("--quiet")
+    flags+=("-q")
+    flags+=("--timeout=")
+    two_word_flags+=("--timeout")
+
+    must_have_one_flag=()
+    must_have_one_noun=()
+    noun_aliases=()
+}
+
+_platformctl_platform_up()
+{
+    last_command="platformctl_platform_up"
+
+    command_aliases=()
+
+    commands=()
+
+    flags=()
+    two_word_flags=()
+    local_nonpersistent_flags=()
+    flags_with_completion=()
+    flags_completion=()
+
+    flags+=("--context=")
+    two_word_flags+=("--context")
+    flags+=("--no-color")
+    flags+=("--output=")
+    two_word_flags+=("--output")
+    two_word_flags+=("-o")
+    flags+=("--quiet")
+    flags+=("-q")
+    flags+=("--timeout=")
+    two_word_flags+=("--timeout")
+
+    must_have_one_flag=()
+    must_have_one_noun=()
+    noun_aliases=()
+}
+
+_platformctl_platform_verify()
+{
+    last_command="platformctl_platform_verify"
+
+    command_aliases=()
+
+    commands=()
+
+    flags=()
+    two_word_flags=()
+    local_nonpersistent_flags=()
+    flags_with_completion=()
+    flags_completion=()
+
+    flags+=("--context=")
+    two_word_flags+=("--context")
+    flags+=("--no-color")
+    flags+=("--output=")
+    two_word_flags+=("--output")
+    two_word_flags+=("-o")
+    flags+=("--quiet")
+    flags+=("-q")
+    flags+=("--timeout=")
+    two_word_flags+=("--timeout")
+
+    must_have_one_flag=()
+    must_have_one_noun=()
+    noun_aliases=()
+}
+
+_platformctl_platform()
+{
+    last_command="platformctl_platform"
+
+    command_aliases=()
+
+    commands=()
+    commands+=("down")
+    commands+=("status")
+    commands+=("up")
+    commands+=("verify")
+
+    flags=()
+    two_word_flags=()
+    local_nonpersistent_flags=()
+    flags_with_completion=()
+    flags_completion=()
+
+    flags+=("--context=")
+    two_word_flags+=("--context")
+    flags+=("--no-color")
+    flags+=("--output=")
+    two_word_flags+=("--output")
+    two_word_flags+=("-o")
+    flags+=("--quiet")
+    flags+=("-q")
+    flags+=("--timeout=")
+    two_word_flags+=("--timeout")
+
+    must_have_one_flag=()
+    must_have_one_noun=()
+    noun_aliases=()
+}
+
+_platformctl_portal()
+{
+    last_command="platformctl_portal"
+
+    command_aliases=()
+
+    commands=()
+
+    flags=()
+    two_word_flags=()
+    local_nonpersistent_flags=()
+    flags_with_completion=()
+    flags_completion=()
+
+    flags+=("--no-open")
+    local_nonpersistent_flags+=("--no-open")
+    flags+=("--port=")
+    two_word_flags+=("--port")
+    local_nonpersistent_flags+=("--port")
+    local_nonpersistent_flags+=("--port=")
+    flags+=("--context=")
+    two_word_flags+=("--context")
+    flags+=("--no-color")
+    flags+=("--output=")
+    two_word_flags+=("--output")
+    two_word_flags+=("-o")
+    flags+=("--quiet")
+    flags+=("-q")
+    flags+=("--timeout=")
+    two_word_flags+=("--timeout")
+
+    must_have_one_flag=()
+    must_have_one_noun=()
+    noun_aliases=()
+}
+
 _platformctl_profile_list()
 {
     last_command="platformctl_profile_list"
@@ -2616,6 +2834,8 @@ _platformctl_root_command()
     commands+=("doctor")
     commands+=("help")
     commands+=("init")
+    commands+=("platform")
+    commands+=("portal")
     commands+=("profile")
     commands+=("request")
     commands+=("service")

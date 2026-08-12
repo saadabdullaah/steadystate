@@ -1,5 +1,30 @@
 # Engineering Log
 
+## 2026-08-11 — Phase 9 portal and GA implementation
+
+### Integrated on `phase-9/portal-ga`
+
+- Added the embedded React portal, typed loopback API, single-use launch/session
+  exchange, CSRF/Host/Origin enforcement, strict headers, bounded SSE replay,
+  deterministic plans, real broker dispatch, and guarded Rollout break glass.
+- Added refined overview, catalog, Team, service, Application, Database,
+  request, readiness, observability, policy, diagnosis, planning, and audit
+  experiences in light/dark responsive layouts with accessibility tests.
+- Added `platformctl platform up|status|verify|down`, expanded first-run config,
+  portal version/asset provenance, deterministic embedded builds, six-target
+  release wiring, parallel Go/JavaScript CodeQL, and Playwright coverage.
+- Added a real full-profile Phase 9 workflow that drives the browser, submits
+  an unmerged App-authored smoke proposal, records GIF/WebM/evidence, removes
+  temporary GitHub resources, captures diagnostics, and safely tears down.
+- Added ADR-0012, portal/GA architecture, user and troubleshooting guides,
+  evidence/security/budget contracts, and private master-plan version 2.0.
+
+### Publication gates still pending
+
+- Draft PR number, final commits, hosted run/artifact IDs and checksums, exact-main
+  regression links, release archives, annotated tag, and `v1.0.0` release will
+  be recorded only after those external gates succeed.
+
 ## 2026-07-13 — Phase 0 foundation
 
 ### Done

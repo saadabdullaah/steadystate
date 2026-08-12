@@ -1,10 +1,10 @@
 # SteadyState
 
-SteadyState is a laptop-scale internal developer platform built around a Kubernetes operator and the `platformctl` developer CLI. It demonstrates control-plane engineering, GitOps, progressive delivery, policy enforcement, observability, durable PostgreSQL, tested recovery, and a reviewed service golden path without requiring a cloud account.
+SteadyState is a self-hosted, laptop-scale internal developer platform built around a Kubernetes operator, the `platformctl` developer CLI, and an embedded local-owner portal. It combines Git-reviewed delivery, progressive rollout, policy, observability, durable PostgreSQL, tested recovery, and golden service paths without requiring a cloud account. The runtime is self-hosted; GitHub supplies the reviewed delivery, registry, and signing plane.
 
-Phase 0 establishes a reproducible Windows-first environment: pinned local tooling, kind clusters with Calico networking, Envoy Gateway using the Kubernetes Gateway API, automated smoke tests, and proof that NetworkPolicy is enforced. Phase 1 adds the `Application` API and a Kubernetes operator that owns, reconciles, observes, and self-heals each application's Deployment, Service, ConfigMap, and HTTPRoute. Phase 2 adds managed Team namespaces with quota, RBAC, NetworkPolicy isolation, and repository authorization. Phase 3 adds Argo CD app-of-apps delivery, immutable GHCR demo releases, automated GitOps pull requests, runtime image-digest and Git-revision provenance, and truthful Argo health. Phase 4 adds metric-gated Argo Rollouts canaries, Prometheus analysis, Envoy Gateway traffic weights, automatic rollback, and reversible strategy migration. Phase 5 adds structured request logs, W3C/OTLP traces, SLO recording and burn-rate alerts, correlated Grafana dashboards, and readiness-derived `ServiceHealth`. Phase 6 adds signed and SPDX-attested demo images, fail-closed Kyverno admission, workload isolation, truthful security status, encrypted Git secrets, security scanners, and a documented threat model. Phase 7 adds a `Database` API, CloudNativePG, continuous WAL/base backups to external SeaweedFS, application bindings, final-backup deletion, and declarative whole-cluster recovery. Phase 8 adds the cross-platform `platformctl` CLI, a typed GitHub App proposal broker, catalog-driven tenancy, Go/React/full-stack scaffolds, signed generic service delivery, ordered diagnostics, protected two-PR deletion, and confirmed break glass.
+Phases 0–8 established the Windows-first kind foundation, the Application/Team/Database control plane, Argo GitOps, metric-gated canaries, correlated telemetry, signed-image policy, durable recovery, and the cross-platform golden-path CLI. Phase 9 adds the refined portal and complete lifecycle commands while preserving every existing ownership boundary: the browser consumes typed summaries and reviewed proposals; it never becomes a second control plane.
 
-> Status: Phases 0 through 7 are released through [`v0.7.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.7.0). Phase 8 checkpoints 1-4, the human-reviewed `xyz` scaffold/activation chain, and branch acceptance are complete. Closeout merge, exact-main regression, binary verification, and `v0.8.0` publication are the remaining gates.
+> Status: Phases 0–8 are released through [`v0.8.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.8.0). Phase 9 is the `v1.0.0` GA milestone; its implementation and hosted acceptance are developed in one `phase-9/portal-ga` pull request.
 
 ![Phase 8 platformctl zero-to-live golden path](docs/demonstrations/phase8-zero-to-live.gif)
 
@@ -216,9 +216,30 @@ backup data.
 preserves `steadystate-backup-data`. Purging requires the explicit
 `scripts/backup-store.ps1 -Action Stop -PurgeData` contract.
 
+## Three-command local product quickstart
+
+After cloning and authenticating `gh`, build or install `platformctl`, then run:
+
+```powershell
+platformctl config init --checkout . --profile full
+platformctl platform up
+platformctl portal
+```
+
+`platform up` verifies pinned tools and prerequisites, reconciles the cluster,
+starts the retained backup store for the full profile, builds and loads the
+exact platform images, deploys GitOps, and verifies readiness. The portal binds
+only to `127.0.0.1`; its one-time launch URL becomes an HttpOnly local session
+and is immediately removed from the browser address bar. `platform down`
+removes the configured cluster and exact external process while preserving the
+SeaweedFS backup volume.
+
+See the [portal user guide](docs/portal.md) for onboarding, Git-first changes,
+telemetry, recovery, deletion, and break glass.
+
 ## Developer golden path with platformctl
 
-`platformctl` is the supported Phase 8 developer entrypoint. It stores only
+`platformctl` is the supported developer entrypoint. It stores only
 non-secret context in the operating-system configuration directory, delegates
 the existing bounded cluster lifecycle, reads platform and telemetry APIs, and
 turns normal writes into typed Git proposals. The GitHub App private key stays
@@ -309,6 +330,9 @@ make verify-data PROFILE=full
 make test-data-recovery PROFILE=full
 make phase7-acceptance PROFILE=full
 make phase8-acceptance PROFILE=full
+make portal
+make test-portal
+make phase9-acceptance PROFILE=full
 make undeploy-gitops
 make destroy
 ```
@@ -352,6 +376,8 @@ make destroy
 | `phase7-foundation` | Prove SeaweedFS/Barman backup, WAL, deletion, restore, and checksum compatibility |
 | `test-data-recovery` / `phase7-acceptance` | Run the workflow-controlled whole-cluster recovery, RTO/RPO, alert, final-backup, and evidence proof |
 | `phase8-acceptance` | Run one workflow-controlled Phase 8 CLI golden-path, evidence, or failure-capture stage on the prepared full profile |
+| `portal` / `test-portal` | Build and run the embedded loopback portal, or verify its Go/API/frontend contracts and deterministic assets |
+| `phase9-acceptance` | Run the workflow-controlled real-browser portal, broker, evidence, and cleanup proof |
 | `platformctl` | Build or run the supported developer CLI for contexts, local lifecycle, reads, diagnosis, typed Git proposals, and confirmed break glass |
 | `diagnostics` | Capture nodes, pods, events, gateway state, and kind logs |
 | `destroy` | Idempotently delete the named kind cluster |
@@ -359,6 +385,7 @@ make destroy
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Portal user guide](docs/portal.md)
 - [Data and recovery runbook](docs/data-recovery.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](CONTRIBUTING.md)
