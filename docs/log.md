@@ -1,5 +1,14 @@
 # Engineering Log
 
+## 2026-08-13 — Phase 9 hosted acceptance verified
+
+- Verified the complete full-profile portal golden path in [Phase 9 acceptance run 31689255906](https://github.com/saadabdullaah/steadystate/actions/runs/31689255906) against commit `7036477bfdca26b1557bbd2db4228dfbdd7b4de5`.
+- Passed real portal navigation, accessibility, telemetry/policy/database views, typed planning, GitHub App broker dispatch, exact three-file PR validation, smoke PR/branch cleanup, curated snapshots, and disposable platform teardown.
+- Retained artifact `9177368072` (`phase9-acceptance-7036477bfdca26b1557bbd2db4228dfbdd7b4de5`) with SHA-256 `05fc3a78031a28ce3b92f0fd6df7043cb9f2299c2aba589b60c2de2a2557f4c1`.
+- Verified evidence JSON SHA-256 `1a3d392f08c0e69c0176f69fcdff730c2edb5ae296d5a6293512f473b1d3e3bf`, hosted GIF SHA-256 `c58b8df32c97c3c38eb4c3a337467ec9bb179c96212a17ace2f77ed494690c75`, and WebM SHA-256 `98ace3249e81f90e2c63e6df8abaca5cb94aa2435dfdc6e05908c93884e841b2`.
+- Verified exact-commit CI run `31689255890`, platformctl smoke run `31689255934`, and parallel Go/JavaScript CodeQL run `31689279749`.
+- Committed the real hosted GIF to `docs/demonstrations/phase9-portal-golden-path.gif`; final PR reruns, exact-main regressions, tag, and GA release remain publication gates.
+
 ## 2026-08-11 — Phase 9 portal and GA implementation
 
 ### Integrated on `phase-9/portal-ga`
@@ -21,9 +30,9 @@
 
 ### Publication gates still pending
 
-- Draft PR number, final commits, hosted run/artifact IDs and checksums, exact-main
-  regression links, release archives, annotated tag, and `v1.0.0` release will
-  be recorded only after those external gates succeed.
+- PR #95 now contains the integrated implementation and hosted evidence. Exact-main
+  regression links, release archives, annotated tag, and the `v1.0.0` release will
+  be recorded only after those remaining external gates succeed.
 
 ## 2026-07-13 — Phase 0 foundation
 

@@ -4,9 +4,9 @@ SteadyState is a self-hosted, laptop-scale internal developer platform built aro
 
 Phases 0–8 established the Windows-first kind foundation, the Application/Team/Database control plane, Argo GitOps, metric-gated canaries, correlated telemetry, signed-image policy, durable recovery, and the cross-platform golden-path CLI. Phase 9 adds the refined portal and complete lifecycle commands while preserving every existing ownership boundary: the browser consumes typed summaries and reviewed proposals; it never becomes a second control plane.
 
-> Status: Phases 0–8 are released through [`v0.8.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.8.0). Phase 9 is the `v1.0.0` GA milestone; its implementation and hosted acceptance are developed in one `phase-9/portal-ga` pull request.
+> Status: Phases 0–8 are released through [`v0.8.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.8.0). Phase 9 implementation and hosted acceptance are verified in [PR #95](https://github.com/saadabdullaah/steadystate/pull/95); exact-main regression, the `v1.0.0` tag, and GA release remain publication gates.
 
-![Phase 8 platformctl zero-to-live golden path](docs/demonstrations/phase8-zero-to-live.gif)
+![Phase 9 local developer portal golden path](docs/demonstrations/phase9-portal-golden-path.gif)
 
 ## Architecture
 
