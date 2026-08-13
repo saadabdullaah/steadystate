@@ -1,6 +1,8 @@
 package main
 
 import (
+	"image"
+	"image/color"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,5 +35,34 @@ func TestValidatePathsConfinesFramesAndOutput(t *testing.T) {
 	}
 	if _, _, _, err := validatePaths(filepath.Join(root, "unexpected.gif"), []string{frame}); err == nil {
 		t.Fatal("unexpected output filename was accepted")
+	}
+}
+
+func TestComposeFramesLetterboxesResponsiveScreenshots(t *testing.T) {
+	desktop := image.NewRGBA(image.Rect(0, 0, 144, 90))
+	mobile := image.NewRGBA(image.Rect(0, 0, 39, 84))
+	desktop.Set(0, 0, color.White)
+	mobile.Set(0, 0, color.White)
+
+	animation, err := composeFrames([]image.Image{desktop, mobile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(animation.Image) != 2 || len(animation.Delay) != 2 {
+		t.Fatalf("unexpected animation sizes: frames=%d delays=%d", len(animation.Image), len(animation.Delay))
+	}
+	for index, frame := range animation.Image {
+		if frame.Bounds().Dx() != 144 || frame.Bounds().Dy() != 90 {
+			t.Fatalf("frame %d bounds=%v, want 144x90", index, frame.Bounds())
+		}
+	}
+}
+
+func TestComposeFramesRejectsInvalidInputs(t *testing.T) {
+	if _, err := composeFrames([]image.Image{image.NewRGBA(image.Rect(0, 0, 10, 10))}); err == nil {
+		t.Fatal("single-frame animation was accepted")
+	}
+	if _, err := composeFrames([]image.Image{image.NewRGBA(image.Rect(0, 0, 4097, 10)), image.NewRGBA(image.Rect(0, 0, 10, 10))}); err == nil {
+		t.Fatal("oversized animation was accepted")
 	}
 }

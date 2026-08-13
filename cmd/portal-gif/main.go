@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"image/color/palette"
 	"image/draw"
 	"image/gif"
@@ -27,8 +28,7 @@ func main() {
 		fatal(err)
 	}
 	defer func() { _ = frameRoot.Close() }()
-	animation := &gif.GIF{LoopCount: 0}
-	var bounds image.Rectangle
+	frames := make([]image.Image, 0, len(frameNames))
 	for _, name := range frameNames {
 		file, err := frameRoot.Open(name)
 		if err != nil {
@@ -39,16 +39,11 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
-		if bounds.Empty() {
-			bounds = frame.Bounds()
-		} else if frame.Bounds().Dx() != bounds.Dx() || frame.Bounds().Dy() != bounds.Dy() {
-			fatal(fmt.Errorf("frame %s dimensions differ from the first frame", name))
-		}
-		paletted := image.NewPaletted(bounds, palette.Plan9)
-		draw.FloydSteinberg.Draw(paletted, bounds, frame, frame.Bounds().Min)
-		animation.Image = append(animation.Image, paletted)
-		animation.Delay = append(animation.Delay, 120)
-		animation.Disposal = append(animation.Disposal, gif.DisposalNone)
+		frames = append(frames, frame)
+	}
+	animation, err := composeFrames(frames)
+	if err != nil {
+		fatal(err)
 	}
 	// #nosec G703 -- validatePaths requires a real, non-symlink parent and fixes the output filename below.
 	outputRoot, err := os.OpenRoot(outputDirectory)
@@ -67,6 +62,41 @@ func main() {
 	if err = output.Close(); err != nil {
 		fatal(err)
 	}
+}
+
+func composeFrames(frames []image.Image) (*gif.GIF, error) {
+	if len(frames) < 2 {
+		return nil, fmt.Errorf("at least two frames are required")
+	}
+	const maximumDimension = 4096
+	width, height := 0, 0
+	for index, frame := range frames {
+		if frame == nil || frame.Bounds().Empty() {
+			return nil, fmt.Errorf("frame %d is empty", index+1)
+		}
+		width = max(width, frame.Bounds().Dx())
+		height = max(height, frame.Bounds().Dy())
+	}
+	if width > maximumDimension || height > maximumDimension {
+		return nil, fmt.Errorf("frame canvas %dx%d exceeds the %d-pixel dimension limit", width, height, maximumDimension)
+	}
+
+	bounds := image.Rect(0, 0, width, height)
+	animation := &gif.GIF{LoopCount: 0}
+	background := color.RGBA{R: 13, G: 20, B: 24, A: 255}
+	for _, frame := range frames {
+		canvas := image.NewRGBA(bounds)
+		draw.Draw(canvas, bounds, &image.Uniform{C: background}, image.Point{}, draw.Src)
+		offset := image.Pt((width-frame.Bounds().Dx())/2, (height-frame.Bounds().Dy())/2)
+		target := image.Rectangle{Min: offset, Max: offset.Add(frame.Bounds().Size())}
+		draw.Draw(canvas, target, frame, frame.Bounds().Min, draw.Src)
+		paletted := image.NewPaletted(bounds, palette.Plan9)
+		draw.FloydSteinberg.Draw(paletted, bounds, canvas, image.Point{})
+		animation.Image = append(animation.Image, paletted)
+		animation.Delay = append(animation.Delay, 120)
+		animation.Disposal = append(animation.Disposal, gif.DisposalNone)
+	}
+	return animation, nil
 }
 
 func validatePaths(outputArgument string, frameArguments []string) (string, string, []string, error) {
