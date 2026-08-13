@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import axe from "axe-core";
 import { createServer, Server } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { resolve } from "node:path";
 
 const catalog = { tenants: [{ name: "payments", teamPath: "gitops/teams/payments", owners: ["platform-team"], lifecycle: "Active", applications: [{ name: "demo", lifecycle: "Active" }], databases: [{ name: "orders", lifecycle: "Active" }], services: [{ name: "xyz", template: "full-stack", version: "v0.1.1", components: ["web", "api"], lifecycle: "Active" }] }] };
 const summary = { kind: "Application", namespace: "team-payments", name: "demo", phase: "Healthy", ready: "True", generation: 2, observedGeneration: 2 };
@@ -10,12 +10,16 @@ let server: Server;
 
 test.beforeAll(async () => {
   const root = resolve(process.cwd(), "../../internal/platformctl/portalassets");
-  const types: Record<string,string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" };
+  const indexAsset = { path: resolve(root, "index.html"), contentType: "text/html; charset=utf-8" };
+  const scriptAsset = { path: resolve(root, "app.js"), contentType: "text/javascript; charset=utf-8" };
+  const styleAsset = { path: resolve(root, "app.css"), contentType: "text/css; charset=utf-8" };
   server = createServer(async (request, response) => {
     const relative = request.url === "/" ? "index.html" : request.url?.slice(1).split("?", 1)[0] || "index.html";
-    const safe = /^[a-zA-Z0-9._-]+$/.test(relative) ? relative : "index.html";
-    try { const content = await readFile(resolve(root, safe)); response.writeHead(200, { "Content-Type": types[extname(safe)] ?? "application/octet-stream" }); response.end(content); }
-    catch { const content = await readFile(resolve(root, "index.html")); response.writeHead(200, { "Content-Type": types[".html"] }); response.end(content); }
+    let asset = indexAsset;
+    if (relative === "app.js") asset = scriptAsset;
+    if (relative === "app.css") asset = styleAsset;
+    try { const content = await readFile(asset.path); response.writeHead(200, { "Content-Type": asset.contentType }); response.end(content); }
+    catch { const content = await readFile(indexAsset.path); response.writeHead(200, { "Content-Type": indexAsset.contentType }); response.end(content); }
   });
   await new Promise<void>((resolveReady, reject) => { server.once("error", reject); server.listen(4173, "127.0.0.1", resolveReady); });
 });

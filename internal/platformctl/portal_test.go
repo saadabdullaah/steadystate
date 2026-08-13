@@ -29,7 +29,7 @@ func TestPortalLaunchIsOneTimeAndCreatesStrictSession(t *testing.T) {
 		t.Fatalf("launch status=%d body=%s", response.Code, response.Body.String())
 	}
 	cookies := response.Result().Cookies()
-	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
+	if len(cookies) != 1 || !cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].SameSite != http.SameSiteStrictMode {
 		t.Fatalf("unsafe session cookie: %#v", cookies)
 	}
 	replay := httptest.NewRecorder()

@@ -249,7 +249,7 @@ func (s *portalServer) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusUnauthorized, "launch_expired", "launch link is invalid or expired", "Restart platformctl portal to create a new one-time link.")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "steadystate_portal_session", Value: s.session, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: int((8 * time.Hour).Seconds())})
+	http.SetCookie(w, &http.Cookie{Name: "steadystate_portal_session", Value: s.session, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, MaxAge: int((8 * time.Hour).Seconds())})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
