@@ -49,7 +49,7 @@ func RenderChange(root string, request ChangeRequest) (ChangeSet, error) {
 	if err != nil {
 		return ChangeSet{}, err
 	}
-	defer repository.Close()
+	defer func() { _ = repository.Close() }()
 	renderer := &changeRenderer{repository: repository, request: request, catalog: catalog, changes: map[string]FileChange{}}
 	if err := renderer.render(); err != nil {
 		return ChangeSet{}, err
@@ -740,7 +740,7 @@ func (r *changeRenderer) deleteLeaf(path, manifest string) error {
 	if err != nil {
 		return exitError(ExitNotFound, "cannot inspect leaf %s: %v", path, err)
 	}
-	defer directory.Close()
+	defer func() { _ = directory.Close() }()
 	entries, err := directory.ReadDir(-1)
 	if err != nil {
 		return exitError(ExitNotFound, "cannot inspect leaf %s: %v", path, err)
@@ -830,7 +830,7 @@ func ApplyChangeSet(root string, set ChangeSet) error {
 	if err != nil {
 		return err
 	}
-	defer repository.Close()
+	defer func() { _ = repository.Close() }()
 	for _, change := range set.Files {
 		if err := validateChangePath(change.Path); err != nil {
 			return err

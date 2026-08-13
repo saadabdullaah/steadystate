@@ -86,8 +86,31 @@ jobs:
               if ($content -match '(http://127\.0\.0\.1:\d+/launch/[0-9a-f]{64})') { $launch = $Matches[1]; break }
             } while ((Get-Date) -lt $deadline -and -not $process.HasExited)
             if (-not $launch) { throw 'Native portal did not start.' }
-            $response = Invoke-WebRequest -Uri $launch -SessionVariable portalSession -MaximumRedirection 5
-            if ($response.StatusCode -ne 200 -or $response.Content -notmatch 'SteadyState') { throw 'Native portal did not serve its embedded application.' }
+            $handler = [System.Net.Http.HttpClientHandler]::new()
+            $handler.AllowAutoRedirect = $false
+            $handler.UseCookies = $false
+            $client = [System.Net.Http.HttpClient]::new($handler)
+            try {
+              $exchange = $client.GetAsync($launch).GetAwaiter().GetResult()
+              if ($exchange.StatusCode -ne [System.Net.HttpStatusCode]::SeeOther -or $exchange.Headers.Location.OriginalString -ne '/') {
+                throw 'Native portal launch exchange did not return the expected clean redirect.'
+              }
+              $cookie = ($exchange.Headers.GetValues('Set-Cookie') | Select-Object -First 1)
+              if ($cookie -notmatch 'HttpOnly' -or $cookie -notmatch 'Secure' -or $cookie -notmatch 'SameSite=Strict') {
+                throw 'Native portal launch exchange did not return the strict session cookie.'
+              }
+              $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, ($launch -replace '/launch/[0-9a-f]{64}$', '/'))
+              $request.Headers.TryAddWithoutValidation('Cookie', $cookie.Split(';')[0]) | Out-Null
+              $served = $client.SendAsync($request).GetAwaiter().GetResult()
+              $content = $served.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              if (-not $served.IsSuccessStatusCode -or $content -notmatch 'SteadyState') { throw 'Native portal did not serve its embedded application.' }
+            } finally {
+              if ($request) { $request.Dispose() }
+              if ($exchange) { $exchange.Dispose() }
+              if ($served) { $served.Dispose() }
+              $client.Dispose()
+              $handler.Dispose()
+            }
           } finally {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
             Remove-Item -LiteralPath $private -Recurse -Force -ErrorAction SilentlyContinue
