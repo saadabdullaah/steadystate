@@ -1573,6 +1573,23 @@ func TestPhase5ObservabilityFoundationContracts(t *testing.T) {
 	}
 }
 
+func TestPhase9AcceptanceEvidenceFieldsAreDeclaredBeforeFinalization(t *testing.T) {
+	root := repositoryRoot(t)
+	script := string(readFile(t, filepath.Join(root, "scripts", "phase9-acceptance.ps1")))
+	for _, field := range []string{
+		"completedAt = $null",
+		"status = 'running'",
+		"requestID = $null",
+		"brokerRunURL = $null",
+		"pullRequestURL = $null",
+		"proposalBranch = $null",
+	} {
+		if !strings.Contains(script, field) {
+			t.Errorf("Phase 9 evidence initialization is missing %q", field)
+		}
+	}
+}
+
 func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	root := repositoryRoot(t)
 	workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase4.yml")))

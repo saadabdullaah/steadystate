@@ -73,7 +73,13 @@ switch ($Stage) {
             runID = $env:GITHUB_RUN_ID
             runAttempt = $env:GITHUB_RUN_ATTEMPT
             startedAt = (Get-Date).ToUniversalTime().ToString('o')
+            completedAt = $null
+            status = 'running'
             smokeTeam = "portal-smoke-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)".ToLowerInvariant()
+            requestID = $null
+            brokerRunURL = $null
+            pullRequestURL = $null
+            proposalBranch = $null
             checks = @()
         }
         Save-State $state
