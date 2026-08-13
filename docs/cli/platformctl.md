@@ -265,9 +265,16 @@ Create the initial non-secret configuration
 ```text
 platformctl config init [flags]
 
---checkout string   SteadyState checkout path
-      --force             replace an existing configuration after creating a backup
-      --name string       initial context name (default "local")
+--branch string         default Git branch (default "main")
+      --checkout string       SteadyState checkout path
+      --cluster string        kind cluster name (default "steadystate")
+      --force                 replace an existing configuration after creating a backup
+      --http-port int         Gateway HTTP host port (default 8080)
+      --https-port int        Gateway HTTPS host port (default 8443)
+      --kube-context string   Kubernetes context
+      --name string           initial context name (default "local")
+      --profile string        minimal, standard, or full (default "standard")
+      --repository string     GitHub repository as OWNER/REPO (inferred from origin when omitted)
 ```
 
 ## `platformctl config view`
@@ -468,6 +475,57 @@ platformctl init NAME [flags]
       --team string       existing Team name (defaults to NAME)
       --template string   golden template: go-api, react-static, or full-stack
       --with-database     create and attach PostgreSQL (full-stack only)
+```
+
+## `platformctl platform`
+
+Manage the complete local SteadyState platform
+
+```text
+platformctl platform [flags]
+```
+
+## `platformctl platform down`
+
+Stop the exact configured platform while retaining backups
+
+```text
+platformctl platform down [flags]
+```
+
+## `platformctl platform status`
+
+Show aggregate platform status
+
+```text
+platformctl platform status [flags]
+```
+
+## `platformctl platform up`
+
+Reconcile the complete configured platform
+
+```text
+platformctl platform up [flags]
+```
+
+## `platformctl platform verify`
+
+Verify the configured complete platform
+
+```text
+platformctl platform verify [flags]
+```
+
+## `platformctl portal`
+
+Run the loopback-only SteadyState developer portal
+
+```text
+platformctl portal [flags]
+
+--no-open    do not open the system browser
+      --port int   fixed loopback port (zero selects an available port)
 ```
 
 ## `platformctl profile`

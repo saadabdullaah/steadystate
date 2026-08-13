@@ -4,8 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"go/format"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"sort"
 	"strings"
 
@@ -70,18 +69,18 @@ func (r *changeRenderer) deleteServiceSource(service CatalogService) error {
 		return err
 	}
 	actual := []string{}
-	err = filepath.WalkDir(filepath.Join(r.root, filepath.FromSlash(service.Path)), func(path string, entry os.DirEntry, walkErr error) error {
+	err = fs.WalkDir(r.repository.FS(), service.Path, func(currentPath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
 			return nil
 		}
-		relative, relErr := filepath.Rel(filepath.Join(r.root, filepath.FromSlash(service.Path)), path)
-		if relErr != nil {
-			return relErr
+		relative := strings.TrimPrefix(currentPath, service.Path+"/")
+		if relative == currentPath || relative == "" {
+			return exitError(ExitConflict, "service source contains an invalid path %q", currentPath)
 		}
-		actual = append(actual, filepath.ToSlash(relative))
+		actual = append(actual, relative)
 		return nil
 	})
 	if err != nil {
@@ -119,11 +118,11 @@ func (r *changeRenderer) serviceFiles(service CatalogService) (map[string][]byte
 		if service.Template == "go-api" {
 			component = "api"
 		}
-		mainSource, readErr := os.ReadFile(filepath.Join(r.root, "apps", "demo-app", "main.go"))
+		mainSource, readErr := r.repository.ReadFile("apps/demo-app/main.go")
 		if readErr != nil {
 			return nil, fmt.Errorf("read Go API golden source: %w", readErr)
 		}
-		testSource, readErr := os.ReadFile(filepath.Join(r.root, "apps", "demo-app", "main_test.go"))
+		testSource, readErr := r.repository.ReadFile("apps/demo-app/main_test.go")
 		if readErr != nil {
 			return nil, fmt.Errorf("read Go API golden tests: %w", readErr)
 		}

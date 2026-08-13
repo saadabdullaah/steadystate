@@ -680,3 +680,39 @@ kubelet/containerd journals and CRI container state from every exact kind
 node. Cleanup skips API-driven teardown when `/readyz` is unavailable, destroys
 kind before detaching the backup network, and removes only exact named Docker
 resources.
+
+## Portal launch, session, or port failure
+
+The one-time URL printed by `platformctl portal` expires after 60 seconds and
+works once. Browser-launch failure is only a warning. Restart the command for a
+fresh token if the clean page reports an expired session. A fixed `--port`
+conflict exits with code 6. Never forward the portal or bind it beyond loopback.
+
+## Portal rejects a write
+
+Plans expire after ten minutes, are single-use, and bind the current
+`origin/main` SHA and render digest. Refresh for a current CSRF token and create
+a new plan after stale-base or digest conflict. If no PR appears, check
+`gh auth status`, App configuration, and the returned workflow URL. Base races,
+unexpected paths, and request-ID reuse intentionally fail closed.
+
+## Portal is disconnected or partial
+
+Open **Readiness**, then run `platformctl platform status` and
+`platformctl platform verify`. `Unknown` is correct when a bounded dependency
+read fails. SSE reconnects and refetches typed snapshots; never expose an
+internal telemetry or Kubernetes endpoint directly to the browser.
+
+## Portal break glass was rejected
+
+The target must be a current canary Rollout. Reinspect for a fresh two-minute
+operation token, enter a reason and exact Application name, and retry only if
+UID/resource version is unchanged. A successful action can still require a
+reviewed recovery Git change.
+
+## Platform lifecycle setup or teardown failed
+
+`platform up` preserves a failed environment for diagnosis. `platform down`
+still attempts GitOps undeploy, exact kind deletion, and exact backup-store
+stop after an earlier failure, then aggregates sanitized errors. It never
+purges the SeaweedFS named volume.

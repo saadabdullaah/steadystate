@@ -1,4 +1,27 @@
-# Architecture Through Phase 7 Data Recovery
+# SteadyState v1.0 Architecture
+
+## Phase 9 local portal data flow
+
+```mermaid
+flowchart LR
+    Browser["Loopback browser"] -->|"HttpOnly session + CSRF"| CLI["platformctl portal"]
+    CLI --> Catalog["Tenant catalog / Git revision"]
+    CLI --> GitHub["Typed Actions broker + reviewed PR"]
+    CLI --> Kubernetes["Curated Kubernetes and Argo reads"]
+    CLI --> Telemetry["Allowlisted Prometheus / Loki / Tempo reads"]
+    CLI --> Policy["Kyverno summaries"]
+    CLI --> Data["CNPG / Barman summaries"]
+    GitHub --> Argo["Merged desired state"]
+    Argo --> Operator["SteadyState operator"]
+    Operator --> Runtime["Workloads, routes, policy, telemetry, databases"]
+```
+
+The browser holds no GitHub credential, App key, kubeconfig, SOPS identity, or
+Kubernetes Secret. The backend returns typed summaries and fixed links, not raw
+objects or arbitrary proxy results. Normal mutations become deterministic Git
+proposals. The sole direct mutation remains guarded Rollout break glass.
+Embedded assets and backend share the signed CLI process, so no portal
+component is installed in the cluster.
 
 ## Phase 8 local-owner CLI boundary
 
@@ -11,8 +34,8 @@ inside GitHub Actions. Cluster reads use the configured local owner context.
 The only direct mutations are confirmed Rollout promote/abort break-glass
 actions. They use optimistic resource-version checks and produce local audit
 records plus Kubernetes Events. Generated workload children remain operator
-owned. The future portal must consume the same CLI/broker/catalog contracts
-rather than inventing parallel ownership.
+owned. The embedded portal consumes these same CLI/broker/catalog contracts
+and does not invent parallel ownership.
 
 Phase 7 adds a separate durable-data boundary: Argo applies only the
 `Database` CR, the SteadyState operator owns CNPG/Barman/monitoring/network

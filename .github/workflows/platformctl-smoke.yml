@@ -9,6 +9,7 @@ on:
       - .goreleaser.yml
       - cmd/platformctl/**
       - internal/platformctl/**
+      - web/portal/**
       - docs/cli/**
       - scripts/install-platformctl.*
 
@@ -63,6 +64,57 @@ jobs:
           & ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} --output json version
           & ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} --output json profile list
           & ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} docs --directory .artifacts/docs
+          $portal = (& ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} --output json version | ConvertFrom-Json)
+          if ($portal.portalVersion -ne 'v1.0.0' -or $portal.portalAssetsDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'Embedded portal metadata is invalid.' }
+      - name: Launch and verify native embedded portal
+        shell: pwsh
+        run: |
+          $config = Join-Path $PWD '.artifacts/native-config'
+          if ($env:RUNNER_OS -eq 'Windows') { $env:APPDATA = $config } else { $env:XDG_CONFIG_HOME = $config }
+          $binary = Join-Path $PWD ".artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }}"
+          & $binary --output json config init --checkout $PWD --repository $env:GITHUB_REPOSITORY --profile minimal
+          $private = Join-Path $PWD '.artifacts/private-portal'
+          New-Item -ItemType Directory -Force $private | Out-Null
+          $stdout = Join-Path $private 'ready.txt'
+          $stderr = Join-Path $private 'launch.txt'
+          $process = Start-Process -FilePath $binary -ArgumentList @('--output','json','portal','--no-open') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(20)
+            do {
+              Start-Sleep -Milliseconds 250
+              $content = if (Test-Path $stderr) { Get-Content -Raw $stderr } else { '' }
+              if ($content -match '(http://127\.0\.0\.1:\d+/launch/[0-9a-f]{64})') { $launch = $Matches[1]; break }
+            } while ((Get-Date) -lt $deadline -and -not $process.HasExited)
+            if (-not $launch) { throw 'Native portal did not start.' }
+            $handler = [System.Net.Http.HttpClientHandler]::new()
+            $handler.AllowAutoRedirect = $false
+            $handler.UseCookies = $false
+            $client = [System.Net.Http.HttpClient]::new($handler)
+            try {
+              $exchange = $client.GetAsync($launch).GetAwaiter().GetResult()
+              if ($exchange.StatusCode -ne [System.Net.HttpStatusCode]::SeeOther -or $exchange.Headers.Location.OriginalString -ne '/') {
+                throw 'Native portal launch exchange did not return the expected clean redirect.'
+              }
+              $cookie = ($exchange.Headers.GetValues('Set-Cookie') | Select-Object -First 1)
+              if ($cookie -notmatch 'HttpOnly' -or $cookie -notmatch 'Secure' -or $cookie -notmatch 'SameSite=Strict') {
+                throw 'Native portal launch exchange did not return the strict session cookie.'
+              }
+              $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, ($launch -replace '/launch/[0-9a-f]{64}$', '/'))
+              $request.Headers.TryAddWithoutValidation('Cookie', $cookie.Split(';')[0]) | Out-Null
+              $served = $client.SendAsync($request).GetAwaiter().GetResult()
+              $content = $served.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              if (-not $served.IsSuccessStatusCode -or $content -notmatch 'SteadyState') { throw 'Native portal did not serve its embedded application.' }
+            } finally {
+              if ($request) { $request.Dispose() }
+              if ($exchange) { $exchange.Dispose() }
+              if ($served) { $served.Dispose() }
+              $client.Dispose()
+              $handler.Dispose()
+            }
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+            Remove-Item -LiteralPath $private -Recurse -Force -ErrorAction SilentlyContinue
+          }
       - name: Hosted failure-diagnosis and break-glass fixtures
         if: runner.os == 'Linux'
         shell: pwsh
@@ -129,7 +181,7 @@ jobs:
           source scripts/versions.env
           mkdir -p .artifacts/syft
           archive=".artifacts/syft/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
-          curl --fail --location --retry 5 --retry-all-errors \
+          curl --fail --location --retry 8 --retry-all-errors --retry-delay 5 --retry-max-time 180 --connect-timeout 30 \
             --output "$archive" \
             "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
           echo "${SYFT_LINUX_AMD64_SHA256}  ${archive}" | sha256sum --check --status

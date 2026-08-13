@@ -908,6 +908,10 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		!strings.Contains(installTools, "for ($attempt = 1; $attempt -le 5; $attempt++)") {
 		t.Fatal("PowerShell checksum downloads must use bounded retries")
 	}
+	if !strings.Contains(installTools, "for ($attempt = 1; $attempt -le 4; $attempt++)") ||
+		!strings.Contains(installTools, "Failed to install $Name $Version after 4 attempts") {
+		t.Fatal("PowerShell Go tool installation must tolerate transient module proxy failures with bounded retries")
+	}
 	phase7Foundation := string(readFile(t, filepath.Join(root, "scripts", "phase7-foundation.ps1")))
 	if !strings.Contains(phase7Foundation, "Wait-ArgoApplicationsHealthy @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')") ||
 		strings.Contains(phase7Foundation, `Invoke-Kubectl wait -n argocd "--for=jsonpath={.status.health.status}=Healthy"`) {
@@ -1562,9 +1566,26 @@ func TestPhase5ObservabilityFoundationContracts(t *testing.T) {
 		}
 	}
 	script := string(readFile(t, filepath.Join(root, "scripts", "gitops.ps1")))
-	for _, token := range []string{"Assert-ChartChecksum", "Invoke-WithRetry", "MaximumAttempts = 3", "helm pull", "LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256"} {
+	for _, token := range []string{"Assert-ChartChecksum", "Invoke-WithRetry", "MaximumAttempts = 6", "helm pull", "Wait-ArgoApplications", "--request-timeout=10s", "readiness-progress.json", "LOKI_CHART_SHA256", "ALLOY_CHART_SHA256", "TEMPO_CHART_SHA256", "OTEL_COLLECTOR_CHART_SHA256"} {
 		if !strings.Contains(script, token) {
 			t.Errorf("GitOps verification is missing %q", token)
+		}
+	}
+}
+
+func TestPhase9AcceptanceEvidenceFieldsAreDeclaredBeforeFinalization(t *testing.T) {
+	root := repositoryRoot(t)
+	script := string(readFile(t, filepath.Join(root, "scripts", "phase9-acceptance.ps1")))
+	for _, field := range []string{
+		"completedAt = $null",
+		"status = 'running'",
+		"requestID = $null",
+		"brokerRunURL = $null",
+		"pullRequestURL = $null",
+		"proposalBranch = $null",
+	} {
+		if !strings.Contains(script, field) {
+			t.Errorf("Phase 9 evidence initialization is missing %q", field)
 		}
 	}
 }
@@ -1738,10 +1759,16 @@ func TestPhase4AcceptanceWorkflowContracts(t *testing.T) {
 	}
 }
 
-func TestCodeQLWorkflowAllowsHostedAnalysisToFinish(t *testing.T) {
+func TestCodeQLWorkflowRunsBoundedParallelLanguageAnalysis(t *testing.T) {
 	workflow := string(readFile(t, filepath.Join(repositoryRoot(t), ".github", "workflows", "codeql.yml")))
-	if !strings.Contains(workflow, "timeout-minutes: 60") {
-		t.Fatal("CodeQL must retain the empirically required 60-minute job timeout")
+	if !strings.Contains(workflow, "language: go") || !strings.Contains(workflow, "language: javascript-typescript") {
+		t.Fatal("CodeQL must analyze Go and JavaScript/TypeScript independently")
+	}
+	if !strings.Contains(workflow, "build-mode: autobuild") || !strings.Contains(workflow, "build-mode: none") {
+		t.Fatal("CodeQL must autobuild Go without tracing the test suite and analyze JavaScript/TypeScript directly")
+	}
+	if !strings.Contains(workflow, "timeout-minutes: 40") {
+		t.Fatal("each CodeQL language analysis must retain the bounded 40-minute timeout")
 	}
 }
 

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-templates','test-envtest','run','platformctl','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','start-backup-store','stop-backup-store','verify-data','test-data-recovery','phase7-foundation','phase7-acceptance','phase8-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-templates','test-envtest','run','platformctl','portal','test-portal','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','start-backup-store','stop-backup-store','verify-data','test-data-recovery','phase7-foundation','phase7-acceptance','phase8-acceptance','phase9-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -19,6 +19,8 @@ param(
     [string]$Phase7AcceptanceStage = $(if ($env:PHASE7_ACCEPTANCE_STAGE) { $env:PHASE7_ACCEPTANCE_STAGE } else { 'Test' }),
     [ValidateSet('Prepare','Test','Finalize','CaptureFailure')]
     [string]$Phase8AcceptanceStage = $(if ($env:PHASE8_ACCEPTANCE_STAGE) { $env:PHASE8_ACCEPTANCE_STAGE } else { 'Test' }),
+    [ValidateSet('Prepare','VerifyBroker','Finalize','CaptureFailure')]
+    [string]$Phase9AcceptanceStage = $(if ($env:PHASE9_ACCEPTANCE_STAGE) { $env:PHASE9_ACCEPTANCE_STAGE } else { 'Prepare' }),
     [string]$GitRevision = $(if ($env:GIT_REVISION) { $env:GIT_REVISION } else { 'main' }),
     [switch]$DisableTelemetryPipeline,
     [switch]$DisableSecurity,
@@ -35,6 +37,7 @@ $Exe = if ($IsWindowsHost) { '.exe' } else { '' }
 $BinDir = Join-Path $Root ".tools/bin/$Platform"
 $GoBinDir = Join-Path $Root ".tools/go/$Platform/bin"
 $NodeBinDir = if ($IsWindowsHost) { Join-Path $Root ".tools/node/$Platform" } else { Join-Path $Root ".tools/node/$Platform/bin" }
+$NpmCommand = if ($IsWindowsHost) { 'npm.cmd' } else { 'npm' }
 $env:PATH = "$GoBinDir$([IO.Path]::PathSeparator)$NodeBinDir$([IO.Path]::PathSeparator)$BinDir$([IO.Path]::PathSeparator)$env:PATH"
 $env:GOCACHE = Join-Path $Root '.tools/cache/go-build'
 $env:GOMODCACHE = Join-Path $Root ".tools/cache/go-mod/$Platform"
@@ -580,6 +583,22 @@ try {
             Invoke-External -Executable go -Arguments $buildArguments
             Write-Host "Built $output"
         }
+        'portal' {
+            Assert-Tools
+            Push-Location (Join-Path $Root 'web/portal')
+            try { Invoke-External $NpmCommand run build } finally { Pop-Location }
+            Invoke-External go run ./cmd/platformctl portal --no-open
+        }
+        'test-portal' {
+            Assert-Tools
+            Push-Location (Join-Path $Root 'web/portal')
+            try {
+                Invoke-External $NpmCommand run typecheck
+                Invoke-External $NpmCommand test
+                Invoke-External $NpmCommand run build
+            } finally { Pop-Location }
+            Invoke-External go test ./internal/platformctl -run 'Portal|PlatformLifecycle|GitHubOrigin' -count=1
+        }
         'build-images' { Invoke-BuildImages }
         'load-images' { Invoke-LoadImages }
         'deploy-operator' { Invoke-DeployOperator }
@@ -663,6 +682,9 @@ try {
         'phase8-acceptance' {
             Assert-Cluster
             & (Join-Path $PSScriptRoot 'phase8-acceptance.ps1') -Stage $Phase8AcceptanceStage -HttpPort $HttpPort
+        }
+        'phase9-acceptance' {
+            & (Join-Path $PSScriptRoot 'phase9-acceptance.ps1') -Stage $Phase9AcceptanceStage
         }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }

@@ -1,16 +1,21 @@
 package platformctl
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
 func newConfigCommand(options *Options) *cobra.Command {
 	command := &cobra.Command{Use: "config", Short: "Manage platformctl configuration"}
-	var name, checkout string
+	var name, checkout, repository, branch, profile, cluster, kubeContext string
+	var httpPort, httpsPort int
 	var force bool
 	initCommand := &cobra.Command{
 		Use:   "init",
@@ -35,6 +40,17 @@ func newConfigCommand(options *Options) *cobra.Command {
 				return err
 			}
 			config := NewConfig(name, checkout)
+			selected := config.Contexts[config.CurrentContext]
+			if repository == "" {
+				repository, branch, err = inferGitHubOrigin(checkout, branch)
+				if err != nil {
+					return err
+				}
+			}
+			selected.Repository, selected.DefaultBranch = repository, branch
+			selected.Profile, selected.ClusterName, selected.KubeContext = profile, cluster, kubeContext
+			selected.HTTPPort, selected.HTTPSPort = httpPort, httpsPort
+			config.Contexts[config.CurrentContext] = selected
 			if err := SaveConfig(path, config); err != nil {
 				return err
 			}
@@ -43,6 +59,13 @@ func newConfigCommand(options *Options) *cobra.Command {
 	}
 	initCommand.Flags().StringVar(&name, "name", "local", "initial context name")
 	initCommand.Flags().StringVar(&checkout, "checkout", "", "SteadyState checkout path")
+	initCommand.Flags().StringVar(&repository, "repository", "", "GitHub repository as OWNER/REPO (inferred from origin when omitted)")
+	initCommand.Flags().StringVar(&branch, "branch", "main", "default Git branch")
+	initCommand.Flags().StringVar(&profile, "profile", "standard", "minimal, standard, or full")
+	initCommand.Flags().StringVar(&cluster, "cluster", "steadystate", "kind cluster name")
+	initCommand.Flags().StringVar(&kubeContext, "kube-context", "", "Kubernetes context")
+	initCommand.Flags().IntVar(&httpPort, "http-port", 8080, "Gateway HTTP host port")
+	initCommand.Flags().IntVar(&httpsPort, "https-port", 8443, "Gateway HTTPS host port")
 	initCommand.Flags().BoolVar(&force, "force", false, "replace an existing configuration after creating a backup")
 	viewCommand := &cobra.Command{
 		Use:   "view",
@@ -71,6 +94,25 @@ func newConfigCommand(options *Options) *cobra.Command {
 	}
 	command.AddCommand(initCommand, viewCommand)
 	return command
+}
+
+var githubRemotePattern = regexp.MustCompile(`^(?:https://github\.com/|git@github\.com:)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?$`)
+
+func inferGitHubOrigin(checkout, branch string) (string, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	remote, err := runExternal(ctx, checkout, "git", "remote", "get-url", "origin")
+	if err != nil {
+		return "", "", exitError(ExitUsage, "repository was not provided and GitHub origin could not be read: %v", err)
+	}
+	match := githubRemotePattern.FindStringSubmatch(strings.TrimSpace(remote))
+	if len(match) != 3 {
+		return "", "", exitError(ExitUsage, "origin is not an unambiguous GitHub repository; pass --repository OWNER/REPO")
+	}
+	if branch == "" {
+		branch = "main"
+	}
+	return match[1] + "/" + match[2], branch, nil
 }
 
 func newContextCommand(options *Options) *cobra.Command {
@@ -229,6 +271,12 @@ func newVersionCommand(options *Options) *cobra.Command {
 			}
 			if build.Go == "" {
 				build.Go = runtime.Version()
+			}
+			if build.PortalVersion == "" {
+				build.PortalVersion = portalVersion
+			}
+			if build.PortalAssetsDigest == "" {
+				build.PortalAssetsDigest = portalAssetsDigest()
 			}
 			return options.printer().Table([]string{"VERSION", "COMMIT", "DATE", "GO"}, [][]string{{build.Version, build.Commit, build.Date, build.Go}}, build)
 		},

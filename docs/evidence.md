@@ -85,3 +85,23 @@ must prove that no open acceptance PR or request branch remains, the Team
 namespace and CR graph disappeared, and the final Database archive stayed in
 the external store. Private keys, tokens, authorization, age identities,
 PostgreSQL URIs/passwords, and Secret values are forbidden.
+
+Phase 9 uploads `phase9-acceptance-<commit>` with real Playwright screenshots,
+a WebM, a deterministic GIF composed from those frames, schema-versioned
+evidence, accessibility results, asset hashes and sizes, sanitized API
+summaries, SSE/performance measurements, broker run and App-authored smoke PR
+metadata, curated platform snapshots, and pre-cleanup diagnostics.
+
+Launch tokens, cookies, browser profiles, HAR files, kubeconfigs, GitHub/App
+tokens, SOPS identities, Secret values, and unredacted logs are forbidden.
+Launch material stays in a private ignored directory removed before upload.
+Success requires the unmerged smoke PR to be closed and its exact branch
+deleted.
+
+The verified Phase 9 branch artifact is `9177368072` from run `31689255906`.
+Its artifact digest is
+`sha256:05fc3a78031a28ce3b92f0fd6df7043cb9f2299c2aba589b60c2de2a2557f4c1`;
+the evidence JSON, GIF, and WebM SHA-256 values are respectively
+`1a3d392f08c0e69c0176f69fcdff730c2edb5ae296d5a6293512f473b1d3e3bf`,
+`c58b8df32c97c3c38eb4c3a337467ec9bb179c96212a17ace2f77ed494690c75`, and
+`98ace3249e81f90e2c63e6df8abaca5cb94aa2435dfdc6e05908c93884e841b2`.

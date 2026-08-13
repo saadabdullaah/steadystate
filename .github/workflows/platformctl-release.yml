@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - v0.8.*
+      - v1.*
 
 permissions:
   contents: write
@@ -25,12 +25,27 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+      - name: Install pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.17.0
+          cache: npm
+          cache-dependency-path: web/portal/package-lock.json
       - name: Install exact Go, Syft, and Cosign
         shell: pwsh
         run: |
           ./scripts/install-tools.ps1 -BaseOnly -IncludeSecurity
           Add-Content -LiteralPath $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE/.tools/go/linux-amd64/bin"
           Add-Content -LiteralPath $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE/.tools/bin/linux-amd64"
+      - name: Verify deterministic portal assets
+        shell: pwsh
+        run: |
+          Push-Location web/portal
+          npm ci --ignore-scripts
+          npm run build
+          npm test
+          Pop-Location
+          git diff --exit-code -- internal/platformctl/portalassets
       - name: Verify tests and generated CLI documentation
         shell: pwsh
         run: |

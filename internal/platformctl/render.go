@@ -31,10 +31,10 @@ type ChangeSet struct {
 }
 
 type changeRenderer struct {
-	root    string
-	request ChangeRequest
-	catalog TenantCatalog
-	changes map[string]FileChange
+	repository *os.Root
+	request    ChangeRequest
+	catalog    TenantCatalog
+	changes    map[string]FileChange
 }
 
 func RenderChange(root string, request ChangeRequest) (ChangeSet, error) {
@@ -45,7 +45,12 @@ func RenderChange(root string, request ChangeRequest) (ChangeSet, error) {
 	if err != nil {
 		return ChangeSet{}, err
 	}
-	renderer := &changeRenderer{root: root, request: request, catalog: catalog, changes: map[string]FileChange{}}
+	repository, err := os.OpenRoot(root)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	defer func() { _ = repository.Close() }()
+	renderer := &changeRenderer{repository: repository, request: request, catalog: catalog, changes: map[string]FileChange{}}
 	if err := renderer.render(); err != nil {
 		return ChangeSet{}, err
 	}
@@ -595,7 +600,10 @@ func requireRetiring(lifecycle, request string, p ChangeParameters) error {
 }
 
 func (r *changeRenderer) approveManifest(path, requestID string, force bool) error {
-	data, err := os.ReadFile(filepath.Join(r.root, filepath.FromSlash(path)))
+	if err := validateChangePath(path); err != nil {
+		return err
+	}
+	data, err := r.repository.ReadFile(filepath.FromSlash(path))
 	if err != nil {
 		return exitError(ExitNotFound, "read protected manifest %s: %v", path, err)
 	}
@@ -669,7 +677,11 @@ func (r *changeRenderer) writeDatabase(team string, p ChangeParameters) error {
 		}
 		spec["recovery"] = recovery
 	case "database.update":
-		data, err := os.ReadFile(filepath.Join(r.root, filepath.FromSlash(databaseManifestPath(p.Name))))
+		manifestPath := databaseManifestPath(p.Name)
+		if err := validateChangePath(manifestPath); err != nil {
+			return err
+		}
+		data, err := r.repository.ReadFile(filepath.FromSlash(manifestPath))
 		if err != nil {
 			return err
 		}
@@ -721,7 +733,15 @@ func (r *changeRenderer) writeLeaf(path, manifest string, object map[string]any)
 }
 
 func (r *changeRenderer) deleteLeaf(path, manifest string) error {
-	entries, err := os.ReadDir(filepath.Join(r.root, filepath.FromSlash(path)))
+	if err := validateChangePath(path + "/" + manifest); err != nil {
+		return err
+	}
+	directory, err := r.repository.Open(filepath.FromSlash(path))
+	if err != nil {
+		return exitError(ExitNotFound, "cannot inspect leaf %s: %v", path, err)
+	}
+	defer func() { _ = directory.Close() }()
+	entries, err := directory.ReadDir(-1)
 	if err != nil {
 		return exitError(ExitNotFound, "cannot inspect leaf %s: %v", path, err)
 	}
@@ -743,8 +763,7 @@ func (r *changeRenderer) set(path string, content []byte) error {
 	if err := validateChangePath(path); err != nil {
 		return err
 	}
-	absolute := filepath.Join(r.root, filepath.FromSlash(path))
-	before, err := os.ReadFile(absolute)
+	before, err := r.repository.ReadFile(filepath.FromSlash(path))
 	action := "update"
 	if os.IsNotExist(err) {
 		before, action = nil, "create"
@@ -762,8 +781,7 @@ func (r *changeRenderer) remove(path string) error {
 	if err := validateChangePath(path); err != nil {
 		return err
 	}
-	absolute := filepath.Join(r.root, filepath.FromSlash(path))
-	before, err := os.ReadFile(absolute)
+	before, err := r.repository.ReadFile(filepath.FromSlash(path))
 	if err != nil {
 		return exitError(ExitNotFound, "cannot finalize missing file %s", path)
 	}
@@ -808,12 +826,17 @@ func validateChangePath(path string) error {
 }
 
 func ApplyChangeSet(root string, set ChangeSet) error {
+	repository, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = repository.Close() }()
 	for _, change := range set.Files {
 		if err := validateChangePath(change.Path); err != nil {
 			return err
 		}
-		absolute := filepath.Join(root, filepath.FromSlash(change.Path))
-		current, readErr := os.ReadFile(absolute)
+		relative := filepath.FromSlash(change.Path)
+		current, readErr := repository.ReadFile(relative)
 		if change.Action == "create" {
 			if readErr == nil || !os.IsNotExist(readErr) {
 				return exitError(ExitConflict, "create target %s changed after rendering", change.Path)
@@ -823,14 +846,14 @@ func ApplyChangeSet(root string, set ChangeSet) error {
 		}
 		switch change.Action {
 		case "create", "update":
-			if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
+			if err := repository.MkdirAll(filepath.Dir(relative), 0o755); err != nil {
 				return err
 			}
-			if err := os.WriteFile(absolute, change.Content, 0o644); err != nil {
+			if err := repository.WriteFile(relative, change.Content, 0o644); err != nil {
 				return err
 			}
 		case "delete":
-			if err := os.Remove(absolute); err != nil {
+			if err := repository.Remove(relative); err != nil {
 				return err
 			}
 		default:
@@ -839,7 +862,7 @@ func ApplyChangeSet(root string, set ChangeSet) error {
 	}
 	for _, change := range set.Files {
 		if change.Action == "delete" {
-			_ = os.Remove(filepath.Dir(filepath.Join(root, filepath.FromSlash(change.Path))))
+			_ = repository.Remove(filepath.Dir(filepath.FromSlash(change.Path)))
 		}
 	}
 	return nil

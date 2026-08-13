@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "portal.assets.steadystate.dev/v1alpha1",
+  "files": [
+    {
+      "name": "app.css",
+      "bytes": 12604,
+      "gzipBytes": 3372,
+      "sha256": "4e0c2f8bef24634ca70ad0d112dad9ca2de33ce73fe104da85d8e3945582cd06"
+    },
+    {
+      "name": "app.js",
+      "bytes": 218888,
+      "gzipBytes": 66517,
+      "sha256": "068322e84d68dbef3681b94a5a11f20723080fe2692469835f4d18f75cb0af66"
+    },
+    {
+      "name": "index.html",
+      "bytes": 464,
+      "gzipBytes": 276,
+      "sha256": "6d6e5825523ddbad39a95c1925e7da868913887d484cbc41e27e55a834869e9a"
+    }
+  ],
+  "budgets": {
+    "javascriptGzipBytes": 66517,
+    "javascriptLimitBytes": 256000,
+    "cssGzipBytes": 3372,
+    "cssLimitBytes": 81920
+  }
+}

@@ -47,7 +47,7 @@ function Invoke-WithRetry {
     param(
         [Parameter(Mandatory)][scriptblock]$Operation,
         [Parameter(Mandatory)][string]$Description,
-        [int]$MaximumAttempts = 3
+        [int]$MaximumAttempts = 6
     )
     for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
         try {
@@ -155,7 +155,8 @@ function Assert-DexAbsent {
 }
 
 function Wait-ArgoWorkloads {
-    Invoke-External kubectl rollout status statefulset/argocd-application-controller -n argocd --timeout=600s
+    param([int]$TimeoutSeconds = 600)
+    Invoke-External kubectl rollout status statefulset/argocd-application-controller -n argocd "--timeout=$($TimeoutSeconds)s"
     foreach ($name in @(
         'argocd-applicationset-controller',
         'argocd-notifications-controller',
@@ -163,7 +164,7 @@ function Wait-ArgoWorkloads {
         'argocd-repo-server',
         'argocd-server'
     )) {
-        Invoke-External kubectl rollout status "deployment/$name" -n argocd --timeout=600s
+        Invoke-External kubectl rollout status "deployment/$name" -n argocd "--timeout=$($TimeoutSeconds)s"
     }
 }
 
@@ -237,30 +238,78 @@ function Wait-ArgoApplication {
     throw "Argo Application $Name did not become Synced and Healthy within $TimeoutSeconds seconds; last state: $lastState."
 }
 
+function Wait-ArgoApplications {
+    param([Parameter(Mandatory)][string[]]$Names, [int]$TimeoutSeconds = 600)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $nextReport = Get-Date
+    $lastStates = @($Names | ForEach-Object { "$($_)=not-found" })
+    do {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $json = @(& kubectl --request-timeout=10s get applications.argoproj.io -n argocd -o json 2>$null)
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($exitCode -eq 0 -and $json) {
+            $payload = (($json -join [Environment]::NewLine) | ConvertFrom-Json)
+            $byName = @{}
+            foreach ($application in @($payload.items)) { $byName[[string]$application.metadata.name] = $application }
+            $applications = @{}
+            $pending = @()
+            foreach ($name in $Names) {
+                if (-not $byName.ContainsKey($name)) {
+                    $pending += "$name=not-found"
+                    continue
+                }
+                $application = $byName[$name]
+                $applications[$name] = $application
+                $sync = [string]$application.status.sync.status
+                $health = [string]$application.status.health.status
+                if ($sync -ne 'Synced' -or $health -ne 'Healthy') { $pending += "$name(sync=$sync,health=$health)" }
+            }
+            if ($pending.Count -eq 0) {
+                Write-Utf8 -Path (Join-Path $ArtifactRoot 'readiness-progress.json') -Content (([ordered]@{ state='passed'; updatedAt=(Get-Date).ToUniversalTime().ToString('o'); applications=$Names } | ConvertTo-Json -Depth 4) + [Environment]::NewLine)
+                return $applications
+            }
+            $lastStates = $pending
+        } else {
+            $lastStates = @("Kubernetes request failed with exit code $exitCode")
+        }
+        Write-Utf8 -Path (Join-Path $ArtifactRoot 'readiness-progress.json') -Content (([ordered]@{ state='waiting'; updatedAt=(Get-Date).ToUniversalTime().ToString('o'); pending=$lastStates } | ConvertTo-Json -Depth 4) + [Environment]::NewLine)
+        if ((Get-Date) -ge $nextReport) {
+            Write-Host "Waiting for Argo Applications: $($lastStates -join '; ')"
+            $nextReport = (Get-Date).AddSeconds(30)
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    Write-Utf8 -Path (Join-Path $ArtifactRoot 'readiness-progress.json') -Content (([ordered]@{ state='failed'; updatedAt=(Get-Date).ToUniversalTime().ToString('o'); pending=$lastStates } | ConvertTo-Json -Depth 4) + [Environment]::NewLine)
+    throw "Argo Applications did not all become Synced and Healthy within $TimeoutSeconds seconds; pending: $($lastStates -join '; ')."
+}
+
 function Wait-SteadyStateReady {
-    param([Parameter(Mandatory)][ValidateSet('team','application')][string]$Kind, [Parameter(Mandatory)][string]$Name, [string]$Namespace)
-    $deadline = (Get-Date).AddSeconds(600)
+    param([Parameter(Mandatory)][ValidateSet('team','application')][string]$Kind, [Parameter(Mandatory)][string]$Name, [string]$Namespace, [int]$TimeoutSeconds = 180)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         $resource = if ($Kind -eq 'application') { 'applications.platform.steadystate.dev' } else { 'teams.platform.steadystate.dev' }
         $arguments = @('get', $resource, $Name)
         if ($Namespace) { $arguments += @('-n', $Namespace) }
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $ready = & kubectl @arguments -o "jsonpath={.status.conditions[?(@.type=='Ready')].status}" 2>$null
+        $ready = & kubectl --request-timeout=10s @arguments -o "jsonpath={.status.conditions[?(@.type=='Ready')].status}" 2>$null
         $exitCode = $LASTEXITCODE
         $ErrorActionPreference = $previousPreference
         if ($exitCode -eq 0 -and $ready -eq 'True') { return }
         Start-Sleep -Seconds 3
     } while ((Get-Date) -lt $deadline)
-    throw "$Kind $Name did not reach Ready=True."
+    throw "$Kind $Name did not reach Ready=True within $TimeoutSeconds seconds."
 }
 
 function Wait-ArgoRoute {
-    $deadline = (Get-Date).AddSeconds(180)
+    param([int]$TimeoutSeconds = 120)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $json = @(& kubectl get httproute argocd -n argocd -o json 2>$null)
+        $json = @(& kubectl --request-timeout=10s get httproute argocd -n argocd -o json 2>$null)
         $exitCode = $LASTEXITCODE
         $ErrorActionPreference = $previousPreference
         if ($exitCode -eq 0 -and $json) {
@@ -276,7 +325,8 @@ function Wait-ArgoRoute {
 }
 
 function Test-ArgoHttp {
-    $deadline = (Get-Date).AddSeconds(120)
+    param([int]$TimeoutSeconds = 90)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         try {
             $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$HttpPort/" -Headers @{ Host = 'argocd.localtest.me' } -TimeoutSec 5
@@ -357,7 +407,7 @@ function Invoke-Test {
     $startedAt = (Get-Date).ToUniversalTime()
 
     $started = Get-Date
-    Wait-ArgoWorkloads
+    Wait-ArgoWorkloads -TimeoutSeconds 180
     Assert-DexAbsent
     Add-PassedCheck $checks 'pinned-argocd-ready-dex-absent' $started "Pinned manifest $(Split-Path -Leaf $manifest) is running and all five Dex objects are absent."
 
@@ -373,10 +423,9 @@ function Invoke-Test {
     }
     $applicationNames += @('steadystate-operator','payments','steadystate-root')
 
-    $applications = @{}
+    $started = Get-Date
+    $applications = Wait-ArgoApplications -Names $applicationNames -TimeoutSeconds 600
     foreach ($name in $applicationNames) {
-        $started = Get-Date
-        $applications[$name] = Wait-ArgoApplication -Name $name
         Add-PassedCheck $checks "argocd-application-$name-healthy" $started "$name is Synced and Healthy."
     }
 

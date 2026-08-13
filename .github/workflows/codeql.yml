@@ -2,6 +2,8 @@ name: CodeQL
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   schedule:
@@ -13,20 +15,41 @@ permissions:
 
 jobs:
   analyze:
-    name: codeql
+    name: codeql (${{ matrix.language }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Initialize CodeQL
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
-          languages: go
-      - name: Install and build
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: Install pinned Node.js
+        if: matrix.language == 'javascript-typescript'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.17.0
+          cache: npm
+          cache-dependency-path: web/portal/package-lock.json
+      - name: Install and build portal
+        if: matrix.language == 'javascript-typescript'
         shell: pwsh
         run: |
           ./scripts/install-tools.ps1 -BaseOnly
-          ./scripts/dev.ps1 test
+          Push-Location web/portal
+          npm ci --ignore-scripts
+          npm run build
+          npm test
+          Pop-Location
       - name: Analyze
         uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4

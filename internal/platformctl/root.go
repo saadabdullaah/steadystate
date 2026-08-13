@@ -11,11 +11,13 @@ import (
 )
 
 type BuildInfo struct {
-	Version string `json:"version" yaml:"version"`
-	Commit  string `json:"commit" yaml:"commit"`
-	Date    string `json:"date" yaml:"date"`
-	Dirty   string `json:"dirty" yaml:"dirty"`
-	Go      string `json:"goVersion" yaml:"goVersion"`
+	Version            string `json:"version" yaml:"version"`
+	Commit             string `json:"commit" yaml:"commit"`
+	Date               string `json:"date" yaml:"date"`
+	Dirty              string `json:"dirty" yaml:"dirty"`
+	Go                 string `json:"goVersion" yaml:"goVersion"`
+	PortalVersion      string `json:"portalVersion" yaml:"portalVersion"`
+	PortalAssetsDigest string `json:"portalAssetsDigest" yaml:"portalAssetsDigest"`
 }
 
 type Options struct {
@@ -77,6 +79,8 @@ func NewRootCommand(options Options) *cobra.Command {
 		newVersionCommand(&options),
 		newDoctorCommand(&options),
 		newClusterCommand(&options),
+		newPlatformCommand(&options),
+		newPortalCommand(&options),
 		newInitCommand(&options),
 		newDevCommand(&options),
 		newServiceCommand(&options),
