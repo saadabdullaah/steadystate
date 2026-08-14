@@ -5,10 +5,34 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$architecture = switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
-    'X64' { 'amd64' }
-    'Arm64' { 'arm64' }
-    default { throw "Unsupported Windows architecture: $_" }
+
+# RuntimeInformation can report an enum differently across Windows PowerShell,
+# PowerShell 7, and emulated 32-bit processes. Try the runtime value first, then
+# the Windows architecture environment variables, and normalize all supported
+# spellings before selecting a release archive.
+$architectureCandidates = @(
+    ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString()
+    $env:PROCESSOR_ARCHITEW6432
+    $env:PROCESSOR_ARCHITECTURE
+)
+$architecture = $null
+foreach ($candidate in $architectureCandidates) {
+    $candidateText = if ($null -eq $candidate) { '' } else { $candidate.ToString() }
+    switch ($candidateText.Trim().ToUpperInvariant()) {
+        { $_ -in @('X64', 'AMD64') } { $architecture = 'amd64'; break }
+        { $_ -in @('ARM64', 'AARCH64') } { $architecture = 'arm64'; break }
+    }
+    if ($architecture) { break }
+}
+if (-not $architecture) {
+    $observed = ($architectureCandidates | Where-Object { $_ } | ForEach-Object { $_.ToString() }) -join ', '
+    throw "Unsupported Windows architecture. Observed values: $observed"
+}
+
+# Windows PowerShell 5.1 may otherwise negotiate a protocol GitHub no longer
+# accepts. PowerShell 7 uses HttpClient, for which this is harmless.
+if ([Net.ServicePointManager]::SecurityProtocol -notmatch 'Tls12') {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 }
 $releaseVersion = $Version.TrimStart('v')
 $archiveName = "platformctl_${releaseVersion}_windows_${architecture}.zip"
