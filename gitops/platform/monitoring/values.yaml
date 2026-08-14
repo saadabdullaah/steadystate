@@ -21,6 +21,25 @@ alertmanager:
 
 grafana:
   enabled: true
+  # Grafana 13 performs substantial one-time initialization on a cold kind
+  # node. Keep readiness responsive, but do not let temporary CPU/I/O
+  # saturation restart a healthy startup before the HTTP server is listening.
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: grafana
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 10
+    failureThreshold: 12
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: grafana
+    initialDelaySeconds: 600
+    periodSeconds: 20
+    timeoutSeconds: 30
+    failureThreshold: 10
   admin:
     existingSecret: steadystate-grafana-admin
     userKey: admin-user

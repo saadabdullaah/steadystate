@@ -401,9 +401,23 @@ func TestArgoConfigurationContracts(t *testing.T) {
 		"kubectl rollout restart statefulset/argocd-application-controller -n argocd",
 		"Wait-ArgoApplication -Name 'data-namespaces' -TimeoutSeconds 900",
 		"kubectl --request-timeout=10s get application.argoproj.io",
+		"Waiting for Argo Application $Name",
+		"root=$rootMessage",
 	} {
 		if !strings.Contains(gitopsScript, token) {
 			t.Errorf("GitOps bootstrap is missing bounded full-profile contract %q", token)
+		}
+	}
+	monitoringValues := string(readFile(t, filepath.Join(root, "gitops", "platform", "monitoring", "values.yaml")))
+	for _, token := range []string{"initialDelaySeconds: 600", "timeoutSeconds: 30", "failureThreshold: 12"} {
+		if !strings.Contains(monitoringValues, token) {
+			t.Errorf("monitoring values are missing cold-start probe contract %q", token)
+		}
+	}
+	rolloutsValues := string(readFile(t, filepath.Join(root, "gitops", "platform", "rollouts", "values.yaml")))
+	for _, token := range []string{"initialDelaySeconds: 600", "timeoutSeconds: 10", "failureThreshold: 12"} {
+		if !strings.Contains(rolloutsValues, token) {
+			t.Errorf("Rollouts values are missing cold-start probe contract %q", token)
 		}
 	}
 	controllerRestart := strings.Index(gitopsScript, "kubectl rollout restart statefulset/argocd-application-controller -n argocd")

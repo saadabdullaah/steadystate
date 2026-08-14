@@ -217,6 +217,7 @@ function Get-KubernetesObject {
 function Wait-ArgoApplication {
     param([Parameter(Mandatory)][string]$Name, [int]$TimeoutSeconds = 600)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $nextReport = Get-Date
     $lastState = 'not found'
     do {
         $previousPreference = $ErrorActionPreference
@@ -232,6 +233,17 @@ function Wait-ArgoApplication {
             $lastState = "sync=$($application.status.sync.status), health=$($application.status.health.status), message=$($application.status.health.message)"
         } elseif ($exitCode -ne 0) {
             $lastState = "Kubernetes request failed with exit code $exitCode"
+        }
+        if ((Get-Date) -ge $nextReport) {
+            $rootState = ''
+            $rootJson = @(& kubectl --request-timeout=10s get application.argoproj.io steadystate-root -n argocd -o json 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $rootJson) {
+                $root = (($rootJson -join [Environment]::NewLine) | ConvertFrom-Json)
+                $rootMessage = [string]$root.status.operationState.message
+                if ($rootMessage) { $rootState = "; root=$rootMessage" }
+            }
+            Write-Host "Waiting for Argo Application $Name`: $lastState$rootState"
+            $nextReport = (Get-Date).AddSeconds(30)
         }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)

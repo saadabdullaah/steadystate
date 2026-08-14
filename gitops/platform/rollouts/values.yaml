@@ -5,6 +5,26 @@ createClusterAggregateRoles: false
 
 controller:
   replicas: 1
+  # The controller downloads the checksum-pinned Gateway API plugin before it
+  # starts its health server. Cold Windows/Docker Desktop networks can take
+  # several minutes, so liveness must not turn a slow download into a restart
+  # loop. Readiness still keeps the Application Progressing until startup ends.
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: healthz
+    initialDelaySeconds: 600
+    periodSeconds: 20
+    timeoutSeconds: 10
+    failureThreshold: 6
+  readinessProbe:
+    httpGet:
+      path: /metrics
+      port: metrics
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 10
+    failureThreshold: 12
   resources:
     requests:
       cpu: 50m
