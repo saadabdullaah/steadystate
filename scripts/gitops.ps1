@@ -336,6 +336,32 @@ function Wait-ArgoRoute {
     throw 'The Argo CD HTTPRoute was not accepted with resolved references.'
 }
 
+function Remove-StaleRootApplication {
+    param([Parameter(Mandatory)][string]$Revision)
+
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $json = @(& kubectl --request-timeout=10s get application.argoproj.io steadystate-root -n argocd -o json 2>$null)
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($exitCode -ne 0 -or -not $json) { return }
+
+    $root = (($json -join [Environment]::NewLine) | ConvertFrom-Json)
+    $targetRevision = [string]$root.spec.source.targetRevision
+    $operationPhase = [string]$root.status.operationState.phase
+    $operationRevision = [string]$root.status.operationState.syncResult.revision
+    $staleTarget = $targetRevision -and $targetRevision -ne $Revision
+    $staleOperation = $operationRevision -and $operationRevision -ne $Revision -and $operationPhase -in @('Running','Terminating')
+    if (-not $staleTarget -and -not $staleOperation) { return }
+
+    $finalizers = @($root.metadata.finalizers | Where-Object { $_ })
+    if ($finalizers.Count -gt 0) {
+        throw "Refusing to replace stale steadystate-root because it has finalizers: $($finalizers -join ', ')."
+    }
+    Write-Host "Replacing stale steadystate-root before revision '$Revision' (target='$targetRevision', operation='$operationRevision', phase='$operationPhase')."
+    Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --wait=true --timeout=60s
+}
+
 function Test-ArgoHttp {
     param([int]$TimeoutSeconds = 90)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -384,6 +410,7 @@ function Invoke-Deploy {
     Render-RootTemplate -Template 'templates/projects.yaml.tpl' -Path $projects
     Render-RootTemplate -Template 'templates/root-application.yaml.tpl' -Path $rootApplication -BootstrapRoot
     Invoke-External kubectl apply -f $projects
+    Remove-StaleRootApplication -Revision $GitRevision
     Invoke-External kubectl apply -f $rootApplication
     if ($Profile -eq 'full') {
         $null = Wait-ArgoApplication -Name 'data-namespaces' -TimeoutSeconds 900

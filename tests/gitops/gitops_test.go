@@ -403,10 +403,18 @@ func TestArgoConfigurationContracts(t *testing.T) {
 		"kubectl --request-timeout=10s get application.argoproj.io",
 		"Waiting for Argo Application $Name",
 		"root=$rootMessage",
+		"Remove-StaleRootApplication -Revision $GitRevision",
+		"Refusing to replace stale steadystate-root because it has finalizers",
+		"delete application.argoproj.io steadystate-root -n argocd --wait=true --timeout=60s",
 	} {
 		if !strings.Contains(gitopsScript, token) {
 			t.Errorf("GitOps bootstrap is missing bounded full-profile contract %q", token)
 		}
+	}
+	staleRootReset := strings.Index(gitopsScript, "Remove-StaleRootApplication -Revision $GitRevision")
+	rootApplyAfterReset := strings.Index(gitopsScript, "Invoke-External kubectl apply -f $rootApplication")
+	if staleRootReset < 0 || rootApplyAfterReset < 0 || staleRootReset > rootApplyAfterReset {
+		t.Fatal("a stale root operation must be removed before the requested root revision is applied")
 	}
 	monitoringValues := string(readFile(t, filepath.Join(root, "gitops", "platform", "monitoring", "values.yaml")))
 	for _, token := range []string{"initialDelaySeconds: 600", "timeoutSeconds: 30", "failureThreshold: 12"} {
