@@ -883,6 +883,12 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 		strings.Contains(databasePatchBody, "op: remove") {
 		t.Fatalf("full profile database binding patch is invalid: %q", databasePatchBody)
 	}
+	for _, applicationPath := range []string{"gitops/applications/demo", "gitops/applications/xyz-api"} {
+		profileNeutral := string(run(t, root, "kustomize", "build", filepath.Join(root, filepath.FromSlash(applicationPath))))
+		if strings.Contains(profileNeutral, "databaseRef:") {
+			t.Fatalf("profile-neutral Application leaf %s contains a database binding", applicationPath)
+		}
+	}
 
 	manifest := readFile(t, filepath.Join(root, "gitops", "platform", "local-path", "local-path-storage.yaml"))
 	sum := sha256.Sum256(manifest)
