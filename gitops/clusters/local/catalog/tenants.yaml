@@ -45,3 +45,11 @@ tenants:
     template: full-stack
     version: v0.1.1
   teamPath: gitops/teams/xyz
+- applications: []
+  databases: []
+  lifecycle: Active
+  name: portal-smoke-31840686166-1
+  owners:
+  - platform-team
+  services: null
+  teamPath: gitops/teams/portal-smoke-31840686166-1
