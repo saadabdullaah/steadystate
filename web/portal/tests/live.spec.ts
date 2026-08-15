@@ -49,17 +49,25 @@ test.describe("real Phase 9 portal", () => {
     await expect(page.getByRole("heading", { name: "xyz-api" })).toBeVisible();
     await expect(page.locator(".detail-grid")).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: resolve(artifactRoot, "screenshots/04-application.png") });
-    for (const tab of ["Rollout", "Slo", "Logs", "Traces", "Policy", "Doctor"]) {
+    const applicationViews = new Map([
+      ["Rollout", "Progressive delivery"],
+      ["Slo", "Five-minute request signal"],
+      ["Logs", "Recent application logs"],
+      ["Traces", "Distributed traces"],
+      ["Policy", "Policy and provenance"],
+      ["Doctor", "Dependency path"]
+    ]);
+    for (const [tab, heading] of applicationViews) {
       await page.getByRole("tab", { name: tab }).click();
-      await expect(page.locator(".data-view")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("heading", { name: heading })).toBeVisible({ timeout: 30_000 });
     }
     accessibility.application = await runAxe(page);
 
     await page.goto(new URL("/databases/xyz/xyz", launchURL!).toString());
     await expect(page.getByRole("heading", { name: "xyz" })).toBeVisible();
-    await expect(page.locator(".data-view")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Database lifetime" })).toBeVisible({ timeout: 30_000 });
     await page.getByRole("tab", { name: "Backups" }).click();
-    await expect(page.locator(".data-view")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Backup history" })).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: resolve(artifactRoot, "screenshots/05-database-backups.png") });
     accessibility.database = await runAxe(page);
 
