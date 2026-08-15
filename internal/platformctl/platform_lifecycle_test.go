@@ -78,6 +78,18 @@ func TestSelectGitHubCLIFallsBackToPath(t *testing.T) {
 	}
 }
 
+func TestJoinPlatformPathUsesTargetOSSeparators(t *testing.T) {
+	if got, want := joinPlatformPath("windows", `C:\Users\developer`, ".local", "bin", "gh.exe"), `C:\Users\developer\.local\bin\gh.exe`; got != want {
+		t.Fatalf("Windows path=%q, want %q", got, want)
+	}
+	if got, want := joinPlatformPath("linux", "/home/developer", ".local", "bin", "gh"), "/home/developer/.local/bin/gh"; got != want {
+		t.Fatalf("Linux path=%q, want %q", got, want)
+	}
+	if got := joinPlatformPath("windows", "", "Programs", "GitHub CLI", "gh.exe"); got != "" {
+		t.Fatalf("empty trusted root produced relative candidate %q", got)
+	}
+}
+
 func TestMissingFullProfileSecurityToolsAreBootstrapWarnings(t *testing.T) {
 	for _, tool := range []string{"sops", "age"} {
 		status, _, remediation := missingToolCheck(tool, "full")

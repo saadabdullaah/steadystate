@@ -272,7 +272,10 @@ func selectPowerShellExecutable(goos string, lookPath func(string) (string, erro
 }
 
 func powerShellArguments(executable string, arguments []string) []string {
-	if strings.EqualFold(filepath.Base(executable), "powershell.exe") {
+	// filepath.Base follows the host OS. Normalize Windows separators first so
+	// the Windows command contract remains testable on Linux CI runners.
+	base := filepath.Base(strings.ReplaceAll(executable, `\`, "/"))
+	if strings.EqualFold(base, "powershell.exe") {
 		result := []string{"-NoProfile", "-ExecutionPolicy", "Bypass"}
 		if len(arguments) > 0 && strings.EqualFold(arguments[0], "-NoProfile") {
 			arguments = arguments[1:]

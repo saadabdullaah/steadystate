@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -214,6 +215,13 @@ func fullProfileAgeIdentityAvailable(identityPath string) bool {
 	if strings.TrimSpace(os.Getenv("SOPS_AGE_KEY")) != "" {
 		return true
 	}
+	clean := filepath.Clean(identityPath)
+	if filepath.Base(clean) != "steadystate.agekey" || filepath.Base(filepath.Dir(clean)) != "secrets" || filepath.Base(filepath.Dir(filepath.Dir(clean))) != ".artifacts" {
+		return false
+	}
+	// #nosec G703 -- the caller supplies only the fixed
+	// .artifacts/secrets/steadystate.agekey path beneath the configured checkout,
+	// and the structure is revalidated immediately above. Only metadata is read.
 	info, err := os.Stat(identityPath)
 	return err == nil && !info.IsDir()
 }
@@ -400,6 +408,9 @@ func githubCLIExecutable() string {
 	home, _ := os.UserHomeDir()
 	localAppData := os.Getenv("LOCALAPPDATA")
 	return selectGitHubCLIExecutable(runtime.GOOS, home, localAppData, func(path string) bool {
+		// #nosec G703 -- candidates are assembled exclusively from the OS home or
+		// LOCALAPPDATA root plus fixed GitHub CLI path segments below. Only file
+		// metadata is read before falling back to exec.LookPath.
 		info, err := os.Stat(path)
 		return err == nil && !info.IsDir()
 	}, exec.LookPath)
@@ -407,12 +418,12 @@ func githubCLIExecutable() string {
 
 func selectGitHubCLIExecutable(goos, home, localAppData string, exists func(string) bool, lookPath func(string) (string, error)) string {
 	name := "gh"
-	candidates := []string{filepath.Join(home, ".local", "bin", name)}
+	candidates := []string{joinPlatformPath(goos, home, ".local", "bin", name)}
 	if goos == "windows" {
 		name = "gh.exe"
 		candidates = []string{
-			filepath.Join(home, ".local", "bin", name),
-			filepath.Join(localAppData, "Programs", "GitHub CLI", name),
+			joinPlatformPath(goos, home, ".local", "bin", name),
+			joinPlatformPath(goos, localAppData, "Programs", "GitHub CLI", name),
 		}
 	}
 	for _, candidate := range candidates {
@@ -424,4 +435,26 @@ func selectGitHubCLIExecutable(goos, home, localAppData string, exists func(stri
 		return executable
 	}
 	return name
+}
+
+func joinPlatformPath(goos string, elements ...string) string {
+	if len(elements) == 0 || strings.TrimSpace(elements[0]) == "" {
+		return ""
+	}
+	if goos != "windows" {
+		return path.Join(elements...)
+	}
+	parts := make([]string, 0, len(elements))
+	for _, element := range elements {
+		element = strings.ReplaceAll(element, "/", `\`)
+		if len(parts) == 0 {
+			element = strings.TrimRight(element, `\`)
+		} else {
+			element = strings.Trim(element, `\`)
+		}
+		if element != "" {
+			parts = append(parts, element)
+		}
+	}
+	return strings.Join(parts, `\`)
 }
