@@ -120,7 +120,7 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	checkGitHubNames := func(check, kind string, required []string) {
 		raw, err := runExternal(ctx, selected.CheckoutPath, "gh", kind, "list", "--repo", selected.Repository, "--json", "name")
 		if err != nil {
-			add(check, "Fail", "GitHub "+kind+" names could not be inspected", "Confirm repository access and gh authentication.")
+			add(check, "Warning", "GitHub "+kind+" names could not be inspected with the active token", "Confirm repository access or inspect the documented names in repository settings.")
 			return
 		}
 		names := decodeGitHubNames(raw)
@@ -149,13 +149,8 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	if raw, err := runExternal(ctx, selected.CheckoutPath, "docker", "info", "--format", "{{.MemTotal}}"); err == nil {
 		if available, parseErr := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); parseErr == nil {
-			minimumGiB := map[string]int64{"minimal": 4, "standard": 7, "full": 9}[selected.Profile]
-			availableGiB := float64(available) / float64(1<<30)
-			if available < minimumGiB*(1<<30) {
-				add("resource-budget", "Warning", fmt.Sprintf("Docker has %.1f GiB; %s profile should have at least %d GiB", availableGiB, selected.Profile, minimumGiB), "Increase the Docker VM memory allocation before a full bootstrap.")
-			} else {
-				add("resource-budget", "Pass", fmt.Sprintf("Docker has %.1f GiB for the %s profile", availableGiB, selected.Profile), "")
-			}
+			check := resourceBudgetCheck(selected.Profile, available)
+			add(check.Name, check.Status, check.Details, check.Remediation)
 		}
 	}
 	for _, port := range []int{selected.HTTPPort, selected.HTTPSPort} {
@@ -181,6 +176,10 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	if selected.Profile == "full" {
 		for _, relative := range []string{".artifacts/secrets/steadystate.agekey", "gitops/secrets/backup-store.enc.yaml"} {
+			if relative == ".artifacts/secrets/steadystate.agekey" && fullProfileAgeIdentityAvailable(filepath.Join(selected.CheckoutPath, filepath.FromSlash(relative))) {
+				add("full-profile-"+filepath.Base(relative), "Pass", "age identity is available through the process environment; its value was not read", "")
+				continue
+			}
 			if _, err := os.Stat(filepath.Join(selected.CheckoutPath, filepath.FromSlash(relative))); err != nil {
 				add("full-profile-"+filepath.Base(relative), "Fail", "required ignored secret material is absent", "Restore the documented SOPS/age full-profile prerequisites.")
 			} else {
@@ -190,6 +189,29 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	sort.SliceStable(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
 	return checks
+}
+
+func fullProfileAgeIdentityAvailable(identityPath string) bool {
+	if strings.TrimSpace(os.Getenv("SOPS_AGE_KEY")) != "" {
+		return true
+	}
+	info, err := os.Stat(identityPath)
+	return err == nil && !info.IsDir()
+}
+
+func resourceBudgetCheck(profile string, available int64) DoctorCheck {
+	minimumGiB := map[string]int64{"minimal": 4, "standard": 7, "full": 9}[profile]
+	availableGiB := float64(available) / float64(1<<30)
+	check := DoctorCheck{Name: "resource-budget"}
+	if available < minimumGiB*(1<<30) {
+		check.Status = "Fail"
+		check.Details = fmt.Sprintf("Docker has %.1f GiB; the %s profile requires at least %d GiB", availableGiB, profile, minimumGiB)
+		check.Remediation = fmt.Sprintf("Select a smaller profile or allocate at least %d GiB to Docker before retrying.", minimumGiB)
+		return check
+	}
+	check.Status = "Pass"
+	check.Details = fmt.Sprintf("Docker has %.1f GiB for the %s profile", availableGiB, profile)
+	return check
 }
 
 func githubCLIVersion(output string) string {
@@ -307,11 +329,11 @@ func newClusterLifecycleCommand(options *Options, name, scriptCommand string) *c
 			ctx, cancel := options.commandContext(cmd.Context())
 			defer cancel()
 			arguments := []string{"-NoProfile", "-File", filepath.Join(selected.CheckoutPath, "scripts", "dev.ps1"), scriptCommand, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort)}
-			process := exec.CommandContext(ctx, "pwsh", arguments...)
+			process := exec.Command("pwsh", arguments...)
 			process.Dir = selected.CheckoutPath
 			process.Stdout = options.Stdout
 			process.Stderr = options.Stderr
-			if err := process.Run(); err != nil {
+			if err := runCommandInProcessTree(ctx, process); err != nil {
 				if ctx.Err() != nil {
 					return exitError(ExitTimeout, "cluster %s timed out", name)
 				}

@@ -98,8 +98,16 @@ func TestFullStackScaffoldAndActivationAreDeterministic(t *testing.T) {
 	if !strings.Contains(string(web), "tag: checkout-web-v0.1.0") || !strings.Contains(string(api), "tag: checkout-api-v0.1.0") {
 		t.Fatalf("activation tags are not component-scoped:\n%s\n%s", web, api)
 	}
-	if !strings.Contains(string(web), "networkIsolation: false") || !strings.Contains(string(api), "databaseRef:\n    name: checkout") {
+	if !strings.Contains(string(web), "networkIsolation: false") || strings.Contains(string(api), "databaseRef:") {
 		t.Fatalf("full-stack connectivity contract is missing:\n%s\n%s", web, api)
+	}
+	catalog, err = LoadCatalog(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, _ = catalogTenant(catalog, "checkout")
+	if len(tenant.Applications) != 2 || tenant.Applications[1].DatabaseRef != "checkout" {
+		t.Fatalf("the profile-neutral leaf lost its catalog database binding: %#v", tenant.Applications)
 	}
 }
 

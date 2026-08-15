@@ -39,6 +39,7 @@ $GoBinDir = Join-Path $Root ".tools/go/$Platform/bin"
 $NodeBinDir = if ($IsWindowsHost) { Join-Path $Root ".tools/node/$Platform" } else { Join-Path $Root ".tools/node/$Platform/bin" }
 $NpmCommand = if ($IsWindowsHost) { 'npm.cmd' } else { 'npm' }
 $env:PATH = "$GoBinDir$([IO.Path]::PathSeparator)$NodeBinDir$([IO.Path]::PathSeparator)$BinDir$([IO.Path]::PathSeparator)$env:PATH"
+Write-Verbose "Pinned tool directories: Go=$GoBinDir Node=$NodeBinDir Bin=$BinDir"
 $env:GOCACHE = Join-Path $Root '.tools/cache/go-build'
 $env:GOMODCACHE = Join-Path $Root ".tools/cache/go-mod/$Platform"
 $env:GOPATH = Join-Path $Root ".tools/gopath/$Platform"
@@ -161,12 +162,82 @@ function Invoke-Envtest {
     if ($LASTEXITCODE -ne 0) { throw "WSL envtest failed or exceeded its ten-minute bound (exit $LASTEXITCODE)" }
 }
 
+function Get-BuildSourceDigest {
+    param(
+        [Parameter(Mandatory)][string[]]$Paths,
+        [Parameter(Mandatory)][string]$BuildEnvironment
+    )
+    $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $files = foreach ($path in $Paths) {
+        $candidate = Join-Path $Root $path
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            Get-Item -LiteralPath $candidate
+        } elseif (Test-Path -LiteralPath $candidate -PathType Container) {
+            Get-ChildItem -LiteralPath $candidate -Recurse -File
+        } else {
+            throw "Build input '$path' does not exist."
+        }
+    }
+    $entries = foreach ($file in ($files | Sort-Object FullName -Unique)) {
+        $fullName = [IO.Path]::GetFullPath($file.FullName)
+        $relativeName = $fullName.Substring($rootPath.Length + 1).Replace('\', '/')
+        $fileDigest = (Get-FileHash -LiteralPath $fullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$relativeName`0$fileDigest"
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $payload = [Text.Encoding]::UTF8.GetBytes("build-environment`0$BuildEnvironment`n$($entries -join "`n")")
+        return ([BitConverter]::ToString($sha.ComputeHash($payload))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-ImageSourceDigest {
+    param([Parameter(Mandatory)][string]$Image)
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $rawLabels = (& docker image inspect --format '{{json .Config.Labels}}' $Image 2>$null | Select-Object -First 1)
+    $ErrorActionPreference = $previousPreference
+    # Windows PowerShell 5 can report LASTEXITCODE=-1 for a successful native
+    # command whose stdout passed through Select-Object. Valid JSON output is
+    # the portable success signal; an absent image produces no output.
+    if (-not $rawLabels) { return '' }
+    try {
+        $labels = $rawLabels | ConvertFrom-Json
+        $property = $labels.PSObject.Properties['dev.steadystate.source-digest']
+        if ($null -eq $property) { return '' }
+        return ([string]$property.Value).Trim()
+    } catch {
+        return ''
+    }
+}
+
+function Invoke-ContentAddressedImageBuild {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Image,
+        [Parameter(Mandatory)][string]$Dockerfile,
+        [Parameter(Mandatory)][string[]]$Inputs,
+        [Parameter(Mandatory)][string]$BuilderImage
+    )
+    $digest = Get-BuildSourceDigest -Paths $Inputs -BuildEnvironment $BuilderImage
+    $currentDigest = Get-ImageSourceDigest -Image $Image
+    Write-Verbose "$Name image source digest: expected=$digest current=$currentDigest"
+    if ($currentDigest -eq $digest) {
+        Write-Host "$Name image is current ($($digest.Substring(0, 12))); skipping rebuild."
+        return
+    }
+    Write-Host "Building $Name image from source $($digest.Substring(0, 12))..."
+    Invoke-External docker build --platform linux/amd64 --pull --label "dev.steadystate.source-digest=$digest" --build-arg "GO_BUILDER=$BuilderImage" --file $Dockerfile --tag $Image .
+}
+
 function Invoke-BuildImages {
     Assert-Docker
     $v = Read-Versions
-    Invoke-External docker build --platform linux/amd64 --pull --build-arg "GO_BUILDER=$($v.GO_BUILDER_IMAGE)" --file Dockerfile --tag $OperatorImage .
-    Invoke-External docker build --platform linux/amd64 --pull --build-arg "GO_BUILDER=$($v.GO_BUILDER_IMAGE)" --file apps/demo-app/Dockerfile --tag $DemoImage .
-    Write-Host "Built $OperatorImage and $DemoImage"
+    Invoke-ContentAddressedImageBuild -Name 'operator' -Image $OperatorImage -Dockerfile 'Dockerfile' -BuilderImage $v.GO_BUILDER_IMAGE -Inputs @('Dockerfile','go.mod','go.sum','api','cmd','internal')
+    Invoke-ContentAddressedImageBuild -Name 'demo' -Image $DemoImage -Dockerfile 'apps/demo-app/Dockerfile' -BuilderImage $v.GO_BUILDER_IMAGE -Inputs @('apps/demo-app/Dockerfile','go.mod','go.sum','apps/demo-app')
+    Write-Host "Platform images are ready: $OperatorImage and $DemoImage"
 }
 
 function Invoke-LoadImages {
@@ -505,17 +576,24 @@ function Invoke-Bootstrap {
             $configPath = Join-Path $Root ".artifacts/kind-$Profile.yaml"
             New-Item -ItemType Directory -Force -Path (Split-Path $configPath) | Out-Null
             [IO.File]::WriteAllText($configPath, $rendered, [Text.UTF8Encoding]::new($false))
-            Invoke-External kind create cluster --name $ClusterName --config $configPath --wait 60s
+            # Readiness cannot be reached before Calico is installed because
+            # the kind profiles intentionally disable the default CNI. Create
+            # the nodes without kind's pre-CNI Ready wait, then use the bounded
+            # Calico and node waits below as the authoritative readiness gates.
+            Invoke-External kind create cluster --name $ClusterName --config $configPath --wait 0s
         } else {
             Write-Host "Cluster '$ClusterName' already exists; reconciling add-ons."
         }
         Invoke-External kubectl apply --server-side -f "https://raw.githubusercontent.com/projectcalico/calico/v$($v.CALICO_VERSION)/manifests/operator-crds.yaml"
         Invoke-External kubectl apply --server-side -f "https://raw.githubusercontent.com/projectcalico/calico/v$($v.CALICO_VERSION)/manifests/tigera-operator.yaml"
         Invoke-External kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/v$($v.CALICO_VERSION)/manifests/custom-resources.yaml"
-        Invoke-External kubectl wait --for=condition=Available deployment/tigera-operator -n tigera-operator --timeout=300s
+        # A cold pull from quay.io can exceed five minutes on developer
+        # connections. The outer platform bootstrap remains bounded, while the
+        # first-run image pull gets enough time to finish and remain cached.
+        Invoke-External kubectl wait --for=condition=Available deployment/tigera-operator -n tigera-operator --timeout=600s
         Wait-KubernetesResource -Arguments @('daemonset/calico-node', '-n', 'calico-system')
-        Invoke-External kubectl rollout status daemonset/calico-node -n calico-system --timeout=300s
-        Invoke-External kubectl wait nodes --all --for=condition=Ready --timeout=300s
+        Invoke-External kubectl rollout status daemonset/calico-node -n calico-system --timeout=600s
+        Invoke-External kubectl wait nodes --all --for=condition=Ready --timeout=600s
 
         Invoke-External helm upgrade --install envoy-gateway oci://docker.io/envoyproxy/gateway-helm --version "v$($v.ENVOY_GATEWAY_VERSION)" --namespace envoy-gateway-system --create-namespace --wait --timeout 5m
         Invoke-External kubectl delete gateway steadystate -n steadystate-smoke --ignore-not-found=true --wait=true

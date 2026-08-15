@@ -36,6 +36,20 @@ function Read-Versions {
     return $values
 }
 
+function Get-InstalledGoVersion {
+    param([Parameter(Mandatory)][string]$GoBinary)
+    $previous = $env:GOTOOLCHAIN
+    try {
+        # Running `go version` inside this repository otherwise permits an old
+        # SDK to auto-download the version declared by go.mod and masquerade as
+        # an already upgraded local installation.
+        $env:GOTOOLCHAIN = 'local'
+        return ((& $GoBinary version) -split ' ')[2].TrimStart('go')
+    } finally {
+        $env:GOTOOLCHAIN = $previous
+    }
+}
+
 function Invoke-Download {
     param(
         [Parameter(Mandatory)][string]$Url,
@@ -153,7 +167,7 @@ if ($IsWindowsHost) {
     $goRoot = Join-Path $ToolsRoot "go/$Platform"
     $goBinary = Join-Path $goRoot 'bin/go.exe'
     if (Test-Path $goBinary) {
-        $installedGo = ((& $goBinary version) -split ' ')[2].TrimStart('go')
+        $installedGo = Get-InstalledGoVersion -GoBinary $goBinary
         if ($installedGo -ne $v.GO_VERSION) { Remove-Item -Recurse -Force $goRoot }
     }
     if ($Force -and (Test-Path $goRoot)) { Remove-Item -Recurse -Force $goRoot }
@@ -239,7 +253,7 @@ if ($IsWindowsHost) {
     $goRoot = Join-Path $ToolsRoot "go/$Platform"
     $goBinary = Join-Path $goRoot 'bin/go'
     if (Test-Path $goBinary) {
-        $installedGo = ((& $goBinary version) -split ' ')[2].TrimStart('go')
+        $installedGo = Get-InstalledGoVersion -GoBinary $goBinary
         if ($installedGo -ne $v.GO_VERSION) { Remove-Item -Recurse -Force $goRoot }
     }
     if ($Force -and (Test-Path $goRoot)) { Remove-Item -Recurse -Force $goRoot }

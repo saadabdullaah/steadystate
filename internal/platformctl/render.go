@@ -656,9 +656,11 @@ func (r *changeRenderer) writeApplicationWithIsolation(team string, p ChangePara
 		"observability": map[string]any{"metrics": true, "logs": true, "traces": true},
 		"security":      map[string]any{"requireSignedImage": true, "runAsNonRoot": true, "networkIsolation": networkIsolation},
 	}
-	if p.DatabaseRef != "" {
-		spec["databaseRef"] = map[string]any{"name": p.DatabaseRef}
-	}
+	// Database bindings are profile-dependent. The catalog records the desired
+	// relationship and the root chart adds databaseRef only when the data
+	// foundation is enabled. Keeping the leaf profile-neutral lets the same
+	// service run in standard mode without waiting forever for a Database that
+	// is intentionally not installed.
 	object := map[string]any{"apiVersion": "platform.steadystate.dev/v1alpha1", "kind": "Application", "metadata": metadata(p.Name, "team-"+team, "1"), "spec": spec}
 	return r.writeLeaf(applicationPath(p.Name), "application.yaml", object)
 }

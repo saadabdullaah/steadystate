@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -401,9 +402,34 @@ func TestArgoConfigurationContracts(t *testing.T) {
 		"kubectl rollout restart statefulset/argocd-application-controller -n argocd",
 		"Wait-ArgoApplication -Name 'data-namespaces' -TimeoutSeconds 900",
 		"kubectl --request-timeout=10s get application.argoproj.io",
+		"Waiting for Argo Application $Name",
+		"root=$rootMessage",
+		"Remove-StaleRootApplication -Revision $GitRevision",
+		"Refusing to replace stale steadystate-root because it has finalizers",
+		"delete application.argoproj.io steadystate-root -n argocd --wait=true --timeout=60s",
+		"Invoke-WithRetry -Description 'Encrypted platform secret bootstrap' -MaximumAttempts 5",
+		"Invoke-WithRetry -Description 'Ephemeral platform secret bootstrap' -MaximumAttempts 5",
+		"Invoke-WithRetry -Description 'Encrypted backup-store credential bootstrap' -MaximumAttempts 5",
 	} {
 		if !strings.Contains(gitopsScript, token) {
 			t.Errorf("GitOps bootstrap is missing bounded full-profile contract %q", token)
+		}
+	}
+	staleRootReset := strings.Index(gitopsScript, "Remove-StaleRootApplication -Revision $GitRevision")
+	rootApplyAfterReset := strings.Index(gitopsScript, "Invoke-External kubectl apply -f $rootApplication")
+	if staleRootReset < 0 || rootApplyAfterReset < 0 || staleRootReset > rootApplyAfterReset {
+		t.Fatal("a stale root operation must be removed before the requested root revision is applied")
+	}
+	monitoringValues := string(readFile(t, filepath.Join(root, "gitops", "platform", "monitoring", "values.yaml")))
+	for _, token := range []string{"initialDelaySeconds: 600", "timeoutSeconds: 30", "failureThreshold: 12"} {
+		if !strings.Contains(monitoringValues, token) {
+			t.Errorf("monitoring values are missing cold-start probe contract %q", token)
+		}
+	}
+	rolloutsValues := string(readFile(t, filepath.Join(root, "gitops", "platform", "rollouts", "values.yaml")))
+	for _, token := range []string{"initialDelaySeconds: 600", "timeoutSeconds: 10", "failureThreshold: 12"} {
+		if !strings.Contains(rolloutsValues, token) {
+			t.Errorf("Rollouts values are missing cold-start probe contract %q", token)
 		}
 	}
 	controllerRestart := strings.Index(gitopsScript, "kubectl rollout restart statefulset/argocd-application-controller -n argocd")
@@ -860,6 +886,12 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 		!strings.Contains(databasePatchBody, "name: orders") ||
 		strings.Contains(databasePatchBody, "op: remove") {
 		t.Fatalf("full profile database binding patch is invalid: %q", databasePatchBody)
+	}
+	for _, applicationPath := range []string{"gitops/applications/demo", "gitops/applications/xyz-api"} {
+		profileNeutral := string(run(t, root, "kustomize", "build", filepath.Join(root, filepath.FromSlash(applicationPath))))
+		if strings.Contains(profileNeutral, "databaseRef:") {
+			t.Fatalf("profile-neutral Application leaf %s contains a database binding", applicationPath)
+		}
 	}
 
 	manifest := readFile(t, filepath.Join(root, "gitops", "platform", "local-path", "local-path-storage.yaml"))
@@ -1774,7 +1806,21 @@ func TestCodeQLWorkflowRunsBoundedParallelLanguageAnalysis(t *testing.T) {
 
 func run(t *testing.T, directory, name string, arguments ...string) []byte {
 	t.Helper()
-	command := exec.Command(name, arguments...)
+	executable := name
+	if _, err := exec.LookPath(name); err != nil {
+		platform := "linux-amd64"
+		suffix := ""
+		if runtime.GOOS == "windows" {
+			platform = "windows-amd64"
+			suffix = ".exe"
+		}
+		candidate := filepath.Join(repositoryRoot(t), ".tools", "bin", platform, name+suffix)
+		if _, statErr := os.Stat(candidate); statErr != nil {
+			t.Fatalf("%s is absent from PATH and pinned tool path %s: %v", name, candidate, statErr)
+		}
+		executable = candidate
+	}
+	command := exec.Command(executable, arguments...)
 	command.Dir = directory
 	output, err := command.CombinedOutput()
 	if err != nil {

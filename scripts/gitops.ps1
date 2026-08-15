@@ -217,6 +217,7 @@ function Get-KubernetesObject {
 function Wait-ArgoApplication {
     param([Parameter(Mandatory)][string]$Name, [int]$TimeoutSeconds = 600)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $nextReport = Get-Date
     $lastState = 'not found'
     do {
         $previousPreference = $ErrorActionPreference
@@ -232,6 +233,17 @@ function Wait-ArgoApplication {
             $lastState = "sync=$($application.status.sync.status), health=$($application.status.health.status), message=$($application.status.health.message)"
         } elseif ($exitCode -ne 0) {
             $lastState = "Kubernetes request failed with exit code $exitCode"
+        }
+        if ((Get-Date) -ge $nextReport) {
+            $rootState = ''
+            $rootJson = @(& kubectl --request-timeout=10s get application.argoproj.io steadystate-root -n argocd -o json 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $rootJson) {
+                $root = (($rootJson -join [Environment]::NewLine) | ConvertFrom-Json)
+                $rootMessage = [string]$root.status.operationState.message
+                if ($rootMessage) { $rootState = "; root=$rootMessage" }
+            }
+            Write-Host "Waiting for Argo Application $Name`: $lastState$rootState"
+            $nextReport = (Get-Date).AddSeconds(30)
         }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)
@@ -324,6 +336,32 @@ function Wait-ArgoRoute {
     throw 'The Argo CD HTTPRoute was not accepted with resolved references.'
 }
 
+function Remove-StaleRootApplication {
+    param([Parameter(Mandatory)][string]$Revision)
+
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $json = @(& kubectl --request-timeout=10s get application.argoproj.io steadystate-root -n argocd -o json 2>$null)
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($exitCode -ne 0 -or -not $json) { return }
+
+    $root = (($json -join [Environment]::NewLine) | ConvertFrom-Json)
+    $targetRevision = [string]$root.spec.source.targetRevision
+    $operationPhase = [string]$root.status.operationState.phase
+    $operationRevision = [string]$root.status.operationState.syncResult.revision
+    $staleTarget = $targetRevision -and $targetRevision -ne $Revision
+    $staleOperation = $operationRevision -and $operationRevision -ne $Revision -and $operationPhase -in @('Running','Terminating')
+    if (-not $staleTarget -and -not $staleOperation) { return }
+
+    $finalizers = @($root.metadata.finalizers | Where-Object { $_ })
+    if ($finalizers.Count -gt 0) {
+        throw "Refusing to replace stale steadystate-root because it has finalizers: $($finalizers -join ', ')."
+    }
+    Write-Host "Replacing stale steadystate-root before revision '$Revision' (target='$targetRevision', operation='$operationRevision', phase='$operationPhase')."
+    Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --wait=true --timeout=60s
+}
+
 function Test-ArgoHttp {
     param([int]$TimeoutSeconds = 90)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -357,11 +395,15 @@ function Invoke-Deploy {
     Invoke-External kubectl apply --server-side --force-conflicts -k $PlatformPath
     $localAgeKey = Join-Path $Root '.artifacts/secrets/steadystate.agekey'
     if ($env:SOPS_AGE_KEY -or (Test-Path -LiteralPath $localAgeKey -PathType Leaf)) {
-        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action Apply
-        if ($LASTEXITCODE -ne 0) { throw 'Encrypted platform secret bootstrap failed.' }
+        Invoke-WithRetry -Description 'Encrypted platform secret bootstrap' -MaximumAttempts 5 -Operation {
+            & (Join-Path $PSScriptRoot 'secrets.ps1') -Action Apply
+            if ($LASTEXITCODE -ne 0) { throw 'Encrypted platform secret bootstrap failed.' }
+        }
     } else {
-        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyEphemeral
-        if ($LASTEXITCODE -ne 0) { throw 'Ephemeral platform secret bootstrap failed.' }
+        Invoke-WithRetry -Description 'Ephemeral platform secret bootstrap' -MaximumAttempts 5 -Operation {
+            & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyEphemeral
+            if ($LASTEXITCODE -ne 0) { throw 'Ephemeral platform secret bootstrap failed.' }
+        }
     }
     Invoke-External kubectl rollout restart deployment/argocd-server -n argocd
     Invoke-External kubectl rollout restart statefulset/argocd-application-controller -n argocd
@@ -372,14 +414,17 @@ function Invoke-Deploy {
     Render-RootTemplate -Template 'templates/projects.yaml.tpl' -Path $projects
     Render-RootTemplate -Template 'templates/root-application.yaml.tpl' -Path $rootApplication -BootstrapRoot
     Invoke-External kubectl apply -f $projects
+    Remove-StaleRootApplication -Revision $GitRevision
     Invoke-External kubectl apply -f $rootApplication
     if ($Profile -eq 'full') {
         $null = Wait-ArgoApplication -Name 'data-namespaces' -TimeoutSeconds 900
         if (-not $env:SOPS_AGE_KEY -and -not (Test-Path -LiteralPath $localAgeKey -PathType Leaf)) {
             throw 'The full profile requires SOPS_AGE_KEY or the ignored local age key to decrypt backup-store credentials.'
         }
-        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyBackup
-        if ($LASTEXITCODE -ne 0) { throw 'Encrypted backup-store credential bootstrap failed.' }
+        Invoke-WithRetry -Description 'Encrypted backup-store credential bootstrap' -MaximumAttempts 5 -Operation {
+            & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyBackup
+            if ($LASTEXITCODE -ne 0) { throw 'Encrypted backup-store credential bootstrap failed.' }
+        }
     }
     Write-Host "Argo CD and the SteadyState GitOps root are deployed at revision '$GitRevision'."
 }

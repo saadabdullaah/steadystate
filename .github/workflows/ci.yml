@@ -177,7 +177,7 @@ jobs:
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f
         with:
           repo-checkout: false
-          go-version-input: "1.25.12"
+          go-version-input: "1.25.13"
           go-package: ./...
           output-format: sarif
           output-file: .artifacts/security/govulncheck.sarif
@@ -186,11 +186,15 @@ jobs:
         with:
           args: "-severity high -confidence medium ./..."
       - name: Go vulnerability gate
-        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f
-        with:
-          repo-checkout: false
-          go-version-input: "1.25.12"
-          go-package: ./...
+        shell: pwsh
+        run: |
+          $report = Get-Content -Raw .artifacts/security/govulncheck.sarif | ConvertFrom-Json
+          $results = @($report.runs | ForEach-Object { @($_.results) } | Where-Object { $null -ne $_ })
+          if ($results.Count -gt 0) {
+            $ids = @($results | ForEach-Object { $_.ruleId } | Sort-Object -Unique) -join ', '
+            throw "govulncheck reported $($results.Count) reachable vulnerability finding(s): $ids"
+          }
+          Write-Host 'govulncheck reported no reachable vulnerabilities.'
       - name: Trivy repository and IaC blocking gate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

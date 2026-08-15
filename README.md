@@ -2,9 +2,9 @@
 
 SteadyState is a self-hosted, laptop-scale internal developer platform built around a Kubernetes operator, the `platformctl` developer CLI, and an embedded local-owner portal. It combines Git-reviewed delivery, progressive rollout, policy, observability, durable PostgreSQL, tested recovery, and golden service paths without requiring a cloud account. The runtime is self-hosted; GitHub supplies the reviewed delivery, registry, and signing plane.
 
-Phases 0–8 established the Windows-first kind foundation, the Application/Team/Database control plane, Argo GitOps, metric-gated canaries, correlated telemetry, signed-image policy, durable recovery, and the cross-platform golden-path CLI. Phase 9 adds the refined portal and complete lifecycle commands while preserving every existing ownership boundary: the browser consumes typed summaries and reviewed proposals; it never becomes a second control plane.
+Phases 0–8 established the Windows-first kind foundation, the Application/Team/Database control plane, Argo GitOps, metric-gated canaries, correlated telemetry, signed-image policy, durable recovery, and the cross-platform golden-path CLI. Phase 9 added the refined portal and complete lifecycle commands while preserving every existing ownership boundary: the browser consumes typed summaries and reviewed proposals; it never becomes a second control plane.
 
-> Status: Phases 0–8 are released through [`v0.8.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v0.8.0). Phase 9 implementation and hosted acceptance are verified in [PR #95](https://github.com/saadabdullaah/steadystate/pull/95); exact-main regression, the `v1.0.0` tag, and GA release remain publication gates.
+> Status: SteadyState GA is published as [`v1.0.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v1.0.0) from exact-main commit `c25fc107b78ca3f6332f027de7a644cc24feccc0`. [PR #95](https://github.com/saadabdullaah/steadystate/pull/95), the complete regression suite, hosted Phase 9 evidence, and all six signed and attested CLI archives are verified.
 
 ![Phase 9 local developer portal golden path](docs/demonstrations/phase9-portal-golden-path.gif)
 
@@ -58,7 +58,15 @@ The repository is a monorepo. Operator APIs and controllers live alongside the C
 - Git for Windows.
 - Docker Desktop using Linux containers and its WSL2 backend.
 - Docker Engine 24 or newer with cgroup v2 enabled.
-- At least 6 GB allocated to Docker Desktop; 8 GB or more is recommended.
+- Docker memory appropriate for the selected profile:
+
+  | Profile | Minimum | Use it for |
+  |---|---:|---|
+  | `minimal` | 4 GiB | Foundation and focused controller development |
+  | `standard` | 7 GiB | Recommended local product experience: portal, GitOps, delivery, policy, and observability |
+  | `full` | 9 GiB | Standard plus PostgreSQL, external backups, and disaster recovery |
+
+  `platformctl platform up` checks this before changing the environment. A machine with 7.8 GiB should use `standard`; selecting `full` fails immediately with a corrective message instead of starting a cluster that is likely to be OOM-killed.
 - Ports `8080` and `8443` available, or explicit alternatives.
 
 Go, kind, kubectl, and Helm do not need global installation. SteadyState downloads verified, pinned versions into the ignored `.tools/` directory.
@@ -221,18 +229,25 @@ preserves `steadystate-backup-data`. Purging requires the explicit
 After cloning and authenticating `gh`, build or install `platformctl`, then run:
 
 ```powershell
-platformctl config init --checkout . --profile full
+platformctl config init --checkout . --profile standard
 platformctl platform up
 platformctl portal
 ```
 
-`platform up` verifies pinned tools and prerequisites, reconciles the cluster,
-starts the retained backup store for the full profile, builds and loads the
-exact platform images, deploys GitOps, and verifies readiness. The portal binds
+`platform up` first validates the selected profile and host prerequisites, then
+installs pinned tools and builds source-addressed platform images before kind
+starts consuming host memory. Exact retries reuse matching images. It then
+reconciles the cluster, starts the retained backup store only for `full`, loads
+the platform images, deploys GitOps, and verifies readiness. Every long stage
+streams child output and a 30-second heartbeat, and a timed-out stage terminates
+its complete process tree. The portal binds
 only to `127.0.0.1`; its one-time launch URL becomes an HttpOnly local session
 and is immediately removed from the browser address bar. `platform down`
 removes the configured cluster and exact external process while preserving the
 SeaweedFS backup volume.
+
+Use `--profile full` only when testing the managed Database, backup, or recovery
+paths and after assigning at least 9 GiB to Docker.
 
 See the [portal user guide](docs/portal.md) for onboarding, Git-first changes,
 telemetry, recovery, deletion, and break glass.

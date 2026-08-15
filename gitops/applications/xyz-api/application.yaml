@@ -7,8 +7,6 @@ metadata:
   name: xyz-api
   namespace: team-xyz
 spec:
-  databaseRef:
-    name: xyz
   deployment:
     automaticRollback: true
     steps:

@@ -3,8 +3,11 @@ package platformctl
 import (
 	"context"
 	"fmt"
+	"io"
+	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -23,6 +26,65 @@ type platformLifecycleResult struct {
 	GitRevision string          `json:"gitRevision,omitempty" yaml:"gitRevision,omitempty"`
 	Stages      []platformStage `json:"stages" yaml:"stages"`
 	State       string          `json:"state" yaml:"state"`
+}
+
+const platformProgressInterval = 30 * time.Second
+
+type stageLogWriter struct {
+	mu          sync.Mutex
+	outputMu    *sync.Mutex
+	destination io.Writer
+	prefix      string
+	pending     string
+	tail        []string
+}
+
+func newStageLogWriter(destination io.Writer, outputMu *sync.Mutex, prefix string) *stageLogWriter {
+	return &stageLogWriter{destination: destination, outputMu: outputMu, prefix: prefix}
+}
+
+func (writer *stageLogWriter) Write(value []byte) (int, error) {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	writer.pending += strings.ReplaceAll(strings.ReplaceAll(string(value), "\r\n", "\n"), "\r", "\n")
+	for {
+		separator := strings.IndexByte(writer.pending, '\n')
+		if separator < 0 {
+			break
+		}
+		writer.emitLocked(writer.pending[:separator])
+		writer.pending = writer.pending[separator+1:]
+	}
+	return len(value), nil
+}
+
+func (writer *stageLogWriter) Flush() {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	if writer.pending != "" {
+		writer.emitLocked(writer.pending)
+		writer.pending = ""
+	}
+}
+
+func (writer *stageLogWriter) Tail() string {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return strings.Join(writer.tail, "\n")
+}
+
+func (writer *stageLogWriter) emitLocked(line string) {
+	line = strings.TrimSpace(Redact(line))
+	if line == "" {
+		return
+	}
+	writer.outputMu.Lock()
+	_, _ = fmt.Fprintf(writer.destination, "[%s] %s\n", writer.prefix, line)
+	writer.outputMu.Unlock()
+	writer.tail = append(writer.tail, line)
+	if len(writer.tail) > 20 {
+		writer.tail = writer.tail[len(writer.tail)-20:]
+	}
 }
 
 func newPlatformCommand(options *Options) *cobra.Command {
@@ -51,6 +113,9 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 			}
 			gitRevision := ""
 			if action == "up" {
+				if err := runPlatformUpPreflight(cmd.Context(), options, selected); err != nil {
+					return err
+				}
 				gitRevision, err = checkoutHeadRevision(cmd.Context(), selected.CheckoutPath)
 				if err != nil {
 					return err
@@ -59,13 +124,14 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 			result := platformLifecycleResult{Action: action, Profile: selected.Profile, GitRevision: gitRevision, Stages: stages, State: "Completed"}
 			errors := []string{}
 			for _, stage := range stages {
-				_, _ = fmt.Fprintf(options.Stderr, "[%s] %s\n", time.Now().UTC().Format(time.RFC3339), stage.Name)
+				started := time.Now()
+				_, _ = fmt.Fprintf(options.Stderr, "[%s] Starting %s (timeout %s)\n", started.UTC().Format(time.RFC3339), stage.Name, stage.Timeout)
 				stageCtx, cancel := context.WithTimeout(cmd.Context(), stage.Timeout)
 				arguments := []string{"-NoProfile", "-File", selected.CheckoutPath + "/scripts/dev.ps1", stage.Command, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort)}
 				if gitRevision != "" {
 					arguments = append(arguments, "-GitRevision", gitRevision)
 				}
-				_, stageErr := runExternal(stageCtx, selected.CheckoutPath, "pwsh", arguments...)
+				stageErr := runPlatformStage(stageCtx, options, selected.CheckoutPath, stage, arguments)
 				cancel()
 				if stageErr != nil {
 					errors = append(errors, stage.Name+": "+ErrorMessage(stageErr))
@@ -73,6 +139,8 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 						result.State = "Failed"
 						return exitError(ExitRemote, "platform up stopped at %s; the environment was preserved for diagnosis: %s", stage.Name, strings.Join(errors, "; "))
 					}
+				} else if !options.Quiet {
+					_, _ = fmt.Fprintf(options.Stderr, "[%s] Completed %s in %s\n", time.Now().UTC().Format(time.RFC3339), stage.Name, time.Since(started).Round(time.Second))
 				}
 			}
 			if len(errors) > 0 {
@@ -85,6 +153,99 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 			return options.printer().Table([]string{"ACTION", "PROFILE", "REVISION", "STATE"}, [][]string{{action, selected.Profile, gitRevision, result.State}}, result)
 		},
 	}
+}
+
+var platformUpBlockingChecks = map[string]bool{
+	"checkout":            true,
+	"docker":              true,
+	"git-repository":      true,
+	"github-app-variable": true,
+	"github-auth":         true,
+	"github-secrets":      true,
+	"operating-system":    true,
+	"resource-budget":     true,
+	"tool-docker":         true,
+	"tool-gh":             true,
+	"tool-git":            true,
+	"tool-pwsh":           true,
+}
+
+func runPlatformUpPreflight(parent context.Context, options *Options, selected Context) error {
+	_, _ = fmt.Fprintf(options.Stderr, "[%s] Validating local prerequisites for the %s profile\n", time.Now().UTC().Format(time.RFC3339), selected.Profile)
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	defer cancel()
+	checks := runDoctor(ctx, selected)
+	failures := []string{}
+	warnings := 0
+	for _, check := range checks {
+		blocking := platformUpBlockingChecks[check.Name] || strings.HasPrefix(check.Name, "full-profile-")
+		if check.Status == "Fail" && blocking {
+			failures = append(failures, fmt.Sprintf("%s: %s (%s)", check.Name, check.Details, check.Remediation))
+		}
+		if check.Status == "Warning" {
+			warnings++
+		}
+	}
+	if len(failures) > 0 {
+		return exitError(ExitUnhealthy, "platform preflight failed before changing the environment: %s", strings.Join(failures, "; "))
+	}
+	if !options.Quiet {
+		_, _ = fmt.Fprintf(options.Stderr, "[%s] Preflight passed (%d non-blocking warnings); pinned tools will be installed next\n", time.Now().UTC().Format(time.RFC3339), warnings)
+	}
+	return nil
+}
+
+func runPlatformStage(ctx context.Context, options *Options, checkoutPath string, stage platformStage, arguments []string) error {
+	// #nosec G204 -- executable and arguments are fixed lifecycle contracts.
+	command := exec.Command("pwsh", arguments...)
+	command.Dir = checkoutPath
+	destination := options.Stderr
+	if options.Quiet {
+		destination = io.Discard
+	}
+	outputMu := &sync.Mutex{}
+	stdout := newStageLogWriter(destination, outputMu, stage.Command)
+	stderr := newStageLogWriter(destination, outputMu, stage.Command)
+	command.Stdout = stdout
+	command.Stderr = stderr
+
+	done := make(chan struct{})
+	if !options.Quiet {
+		started := time.Now()
+		go func() {
+			ticker := time.NewTicker(platformProgressInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					outputMu.Lock()
+					_, _ = fmt.Fprintf(destination, "[%s] %s still running (%s elapsed; timeout %s)\n", time.Now().UTC().Format(time.RFC3339), stage.Name, time.Since(started).Round(time.Second), stage.Timeout)
+					outputMu.Unlock()
+				case <-done:
+					return
+				}
+			}
+		}()
+	}
+
+	err := runCommandInProcessTree(ctx, command)
+	close(done)
+	stdout.Flush()
+	stderr.Flush()
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return exitError(ExitTimeout, "%s timed out after %s", stage.Name, stage.Timeout)
+	}
+	message := strings.TrimSpace(stderr.Tail())
+	if message == "" {
+		message = strings.TrimSpace(stdout.Tail())
+	}
+	if message == "" {
+		message = err.Error()
+	}
+	return fmt.Errorf("%s", Redact(message))
 }
 
 func checkoutHeadRevision(ctx context.Context, checkoutPath string) (string, error) {
@@ -101,11 +262,14 @@ func checkoutHeadRevision(ctx context.Context, checkoutPath string) (string, err
 }
 
 func platformUpStages(profile string) []platformStage {
-	stages := []platformStage{{"Install pinned tools", "tools", 15 * time.Minute}, {"Verify pinned tools", "check-versions", 5 * time.Minute}, {"Bootstrap cluster", "bootstrap", 20 * time.Minute}}
+	// Build before starting kind so cold Go compilation gets the host's CPU and
+	// memory instead of competing with four Kubernetes nodes. The build script
+	// is content-addressed, so exact retries become a fast cache hit.
+	stages := []platformStage{{"Install pinned tools", "tools", 15 * time.Minute}, {"Verify pinned tools", "check-versions", 5 * time.Minute}, {"Build platform images", "build-images", 25 * time.Minute}, {"Bootstrap cluster", "bootstrap", 20 * time.Minute}}
 	if profile == "full" {
 		stages = append(stages, platformStage{"Start retained backup store", "start-backup-store", 5 * time.Minute})
 	}
-	stages = append(stages, platformStage{"Build platform images", "build-images", 15 * time.Minute}, platformStage{"Load platform images", "load-images", 10 * time.Minute}, platformStage{"Deploy GitOps", "deploy-gitops", 30 * time.Minute}, platformStage{"Verify platform readiness", "test-gitops", 20 * time.Minute})
+	stages = append(stages, platformStage{"Load platform images", "load-images", 10 * time.Minute}, platformStage{"Deploy GitOps", "deploy-gitops", 30 * time.Minute}, platformStage{"Verify platform readiness", "test-gitops", 20 * time.Minute})
 	if profile == "full" {
 		stages = append(stages, platformStage{"Verify data platform", "verify-data", 10 * time.Minute})
 	}
@@ -163,7 +327,8 @@ func newPlatformVerifyCommand(options *Options) *cobra.Command {
 				cancel()
 				return revisionErr
 			}
-			_, err = runExternal(ctx, selected.CheckoutPath, "pwsh", "-NoProfile", "-File", selected.CheckoutPath+"/scripts/dev.ps1", stage.Command, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort), "-GitRevision", revision)
+			arguments := []string{"-NoProfile", "-File", selected.CheckoutPath + "/scripts/dev.ps1", stage.Command, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort), "-GitRevision", revision}
+			err = runPlatformStage(ctx, options, selected.CheckoutPath, stage, arguments)
 			cancel()
 			if err != nil {
 				return exitError(ExitUnhealthy, "%s failed: %v", stage.Name, err)

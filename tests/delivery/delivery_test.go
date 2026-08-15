@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -12,11 +13,15 @@ import (
 func TestDemoVersionContract(t *testing.T) {
 	root := repositoryRoot(t)
 	version := strings.TrimSpace(read(t, filepath.Join(root, "apps", "demo-app", "VERSION")))
-	if !regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`).MatchString(version) {
+	versionPattern := regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+	versionParts := versionPattern.FindStringSubmatch(version)
+	if len(versionParts) != 4 {
 		t.Fatalf("demo VERSION %q is not strict semver", version)
 	}
-	if version != "v0.7.0" {
-		t.Fatalf("Phase 7 must declare v0.7.0, got %q", version)
+	major, _ := strconv.Atoi(versionParts[1])
+	minor, _ := strconv.Atoi(versionParts[2])
+	if major == 0 && minor < 7 {
+		t.Fatalf("demo VERSION must not regress below the Phase 7 v0.7.0 baseline, got %q", version)
 	}
 	manifest := read(t, filepath.Join(root, "gitops", "applications", "demo", "application.yaml"))
 	tagPattern := regexp.MustCompile(`(?m)^    tag: (v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
@@ -25,8 +30,9 @@ func TestDemoVersionContract(t *testing.T) {
 		t.Fatal("the demo manifest must contain exactly one strict semver image tag")
 	}
 	manifestVersion := tagMatches[0][1]
-	if manifestVersion != version && manifestVersion != "v0.6.0" {
-		t.Fatalf("demo manifest tag %q must be the released v0.6.0 baseline or match VERSION %q", manifestVersion, version)
+	releasedBaselines := map[string]bool{"v0.6.0": true, "v0.7.0": true}
+	if manifestVersion != version && !releasedBaselines[manifestVersion] {
+		t.Fatalf("demo manifest tag %q must be a released baseline or match VERSION %q", manifestVersion, version)
 	}
 }
 

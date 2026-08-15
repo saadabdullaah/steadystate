@@ -716,3 +716,22 @@ reviewed recovery Git change.
 still attempts GitOps undeploy, exact kind deletion, and exact backup-store
 stop after an earlier failure, then aggregates sanitized errors. It never
 purges the SeaweedFS named volume.
+
+Before changing the environment, `platform up` validates the configured
+checkout, Docker and GitHub access, exact host ports, required ignored secret
+material, and the selected profile's Docker memory. The supported minimums are
+4 GiB for `minimal`, 7 GiB for `standard`, and 9 GiB for `full`. Choose
+`standard` on an 8 GiB Docker Desktop allocation. The `full` profile adds the
+database and recovery stack and is deliberately rejected below 9 GiB rather
+than attempting an unstable bootstrap.
+
+Cold platform image compilation runs before kind starts so the compiler does
+not compete with Kubernetes. Each image records a deterministic digest of its
+exact build inputs; rerunning the same checkout reports a cache hit and skips
+the rebuild. Stage output is streamed with a heartbeat every 30 seconds. A
+deadline closes the complete PowerShell/Docker child process tree, so a timed
+out build cannot continue invisibly after `platform up` returns.
+
+If a run fails after cluster creation, correct the reported cause and rerun
+`platform up`; the contracts are idempotent. Use `platform down` only when you
+want to remove the current cluster. It preserves the exact named backup volume.

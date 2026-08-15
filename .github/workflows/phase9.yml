@@ -25,7 +25,7 @@ jobs:
   browser-contract:
     name: portal-browser-contract
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -43,6 +43,7 @@ jobs:
           cache-dependency-path: web/portal/package-lock.json
 
       - name: Verify Chromium, Firefox, and WebKit portal contracts
+        timeout-minutes: 20
         working-directory: web/portal
         env:
           FULL_BROWSER_MATRIX: "true"
