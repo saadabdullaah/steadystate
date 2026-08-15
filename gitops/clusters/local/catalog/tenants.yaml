@@ -43,5 +43,5 @@ tenants:
     ownsTeam: true
     path: services/xyz
     template: full-stack
-    version: v0.1.1
+    version: v0.1.2
   teamPath: gitops/teams/xyz
