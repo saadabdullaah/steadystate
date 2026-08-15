@@ -2,12 +2,6 @@ name: Platformctl smoke
 
 on:
   workflow_dispatch:
-    inputs:
-      release_version:
-        description: Published platformctl version to install on every supported runner
-        required: false
-        default: v1.0.1
-        type: string
   pull_request:
     paths:
       - .github/workflows/platformctl-smoke.yml
@@ -38,7 +32,7 @@ jobs:
     env:
       GOTOOLCHAIN: go1.25.13
       CGO_ENABLED: "0"
-      INSTALLER_RELEASE_VERSION: ${{ inputs.release_version || 'v1.0.0' }}
+      INSTALLER_RELEASE_VERSION: ${{ github.event_name == 'pull_request' && 'v1.0.0' || 'v1.0.1' }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -88,9 +82,10 @@ jobs:
         run: |
           export PLATFORMCTL_VERSION="$INSTALLER_RELEASE_VERSION"
           export PLATFORMCTL_INSTALL_DIR="$PWD/.artifacts/installed"
-          ./scripts/install-platformctl.sh
+          bash ./scripts/install-platformctl.sh
           expected="${INSTALLER_RELEASE_VERSION#v}"
-          output="$($PLATFORMCTL_INSTALL_DIR/platformctl --output json version)"
+          binary="${PLATFORMCTL_INSTALL_DIR}/platformctl"
+          output="$("$binary" --output json version)"
           printf '%s' "$output" | grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"${expected}\""
       - name: Launch and verify native embedded portal
         shell: pwsh

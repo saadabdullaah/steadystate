@@ -44,7 +44,7 @@ func TestPlatformctlPatchReleaseContract(t *testing.T) {
 		"scripts/install-platformctl.ps1":         {`$Version = '` + version + `'`},
 		"scripts/install-platformctl.sh":          {`PLATFORMCTL_VERSION:-` + version},
 		".github/workflows/phase9.yml":            {`main.version=` + version},
-		".github/workflows/platformctl-smoke.yml": {"release_version:", "INSTALLER_RELEASE_VERSION", "Verify released installer", version},
+		".github/workflows/platformctl-smoke.yml": {"workflow_dispatch:", "INSTALLER_RELEASE_VERSION", "github.event_name == 'pull_request'", "Verify released installer", version},
 		"docs/cli/README.md":                      {version},
 		"docs/cli/operations.md":                  {`refs/tags/` + version, `platformctl_1.0.1_windows_amd64.zip`},
 	}
