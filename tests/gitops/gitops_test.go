@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1802,7 +1803,21 @@ func TestCodeQLWorkflowRunsBoundedParallelLanguageAnalysis(t *testing.T) {
 
 func run(t *testing.T, directory, name string, arguments ...string) []byte {
 	t.Helper()
-	command := exec.Command(name, arguments...)
+	executable := name
+	if _, err := exec.LookPath(name); err != nil {
+		platform := "linux-amd64"
+		suffix := ""
+		if runtime.GOOS == "windows" {
+			platform = "windows-amd64"
+			suffix = ".exe"
+		}
+		candidate := filepath.Join(repositoryRoot(t), ".tools", "bin", platform, name+suffix)
+		if _, statErr := os.Stat(candidate); statErr != nil {
+			t.Fatalf("%s is absent from PATH and pinned tool path %s: %v", name, candidate, statErr)
+		}
+		executable = candidate
+	}
+	command := exec.Command(executable, arguments...)
 	command.Dir = directory
 	output, err := command.CombinedOutput()
 	if err != nil {

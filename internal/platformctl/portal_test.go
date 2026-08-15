@@ -203,7 +203,7 @@ func TestPortalPlanExpirationAndCapacityCleanup(t *testing.T) {
 
 func TestPlatformLifecycleStagesPreserveDataBoundary(t *testing.T) {
 	up := platformUpStages("full")
-	expected := []string{"tools", "check-versions", "bootstrap", "start-backup-store", "build-images", "load-images", "deploy-gitops", "test-gitops", "verify-data"}
+	expected := []string{"tools", "check-versions", "build-images", "bootstrap", "start-backup-store", "load-images", "deploy-gitops", "test-gitops", "verify-data"}
 	if len(up) != len(expected) {
 		t.Fatalf("up stages=%v", up)
 	}

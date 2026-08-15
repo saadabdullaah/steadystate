@@ -1,5 +1,24 @@
 # Engineering Log
 
+## 2026-08-15 — GA fresh-install hardening
+
+- Reproduced the first external Windows installation path and corrected the
+  installer architecture fallback, standard-profile database neutrality, and
+  lifecycle behavior in the GA hotfix line.
+- Made platform image builds source-addressed and retry-safe, moved cold image
+  compilation before kind startup, streamed bounded stage progress, and added
+  true Windows/Unix process-tree termination for deadlines.
+- Added a fail-fast profile preflight: `standard` supports a 7 GiB Docker
+  allocation, while the database/recovery `full` profile requires 9 GiB and no
+  longer proceeds toward a predictable OOM failure below that boundary.
+- Rebased the Go toolchain and builder to the Go 1.25.13 security patch and
+  removed the duplicate blocking `govulncheck` execution while preserving its
+  SARIF gate.
+- Reworked the embedded portal from generic cards/raw JSON into a compact
+  SteadyState operations console with native rollout, SLO, log, trace, policy,
+  diagnosis, and backup views. The hotfix PR and final workflow evidence are
+  recorded after hosted validation.
+
 ## 2026-08-13 — Phase 9 hosted acceptance verified
 
 - Verified the complete full-profile portal golden path in [Phase 9 acceptance run 31689255906](https://github.com/saadabdullaah/steadystate/actions/runs/31689255906) against commit `7036477bfdca26b1557bbd2db4228dfbdd7b4de5`.

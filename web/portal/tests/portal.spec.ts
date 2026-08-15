@@ -35,7 +35,13 @@ async function mockPortal(page: import("@playwright/test").Page) {
       teams: catalog.tenants,
       services: [{ team: "payments", service: catalog.tenants[0].services[0] }],
       requests: [{ databaseId: 1, displayTitle: "service.scaffold fixture", status: "completed", conclusion: "success", url: "https://github.com/saadabdullaah/steadystate/actions", createdAt: "2026-08-11T00:00:00Z" }],
-      readiness: { state: "Ready", checks: [{ name: "GitHub authentication", status: "Pass", details: "Authenticated", remediation: "gh auth login" }] }
+      readiness: { state: "Ready", checks: [{ name: "GitHub authentication", status: "Pass", details: "Authenticated", remediation: "gh auth login" }] },
+      "teams/payments/applications/demo/rollout": { strategy: "canary", status: { phase: "Progressing", currentStepIndex: 1, readyReplicas: 2 }, analyses: [{ name: "demo-analysis-2", status: { phase: "Successful", message: "All metric gates passed" } }] },
+      "teams/payments/applications/demo/slo": { status: "success", data: { result: [{ value: [1, "12.75"] }] } },
+      "teams/payments/applications/demo/logs": { status: "success", data: { result: [{ stream: { application: "demo" }, values: [["1786406400000000000", JSON.stringify({ level: "info", message: "request complete", request_id: "request-1" })]] }] } },
+      "teams/payments/applications/demo/traces": { traces: [{ traceID: "trace-1", rootTraceName: "GET /", rootServiceName: "demo", durationMs: 18 }] },
+      "teams/payments/applications/demo/policy": [{ name: "demo-policy", status: { summary: { pass: 4, fail: 0 } } }],
+      "teams/payments/applications/demo/doctor": [{ name: "GitOps revision", status: "Pass", details: "Catalog and Argo revisions agree", remediation: "platformctl request status" }]
     };
     if (path === "events") return route.fulfill({ status: 200, contentType: "text/event-stream", body: "event: heartbeat\ndata: {}\n\n" });
     const response = data[path] ?? (path === "teams/payments" ? { catalog: catalog.tenants[0], namespace: "team-payments", status: summary } : { summary, status: { phase: "Healthy", activeVersion: "v1.0.0", resolvedGitRevision: "a".repeat(40), conditions: [{ type: "Ready", status: "True", message: "Serving" }] }, generation: 2 });
@@ -72,11 +78,26 @@ test("keyboard shortcut focuses catalog search", async ({ page }) => {
   await expect(page.getByLabel("Search catalog")).toBeFocused();
 });
 
-test("scrollable operational data is keyboard accessible", async ({ page }) => {
+test("application diagnosis is curated instead of exposing raw objects", async ({ page }) => {
   await page.goto("/applications/payments/demo");
   await page.getByRole("tab", { name: "Doctor" }).click();
-  const data = page.getByLabel("Operational data");
-  await expect(data).toHaveAttribute("tabindex", "0");
-  await data.focus();
-  await expect(data).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Dependency path" })).toBeVisible();
+  await expect(page.locator("pre")).toHaveCount(0);
+});
+
+test("application operations use native summaries across every signal", async ({ page }) => {
+  await page.goto("/applications/payments/demo");
+  const expected = new Map([
+    ["Rollout", "Progressive delivery"],
+    ["Slo", "Five-minute request signal"],
+    ["Logs", "Recent application logs"],
+    ["Traces", "Distributed traces"],
+    ["Policy", "Policy and provenance"],
+    ["Doctor", "Dependency path"]
+  ]);
+  for (const [tab, heading] of expected) {
+    await page.getByRole("tab", { name: tab }).click();
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+  }
+  await expect(page.locator("pre")).toHaveCount(0);
 });

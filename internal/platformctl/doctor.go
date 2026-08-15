@@ -149,13 +149,8 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	if raw, err := runExternal(ctx, selected.CheckoutPath, "docker", "info", "--format", "{{.MemTotal}}"); err == nil {
 		if available, parseErr := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); parseErr == nil {
-			minimumGiB := map[string]int64{"minimal": 4, "standard": 7, "full": 9}[selected.Profile]
-			availableGiB := float64(available) / float64(1<<30)
-			if available < minimumGiB*(1<<30) {
-				add("resource-budget", "Warning", fmt.Sprintf("Docker has %.1f GiB; %s profile should have at least %d GiB", availableGiB, selected.Profile, minimumGiB), "Increase the Docker VM memory allocation before a full bootstrap.")
-			} else {
-				add("resource-budget", "Pass", fmt.Sprintf("Docker has %.1f GiB for the %s profile", availableGiB, selected.Profile), "")
-			}
+			check := resourceBudgetCheck(selected.Profile, available)
+			add(check.Name, check.Status, check.Details, check.Remediation)
 		}
 	}
 	for _, port := range []int{selected.HTTPPort, selected.HTTPSPort} {
@@ -190,6 +185,21 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	sort.SliceStable(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
 	return checks
+}
+
+func resourceBudgetCheck(profile string, available int64) DoctorCheck {
+	minimumGiB := map[string]int64{"minimal": 4, "standard": 7, "full": 9}[profile]
+	availableGiB := float64(available) / float64(1<<30)
+	check := DoctorCheck{Name: "resource-budget"}
+	if available < minimumGiB*(1<<30) {
+		check.Status = "Fail"
+		check.Details = fmt.Sprintf("Docker has %.1f GiB; the %s profile requires at least %d GiB", availableGiB, profile, minimumGiB)
+		check.Remediation = fmt.Sprintf("Select a smaller profile or allocate at least %d GiB to Docker before retrying.", minimumGiB)
+		return check
+	}
+	check.Status = "Pass"
+	check.Details = fmt.Sprintf("Docker has %.1f GiB for the %s profile", availableGiB, profile)
+	return check
 }
 
 func githubCLIVersion(output string) string {
@@ -307,11 +317,11 @@ func newClusterLifecycleCommand(options *Options, name, scriptCommand string) *c
 			ctx, cancel := options.commandContext(cmd.Context())
 			defer cancel()
 			arguments := []string{"-NoProfile", "-File", filepath.Join(selected.CheckoutPath, "scripts", "dev.ps1"), scriptCommand, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort)}
-			process := exec.CommandContext(ctx, "pwsh", arguments...)
+			process := exec.Command("pwsh", arguments...)
 			process.Dir = selected.CheckoutPath
 			process.Stdout = options.Stdout
 			process.Stderr = options.Stderr
-			if err := process.Run(); err != nil {
+			if err := runCommandInProcessTree(ctx, process); err != nil {
 				if ctx.Err() != nil {
 					return exitError(ExitTimeout, "cluster %s timed out", name)
 				}

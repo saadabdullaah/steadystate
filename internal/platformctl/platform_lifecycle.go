@@ -113,6 +113,9 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 			}
 			gitRevision := ""
 			if action == "up" {
+				if err := runPlatformUpPreflight(cmd.Context(), options, selected); err != nil {
+					return err
+				}
 				gitRevision, err = checkoutHeadRevision(cmd.Context(), selected.CheckoutPath)
 				if err != nil {
 					return err
@@ -152,9 +155,49 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 	}
 }
 
+var platformUpBlockingChecks = map[string]bool{
+	"checkout":            true,
+	"docker":              true,
+	"git-repository":      true,
+	"github-app-variable": true,
+	"github-auth":         true,
+	"github-secrets":      true,
+	"operating-system":    true,
+	"resource-budget":     true,
+	"tool-docker":         true,
+	"tool-gh":             true,
+	"tool-git":            true,
+	"tool-pwsh":           true,
+}
+
+func runPlatformUpPreflight(parent context.Context, options *Options, selected Context) error {
+	_, _ = fmt.Fprintf(options.Stderr, "[%s] Validating local prerequisites for the %s profile\n", time.Now().UTC().Format(time.RFC3339), selected.Profile)
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	defer cancel()
+	checks := runDoctor(ctx, selected)
+	failures := []string{}
+	warnings := 0
+	for _, check := range checks {
+		blocking := platformUpBlockingChecks[check.Name] || strings.HasPrefix(check.Name, "full-profile-")
+		if check.Status == "Fail" && blocking {
+			failures = append(failures, fmt.Sprintf("%s: %s (%s)", check.Name, check.Details, check.Remediation))
+		}
+		if check.Status == "Warning" {
+			warnings++
+		}
+	}
+	if len(failures) > 0 {
+		return exitError(ExitUnhealthy, "platform preflight failed before changing the environment: %s", strings.Join(failures, "; "))
+	}
+	if !options.Quiet {
+		_, _ = fmt.Fprintf(options.Stderr, "[%s] Preflight passed (%d non-blocking warnings); pinned tools will be installed next\n", time.Now().UTC().Format(time.RFC3339), warnings)
+	}
+	return nil
+}
+
 func runPlatformStage(ctx context.Context, options *Options, checkoutPath string, stage platformStage, arguments []string) error {
 	// #nosec G204 -- executable and arguments are fixed lifecycle contracts.
-	command := exec.CommandContext(ctx, "pwsh", arguments...)
+	command := exec.Command("pwsh", arguments...)
 	command.Dir = checkoutPath
 	destination := options.Stderr
 	if options.Quiet {
@@ -185,7 +228,7 @@ func runPlatformStage(ctx context.Context, options *Options, checkoutPath string
 		}()
 	}
 
-	err := command.Run()
+	err := runCommandInProcessTree(ctx, command)
 	close(done)
 	stdout.Flush()
 	stderr.Flush()
@@ -219,11 +262,14 @@ func checkoutHeadRevision(ctx context.Context, checkoutPath string) (string, err
 }
 
 func platformUpStages(profile string) []platformStage {
-	stages := []platformStage{{"Install pinned tools", "tools", 15 * time.Minute}, {"Verify pinned tools", "check-versions", 5 * time.Minute}, {"Bootstrap cluster", "bootstrap", 20 * time.Minute}}
+	// Build before starting kind so cold Go compilation gets the host's CPU and
+	// memory instead of competing with four Kubernetes nodes. The build script
+	// is content-addressed, so exact retries become a fast cache hit.
+	stages := []platformStage{{"Install pinned tools", "tools", 15 * time.Minute}, {"Verify pinned tools", "check-versions", 5 * time.Minute}, {"Build platform images", "build-images", 25 * time.Minute}, {"Bootstrap cluster", "bootstrap", 20 * time.Minute}}
 	if profile == "full" {
 		stages = append(stages, platformStage{"Start retained backup store", "start-backup-store", 5 * time.Minute})
 	}
-	stages = append(stages, platformStage{"Build platform images", "build-images", 15 * time.Minute}, platformStage{"Load platform images", "load-images", 10 * time.Minute}, platformStage{"Deploy GitOps", "deploy-gitops", 30 * time.Minute}, platformStage{"Verify platform readiness", "test-gitops", 20 * time.Minute})
+	stages = append(stages, platformStage{"Load platform images", "load-images", 10 * time.Minute}, platformStage{"Deploy GitOps", "deploy-gitops", 30 * time.Minute}, platformStage{"Verify platform readiness", "test-gitops", 20 * time.Minute})
 	if profile == "full" {
 		stages = append(stages, platformStage{"Verify data platform", "verify-data", 10 * time.Minute})
 	}
@@ -281,7 +327,8 @@ func newPlatformVerifyCommand(options *Options) *cobra.Command {
 				cancel()
 				return revisionErr
 			}
-			_, err = runExternal(ctx, selected.CheckoutPath, "pwsh", "-NoProfile", "-File", selected.CheckoutPath+"/scripts/dev.ps1", stage.Command, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort), "-GitRevision", revision)
+			arguments := []string{"-NoProfile", "-File", selected.CheckoutPath + "/scripts/dev.ps1", stage.Command, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort), "-GitRevision", revision}
+			err = runPlatformStage(ctx, options, selected.CheckoutPath, stage, arguments)
 			cancel()
 			if err != nil {
 				return exitError(ExitUnhealthy, "%s failed: %v", stage.Name, err)
