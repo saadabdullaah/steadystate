@@ -407,6 +407,9 @@ func TestArgoConfigurationContracts(t *testing.T) {
 		"Remove-StaleRootApplication -Revision $GitRevision",
 		"Refusing to replace stale steadystate-root because it has finalizers",
 		"delete application.argoproj.io steadystate-root -n argocd --wait=true --timeout=60s",
+		"Invoke-WithRetry -Description 'Encrypted platform secret bootstrap' -MaximumAttempts 5",
+		"Invoke-WithRetry -Description 'Ephemeral platform secret bootstrap' -MaximumAttempts 5",
+		"Invoke-WithRetry -Description 'Encrypted backup-store credential bootstrap' -MaximumAttempts 5",
 	} {
 		if !strings.Contains(gitopsScript, token) {
 			t.Errorf("GitOps bootstrap is missing bounded full-profile contract %q", token)

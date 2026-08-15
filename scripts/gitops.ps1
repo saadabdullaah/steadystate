@@ -395,11 +395,15 @@ function Invoke-Deploy {
     Invoke-External kubectl apply --server-side --force-conflicts -k $PlatformPath
     $localAgeKey = Join-Path $Root '.artifacts/secrets/steadystate.agekey'
     if ($env:SOPS_AGE_KEY -or (Test-Path -LiteralPath $localAgeKey -PathType Leaf)) {
-        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action Apply
-        if ($LASTEXITCODE -ne 0) { throw 'Encrypted platform secret bootstrap failed.' }
+        Invoke-WithRetry -Description 'Encrypted platform secret bootstrap' -MaximumAttempts 5 -Operation {
+            & (Join-Path $PSScriptRoot 'secrets.ps1') -Action Apply
+            if ($LASTEXITCODE -ne 0) { throw 'Encrypted platform secret bootstrap failed.' }
+        }
     } else {
-        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyEphemeral
-        if ($LASTEXITCODE -ne 0) { throw 'Ephemeral platform secret bootstrap failed.' }
+        Invoke-WithRetry -Description 'Ephemeral platform secret bootstrap' -MaximumAttempts 5 -Operation {
+            & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyEphemeral
+            if ($LASTEXITCODE -ne 0) { throw 'Ephemeral platform secret bootstrap failed.' }
+        }
     }
     Invoke-External kubectl rollout restart deployment/argocd-server -n argocd
     Invoke-External kubectl rollout restart statefulset/argocd-application-controller -n argocd
@@ -417,8 +421,10 @@ function Invoke-Deploy {
         if (-not $env:SOPS_AGE_KEY -and -not (Test-Path -LiteralPath $localAgeKey -PathType Leaf)) {
             throw 'The full profile requires SOPS_AGE_KEY or the ignored local age key to decrypt backup-store credentials.'
         }
-        & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyBackup
-        if ($LASTEXITCODE -ne 0) { throw 'Encrypted backup-store credential bootstrap failed.' }
+        Invoke-WithRetry -Description 'Encrypted backup-store credential bootstrap' -MaximumAttempts 5 -Operation {
+            & (Join-Path $PSScriptRoot 'secrets.ps1') -Action ApplyBackup
+            if ($LASTEXITCODE -ne 0) { throw 'Encrypted backup-store credential bootstrap failed.' }
+        }
     }
     Write-Host "Argo CD and the SteadyState GitOps root are deployed at revision '$GitRevision'."
 }
