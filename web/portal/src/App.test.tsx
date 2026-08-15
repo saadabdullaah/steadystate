@@ -27,6 +27,6 @@ describe("portal shell", () => {
     vi.stubGlobal("EventSource", class { onopen=()=>{};onerror=()=>{};addEventListener(){}close(){} });
     render(<App/>);
     expect(await screen.findByRole("navigation", {name:"Primary"})).toBeInTheDocument();
-    expect(screen.getByText("Local owner", { selector: ".mode" })).toBeInTheDocument();
+    expect(screen.getByText("Local owner console", { selector: ".mode" })).toBeInTheDocument();
   });
 });

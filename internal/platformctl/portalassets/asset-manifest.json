@@ -3,15 +3,15 @@
   "files": [
     {
       "name": "app.css",
-      "bytes": 21368,
-      "gzipBytes": 5313,
-      "sha256": "68b98c8b3c3222fbbcf7d5c8754ae55fc912af655726b091dc1c3a9b89b26542"
+      "bytes": 34340,
+      "gzipBytes": 7724,
+      "sha256": "85ce1110a5a891b7ee46535975a435112937a97cff835327fc6e6dde43b4b681"
     },
     {
       "name": "app.js",
-      "bytes": 229949,
-      "gzipBytes": 69540,
-      "sha256": "a4da23cb5d4ea885c8a3c2679bd8c6f8afe2473acdd1706809fbea1e34a2fb8b"
+      "bytes": 232791,
+      "gzipBytes": 70131,
+      "sha256": "0261900749a28ff552cfa511e8594dc68ba219e67ff4320ea71b6547ee189f40"
     },
     {
       "name": "index.html",
@@ -21,9 +21,9 @@
     }
   ],
   "budgets": {
-    "javascriptGzipBytes": 69540,
+    "javascriptGzipBytes": 70131,
     "javascriptLimitBytes": 256000,
-    "cssGzipBytes": 5313,
+    "cssGzipBytes": 7724,
     "cssLimitBytes": 81920
   }
 }

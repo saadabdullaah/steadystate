@@ -53,11 +53,12 @@ test.beforeEach(async ({ page }) => { await mockPortal(page); });
 
 test("portal exposes an accessible operational overview", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Everything steady, in one place" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "The platform is steady." })).toBeVisible();
   await expect(page.getByText("Healthy", { exact: true }).first()).toBeVisible();
   await page.addScriptTag({ content: axe.source });
   const results = await page.evaluate(async () => await (window as any).axe.run());
   expect(results.violations.filter(item => ["serious", "critical"].includes(item.impact ?? ""))).toEqual([]);
+  if (process.env.PORTAL_SCREENSHOT_PATH) await page.screenshot({ path: process.env.PORTAL_SCREENSHOT_PATH, fullPage: true });
 });
 
 test("primary navigation stays usable on mobile and dark theme", async ({ page }) => {
@@ -69,13 +70,28 @@ test("primary navigation stays usable on mobile and dark theme", async ({ page }
   await page.getByRole("button", { name: /payments/ }).click();
   await expect(page.getByRole("heading", { name: "payments" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  if (process.env.PORTAL_MOBILE_SCREENSHOT_PATH) await page.screenshot({ path: process.env.PORTAL_MOBILE_SCREENSHOT_PATH, fullPage: true });
 });
 
 test("keyboard shortcut focuses catalog search", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Everything steady, in one place" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "The platform is steady." })).toBeVisible();
   await page.keyboard.press("Control+K");
   await expect(page.getByLabel("Search catalog")).toBeFocused();
+});
+
+test("primary product surfaces preserve the editorial system", async ({ page }) => {
+  const surfaces = [
+    ["/services", "Services", "services"],
+    ["/changes", "Create a reviewed change", "changes"],
+    ["/requests", "Requests", "requests"],
+    ["/readiness", "Readiness", "readiness"]
+  ] as const;
+  for (const [path, heading, slug] of surfaces) {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    if (process.env.PORTAL_GALLERY_DIR) await page.screenshot({ path: resolve(process.env.PORTAL_GALLERY_DIR, `${slug}.png`), fullPage: true });
+  }
 });
 
 test("application diagnosis is curated instead of exposing raw objects", async ({ page }) => {
