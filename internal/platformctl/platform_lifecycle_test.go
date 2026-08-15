@@ -41,6 +41,13 @@ func TestResourceBudgetSupportsStandardButRejectsFullAtEightGiB(t *testing.T) {
 	}
 }
 
+func TestFullProfileAgeIdentityAcceptsEnvironmentCustody(t *testing.T) {
+	t.Setenv("SOPS_AGE_KEY", "present")
+	if !fullProfileAgeIdentityAvailable(t.TempDir() + "/missing") {
+		t.Fatal("environment-custodied identity was rejected")
+	}
+}
+
 func TestStageLogWriterStreamsRedactedCompleteLines(t *testing.T) {
 	var output bytes.Buffer
 	writer := newStageLogWriter(&output, &sync.Mutex{}, "tools")

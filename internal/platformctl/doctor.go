@@ -120,7 +120,7 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	checkGitHubNames := func(check, kind string, required []string) {
 		raw, err := runExternal(ctx, selected.CheckoutPath, "gh", kind, "list", "--repo", selected.Repository, "--json", "name")
 		if err != nil {
-			add(check, "Fail", "GitHub "+kind+" names could not be inspected", "Confirm repository access and gh authentication.")
+			add(check, "Warning", "GitHub "+kind+" names could not be inspected with the active token", "Confirm repository access or inspect the documented names in repository settings.")
 			return
 		}
 		names := decodeGitHubNames(raw)
@@ -176,6 +176,10 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	if selected.Profile == "full" {
 		for _, relative := range []string{".artifacts/secrets/steadystate.agekey", "gitops/secrets/backup-store.enc.yaml"} {
+			if relative == ".artifacts/secrets/steadystate.agekey" && fullProfileAgeIdentityAvailable(filepath.Join(selected.CheckoutPath, filepath.FromSlash(relative))) {
+				add("full-profile-"+filepath.Base(relative), "Pass", "age identity is available through the process environment; its value was not read", "")
+				continue
+			}
 			if _, err := os.Stat(filepath.Join(selected.CheckoutPath, filepath.FromSlash(relative))); err != nil {
 				add("full-profile-"+filepath.Base(relative), "Fail", "required ignored secret material is absent", "Restore the documented SOPS/age full-profile prerequisites.")
 			} else {
@@ -185,6 +189,14 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	sort.SliceStable(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
 	return checks
+}
+
+func fullProfileAgeIdentityAvailable(identityPath string) bool {
+	if strings.TrimSpace(os.Getenv("SOPS_AGE_KEY")) != "" {
+		return true
+	}
+	info, err := os.Stat(identityPath)
+	return err == nil && !info.IsDir()
 }
 
 func resourceBudgetCheck(profile string, available int64) DoctorCheck {

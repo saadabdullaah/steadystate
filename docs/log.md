@@ -13,7 +13,13 @@
   longer proceeds toward a predictable OOM failure below that boundary.
 - Rebased the Go toolchain and builder to the Go 1.25.13 security patch and
   removed the duplicate blocking `govulncheck` execution while preserving its
-  SARIF gate.
+  SARIF gate. The hosted security scan also advanced the generated web
+  lockfile from `nanoid` 3.3.17 to the fixed 3.3.18 release and declared the
+  demo builder change as patch version `v0.7.1`.
+- Made pinned Go detection immune to `GOTOOLCHAIN=auto` masquerading, accepted
+  environment-custodied SOPS identities without reading them, and kept
+  uninspectable repository secret-name metadata as an explicit warning rather
+  than a false missing-secret result under the scoped Actions token.
 - Reworked the embedded portal from generic cards/raw JSON into a compact
   SteadyState operations console with native rollout, SLO, log, trace, policy,
   diagnosis, and backup views. The hotfix PR and final workflow evidence are
