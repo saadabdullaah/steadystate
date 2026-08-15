@@ -87,7 +87,8 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	for _, tool := range tools {
 		if path, err := exec.LookPath(tool); err != nil {
-			add("tool-"+tool, "Fail", tool+" was not found", "Install "+tool+" and ensure it is on PATH.")
+			status, details, remediation := missingToolCheck(tool, selected.Profile)
+			add("tool-"+tool, status, details, remediation)
 		} else {
 			add("tool-"+tool, "Pass", path, "")
 		}
@@ -200,6 +201,13 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	}
 	sort.SliceStable(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
 	return checks
+}
+
+func missingToolCheck(tool, profile string) (string, string, string) {
+	if profile == "full" && (tool == "sops" || tool == "age") {
+		return "Warning", tool + " is not installed yet", "platformctl platform up installs the pinned repository-local " + tool + " tool before it is required."
+	}
+	return "Fail", tool + " was not found", "Install " + tool + " and ensure it is on PATH."
 }
 
 func fullProfileAgeIdentityAvailable(identityPath string) bool {

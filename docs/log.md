@@ -33,6 +33,9 @@
 - GitHub operations prefer the user-owned `~/.local/bin/gh` binary before the
   ambient PATH, preventing an older administrator-owned installation from
   silently overriding the checksum-verified `2.97.0` security baseline.
+- Fresh full-profile diagnostics treat not-yet-installed repository-local
+  `sops` and `age` binaries as bootstrap warnings while continuing to require
+  the owner-held age identity before any environment mutation.
 
 ## 2026-08-15 — GA fresh-install hardening
 

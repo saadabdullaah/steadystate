@@ -92,7 +92,10 @@ platformctl portal
 The installer verifies the release checksum and adds `platformctl` to the
 current process and user PATH. Use `--profile full` only after restoring the
 owner-held `.artifacts/secrets/steadystate.agekey`; the encrypted backup-store
-manifest stays committed, while its private identity never enters Git.
+manifest stays committed, while its private identity never enters Git. On a
+fresh full-profile clone, `doctor` reports missing repository-local `sops` and
+`age` binaries as warnings because `platform up` installs their pinned copies
+before decrypting anything.
 
 For foundation and operator contributors, the underlying commands remain
 available directly:

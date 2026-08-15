@@ -78,6 +78,19 @@ func TestSelectGitHubCLIFallsBackToPath(t *testing.T) {
 	}
 }
 
+func TestMissingFullProfileSecurityToolsAreBootstrapWarnings(t *testing.T) {
+	for _, tool := range []string{"sops", "age"} {
+		status, _, remediation := missingToolCheck(tool, "full")
+		if status != "Warning" || !strings.Contains(remediation, "platformctl platform up") {
+			t.Fatalf("%s status=%q remediation=%q", tool, status, remediation)
+		}
+	}
+	status, _, _ := missingToolCheck("docker", "full")
+	if status != "Fail" {
+		t.Fatalf("Docker missing status=%q, want Fail", status)
+	}
+}
+
 func TestPlatformUpPreflightBlockingBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name     string
