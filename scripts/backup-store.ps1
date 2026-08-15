@@ -97,8 +97,12 @@ function Assert-SubnetAvailable {
 
 function Connect-ClusterNodes {
     if (-not (Get-Command kind -ErrorAction SilentlyContinue)) { return }
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $nodes = @(& kind get nodes --name $ClusterName 2>$null)
-    if ($LASTEXITCODE -ne 0) { return }
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($exitCode -ne 0) { return }
     foreach ($node in $nodes) {
         if ($node -notmatch "^$([regex]::Escape($ClusterName))-(control-plane|worker[0-9]*)$") {
             throw "Refusing to connect unexpected container '$node' to the backup network."
@@ -113,8 +117,12 @@ function Connect-ClusterNodes {
 
 function Disconnect-ClusterNodes {
     if (-not (Get-Command kind -ErrorAction SilentlyContinue)) { return }
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $nodes = @(& kind get nodes --name $ClusterName 2>$null)
-    if ($LASTEXITCODE -ne 0) { return }
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($exitCode -ne 0) { return }
     foreach ($node in $nodes) {
         if ($node -notmatch "^$([regex]::Escape($ClusterName))-(control-plane|worker[0-9]*)$") {
             throw "Refusing to disconnect unexpected container '$node' from the backup network."

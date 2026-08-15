@@ -43,6 +43,14 @@ kubectl get pods -n envoy-gateway-system
 kubectl get events -A --sort-by=.lastTimestamp
 ```
 
+On a cold Windows/Docker Desktop bootstrap, SteadyState pulls the frozen Envoy
+Gateway image through the host engine, verifies its repository digest, and
+imports only `linux/amd64` into each kind node before Helm runs. This avoids a
+known failure mode where an in-node registry pull remains in
+`ContainerCreating`, and avoids kind's all-platform import path for OCI indexes
+with detached attestation manifests. The ignored archive is cached under
+`.artifacts/images/`; rerunning `platform up` is safe.
+
 ## Partial bootstrap
 
 Bootstrap retains a failed cluster and writes diagnostics under `.artifacts/diagnostics/`. Correct the cause and rerun bootstrap; the operation reconciles existing state.

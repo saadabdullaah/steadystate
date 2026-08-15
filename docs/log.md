@@ -1004,3 +1004,19 @@
   building any archive because GoReleaser's publishing step had not received
   `GITHUB_TOKEN`. The tag step now maps the job-scoped token explicitly, and
   the GitOps contract suite prevents removing that tag-only requirement.
+
+## v1.0.1 fresh-install hardening
+
+- A clean Windows minimal-profile run on 2026-08-15 proved the prerequisite,
+  pinned-tool, image-build, and Kubernetes 1.35.5/Calico path, then exposed an
+  Envoy Gateway cold-start failure: the kind node's direct Docker Hub pull
+  remained in `ContainerCreating` beyond Helm's five-minute hook timeout even
+  though the host Docker engine fetched the exact image in 25 seconds.
+- Bootstrap now pulls Envoy Gateway `v1.8.0` through the host engine, verifies
+  digest `sha256:a9b4c4d8a402e8c007b74f2796587a6fb33d8baba46094f17c8a6f233e46d609`,
+  and imports only the Linux AMD64 image into each exact kind node before Helm.
+  This also avoids kind 0.32's `--all-platforms` import failure for the image's
+  OCI attestation index. Helm retains a bounded ten-minute fallback.
+- Backup-store node discovery now treats an already-absent kind cluster as an
+  idempotent stop condition under Windows PowerShell 5.1, so `platform down`
+  still removes the exact SeaweedFS resources while retaining its named volume.

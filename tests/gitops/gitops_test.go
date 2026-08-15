@@ -944,6 +944,19 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		!strings.Contains(installTools, "Failed to install $Name $Version after 4 attempts") {
 		t.Fatal("PowerShell Go tool installation must tolerate transient module proxy failures with bounded retries")
 	}
+	devScript := string(readFile(t, filepath.Join(root, "scripts", "dev.ps1")))
+	for _, contract := range []string{
+		"function Import-KindImageFromDocker",
+		"docker pull --platform linux/amd64 $Image",
+		"docker image inspect $Image --format '{{range .RepoDigests}}{{println .}}{{end}}'",
+		"ctr --namespace=k8s.io images import --platform linux/amd64",
+		"Import-KindImageFromDocker -Image $envoyImage",
+		"--wait --timeout 10m",
+	} {
+		if !strings.Contains(devScript, contract) {
+			t.Fatalf("minimal bootstrap is missing the pinned Envoy preload contract %q", contract)
+		}
+	}
 	phase7Foundation := string(readFile(t, filepath.Join(root, "scripts", "phase7-foundation.ps1")))
 	if !strings.Contains(phase7Foundation, "Wait-ArgoApplicationsHealthy @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')") ||
 		strings.Contains(phase7Foundation, `Invoke-Kubectl wait -n argocd "--for=jsonpath={.status.health.status}=Healthy"`) {
@@ -1006,6 +1019,11 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	}
 	if strings.Contains(backupStore, `{{"\n"}}`) || strings.Contains(backupStore, "index .NetworkSettings.Networks") {
 		t.Fatal("SeaweedFS lifecycle must parse docker inspect JSON instead of relying on PowerShell-sensitive quoted Go templates")
+	}
+	for _, contract := range []string{"$ErrorActionPreference = 'Continue'", "$exitCode = $LASTEXITCODE", "if ($exitCode -ne 0) { return }"} {
+		if strings.Count(backupStore, contract) < 2 {
+			t.Fatalf("SeaweedFS node discovery must tolerate an absent kind cluster using %q", contract)
+		}
 	}
 	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
 	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline -DisableTenantWorkloads -DisableMonitoringStateMetrics") ||
