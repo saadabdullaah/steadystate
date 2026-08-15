@@ -483,6 +483,19 @@ function Invoke-Test {
     foreach ($name in $applicationNames) {
         Add-PassedCheck $checks "argocd-application-$name-healthy" $started "$name is Synced and Healthy."
     }
+    if ($isMinimal) {
+        $optionalApplications = @('monitoring','argo-rollouts','loki','tempo','otel-collector','alloy','kyverno','kyverno-policies','payments','data-namespaces','local-path-storage','cert-manager','cloudnative-pg','barman-cloud')
+        foreach ($name in $optionalApplications) {
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $found = & kubectl get application.argoproj.io $name -n argocd --ignore-not-found=true -o name 2>$null
+            $exitCode = $LASTEXITCODE
+            $ErrorActionPreference = $previousPreference
+            if ($exitCode -ne 0) { throw "Failed to verify that optional Argo Application $name is absent." }
+            if ($found) { throw "Minimal profile retained unexpected optional Argo Application $name." }
+        }
+        Add-PassedCheck $checks 'minimal-profile-optional-applications-absent' (Get-Date) 'Every standard/full optional Argo child is absent.'
+    }
 
     $started = Get-Date
     Wait-ArgoRoute

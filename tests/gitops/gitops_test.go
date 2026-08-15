@@ -815,6 +815,8 @@ func TestMinimalProfileRendersOnlyCoreApplications(t *testing.T) {
 		"$progressiveDelivery = if ($isMinimal) { 'false' } else { 'true' }",
 		"$tenantWorkloads = if ($DisableTenantWorkloads -or $isMinimal) { 'false' } else { 'true' }",
 		"minimal-profile-core-only",
+		"minimal-profile-optional-applications-absent",
+		"Minimal profile retained unexpected optional Argo Application",
 	} {
 		if !strings.Contains(gitopsScript, contract) {
 			t.Errorf("minimal profile mapping is missing %q", contract)
