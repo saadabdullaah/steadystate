@@ -36,6 +36,28 @@ func TestDemoVersionContract(t *testing.T) {
 	}
 }
 
+func TestPlatformctlPatchReleaseContract(t *testing.T) {
+	root := repositoryRoot(t)
+	version := "v1.0.1"
+	contracts := map[string][]string{
+		"internal/platformctl/portal.go":          {`const portalVersion = "` + version + `"`},
+		"scripts/install-platformctl.ps1":         {`$Version = '` + version + `'`},
+		"scripts/install-platformctl.sh":          {`PLATFORMCTL_VERSION:-` + version},
+		".github/workflows/phase9.yml":            {`main.version=` + version},
+		".github/workflows/platformctl-smoke.yml": {"release_version:", "INSTALLER_RELEASE_VERSION", "Verify released installer", version},
+		"docs/cli/README.md":                      {version},
+		"docs/cli/operations.md":                  {`refs/tags/` + version, `platformctl_1.0.1_windows_amd64.zip`},
+	}
+	for path, tokens := range contracts {
+		content := read(t, filepath.Join(root, filepath.FromSlash(path)))
+		for _, token := range tokens {
+			if !strings.Contains(content, token) {
+				t.Errorf("%s is missing patch-release contract %q", path, token)
+			}
+		}
+	}
+}
+
 func TestDemoReleaseWorkflowContract(t *testing.T) {
 	root := repositoryRoot(t)
 	workflow := read(t, filepath.Join(root, ".github", "workflows", "demo-release.yml"))

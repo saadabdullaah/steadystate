@@ -1,5 +1,28 @@
 # Engineering Log
 
+## 2026-08-15 - v1.0.1 release closeout
+
+- Squash-merged fresh-install hardening PR #111 as
+  `cf3d8d53d89c296a0311c04b8819327f52772c59`. Its branch Phase 9 run
+  `31888881140` retained artifact `9248286391`; the hosted GIF SHA-256 is
+  `d7d47a04d24181f0ad76e5489b08ca39eef84eb553593e5c646338dc11aa7797`.
+- Main-branch release runs `31891413953` and `31891413957` published signed,
+  SPDX-attested `xyz v0.1.2` and demo `v0.7.1` images. App-authored delivery
+  PR #118 merged as `ea6b41ed803372962abf8c0eb6d6b7bff9811a7d`; PR #119 merged as final
+  delivery commit `5651068c83328fac22f4e4c12d6ee05b7ed44328`.
+- Exact-main CI `31894424108`, parallel CodeQL `31894424105`, Nightly
+  `31894456291`, Phase 4 `31894459297`, Phase 5 `31894457290`, Phase 6
+  `31894457665`, Phase 7 `31894459604`, Phase 8 `31894459267`, Phase 9
+  `31894459919`, and platformctl smoke `31894457361` all passed.
+- Retained exact-main artifacts: Phase 1 `9249504549`, Phase 2 `9249518003`,
+  Phase 3 `9249593065`, Phase 4 `9249722844`, Phase 5 `9249570963`, Phase 6
+  `9249561710`, Phase 7 `9249802709`, Phase 8 `9249645903`, Phase 9
+  `9249663392`, and release snapshot `9249469874`.
+- The `v1.0.1` closeout updates installer defaults, portal version metadata,
+  consumer verification examples, and cross-platform released-installer
+  smoke. Publication remains gated on the closeout PR and exact release-commit
+  validation.
+
 ## 2026-08-15 — GA fresh-install hardening
 
 - Reproduced the first external Windows installation path and corrected the
