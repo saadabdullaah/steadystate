@@ -816,6 +816,9 @@ func TestMinimalProfileRendersOnlyCoreApplications(t *testing.T) {
 		"$tenantWorkloads = if ($DisableTenantWorkloads -or $isMinimal) { 'false' } else { 'true' }",
 		"minimal-profile-core-only",
 		"minimal-profile-optional-applications-absent",
+		"function Protect-MinimalProfilePrune",
+		"resources-finalizer.argocd.argoproj.io/background",
+		"minimal-profile-optional-pods-absent",
 		"Minimal profile retained unexpected optional Argo Application",
 	} {
 		if !strings.Contains(gitopsScript, contract) {

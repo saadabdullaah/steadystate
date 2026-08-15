@@ -59,7 +59,10 @@ The `minimal` profile deliberately deploys only Argo CD, its configuration,
 the SteadyState operator, Gateway, and core CRDs. It omits tenant workloads,
 Rollouts/Prometheus, telemetry, Kyverno, and the data stack. Use `standard` for
 the complete non-database product experience and `full` for PostgreSQL and
-recovery.
+recovery. When changing an existing standard/full cluster to `minimal`, the
+deploy contract adds Argo's background cascade finalizer to each optional child
+before the root prunes it, and readiness requires both the child Applications
+and their Pods to be gone.
 
 ## Operator deployment is unavailable
 

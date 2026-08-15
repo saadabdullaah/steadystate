@@ -365,6 +365,29 @@ function Remove-StaleRootApplication {
     Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --wait=true --timeout=60s
 }
 
+function Protect-MinimalProfilePrune {
+    if ($Profile -ne 'minimal') { return }
+    $finalizer = 'resources-finalizer.argocd.argoproj.io/background'
+    $optionalApplications = @('monitoring','argo-rollouts','loki','tempo','otel-collector','alloy','kyverno','kyverno-policies','payments','data-namespaces','local-path-storage','cert-manager','cloudnative-pg','barman-cloud')
+    foreach ($name in $optionalApplications) {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $json = @(& kubectl --request-timeout=10s get application.argoproj.io $name -n argocd -o json 2>$null)
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($exitCode -ne 0 -or -not $json) { continue }
+
+        $application = (($json -join [Environment]::NewLine) | ConvertFrom-Json)
+        $finalizers = @($application.metadata.finalizers | Where-Object { $_ })
+        if ($finalizers -contains $finalizer) { continue }
+        $finalizers += $finalizer
+        $patchPath = Join-Path $ArtifactRoot "minimal-prune-$name.json"
+        $patch = [ordered]@{ metadata = [ordered]@{ finalizers = $finalizers } }
+        Write-Utf8 -Path $patchPath -Content (($patch | ConvertTo-Json -Depth 4) + [Environment]::NewLine)
+        Invoke-External kubectl patch application.argoproj.io $name -n argocd --type=merge --patch-file $patchPath
+    }
+}
+
 function Test-ArgoHttp {
     param([int]$TimeoutSeconds = 90)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -417,6 +440,7 @@ function Invoke-Deploy {
     Render-RootTemplate -Template 'templates/projects.yaml.tpl' -Path $projects
     Render-RootTemplate -Template 'templates/root-application.yaml.tpl' -Path $rootApplication -BootstrapRoot
     Invoke-External kubectl apply -f $projects
+    Protect-MinimalProfilePrune
     Remove-StaleRootApplication -Revision $GitRevision
     Invoke-External kubectl apply -f $rootApplication
     if ($Profile -eq 'full') {
@@ -495,6 +519,16 @@ function Invoke-Test {
             if ($found) { throw "Minimal profile retained unexpected optional Argo Application $name." }
         }
         Add-PassedCheck $checks 'minimal-profile-optional-applications-absent' (Get-Date) 'Every standard/full optional Argo child is absent.'
+        foreach ($namespace in @('monitoring','argo-rollouts','kyverno','cnpg-system','cert-manager')) {
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $pods = @(& kubectl get pods -n $namespace --ignore-not-found=true -o name 2>$null)
+            $exitCode = $LASTEXITCODE
+            $ErrorActionPreference = $previousPreference
+            if ($exitCode -ne 0) { throw "Failed to verify optional Pod absence in namespace $namespace." }
+            if ($pods.Count -gt 0) { throw "Minimal profile retained optional Pods in namespace $namespace`: $($pods -join ', ')." }
+        }
+        Add-PassedCheck $checks 'minimal-profile-optional-pods-absent' (Get-Date) 'Every optional add-on namespace contains zero Pods.'
     }
 
     $started = Get-Date

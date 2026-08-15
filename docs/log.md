@@ -1026,3 +1026,8 @@
   Gateway, and CRDs remain; tenant workloads, Rollouts/Prometheus, telemetry,
   Kyverno, and data add-ons are omitted. Standard and full renders are
   unchanged.
+- Minimal downgrade now prepares every optional Argo child with the background
+  resource finalizer before root reconciliation. The live readiness gate
+  rejects both lingering child Applications and lingering optional Pods, which
+  prevents an apparently green minimal profile from retaining the resource
+  footprint of an earlier standard/full run.
