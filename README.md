@@ -68,7 +68,7 @@ The repository is a monorepo. Operator APIs and controllers live alongside the C
 
   | Profile | Minimum | Use it for |
   |---|---:|---|
-  | `minimal` | 4 GiB | Foundation and focused controller development |
+  | `minimal` | 4 GiB | Core Argo/operator foundation and focused controller development; omits tenant workloads and all optional add-ons |
   | `standard` | 7 GiB | Recommended local product experience: portal, GitOps, delivery, policy, and observability |
   | `full` | 9 GiB | Standard plus PostgreSQL, external backups, and disaster recovery |
 

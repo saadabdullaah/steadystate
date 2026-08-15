@@ -739,13 +739,14 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 8 {
+	if len(parameters) != 9 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
 		"gitRevision":                       "$ARGOCD_APP_REVISION",
 		"enableTelemetryPipeline":           "true",
 		"enableSecurity":                    "true",
+		"enableProgressiveDelivery":         "true",
 		"enableDataFoundation":              "false",
 		"enableTenantWorkloads":             "true",
 		"tenantFilter":                      "xyz",
@@ -776,6 +777,49 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	}
 	assertString(t, rootApplication, "5s", "spec", "syncPolicy", "retry", "backoff", "duration")
 	assertString(t, rootApplication, "30s", "spec", "syncPolicy", "retry", "backoff", "maxDuration")
+}
+
+func TestMinimalProfileRendersOnlyCoreApplications(t *testing.T) {
+	root := repositoryRoot(t)
+	rendered := run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--set", "enableProgressiveDelivery=false",
+		"--set", "enableTelemetryPipeline=false",
+		"--set", "enableSecurity=false",
+		"--set", "enableTenantWorkloads=false",
+		"--show-only", "templates/applications.yaml.tpl",
+	)
+	applications := map[string]bool{}
+	for _, object := range decodeManifests(t, rendered) {
+		if objectString(object, "kind") == "Application" {
+			applications[objectString(object, "metadata", "name")] = true
+		}
+	}
+	for _, required := range []string{"argocd-configuration", "steadystate-operator"} {
+		if !applications[required] {
+			t.Errorf("minimal profile is missing core Application %q", required)
+		}
+	}
+	for _, forbidden := range []string{"monitoring", "argo-rollouts", "loki", "tempo", "otel-collector", "alloy", "kyverno", "kyverno-policies", "payments", "data-namespaces", "cloudnative-pg"} {
+		if applications[forbidden] {
+			t.Errorf("minimal profile rendered optional Application %q", forbidden)
+		}
+	}
+	if len(applications) != 2 {
+		t.Fatalf("minimal profile rendered unexpected Applications: %v", applications)
+	}
+
+	gitopsScript := string(readFile(t, filepath.Join(root, "scripts", "gitops.ps1")))
+	for _, contract := range []string{
+		"$isMinimal = $Profile -eq 'minimal'",
+		"$progressiveDelivery = if ($isMinimal) { 'false' } else { 'true' }",
+		"$tenantWorkloads = if ($DisableTenantWorkloads -or $isMinimal) { 'false' } else { 'true' }",
+		"minimal-profile-core-only",
+	} {
+		if !strings.Contains(gitopsScript, contract) {
+			t.Errorf("minimal profile mapping is missing %q", contract)
+		}
+	}
 }
 
 func TestGitOpsCommandsAreMirrored(t *testing.T) {

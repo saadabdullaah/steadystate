@@ -55,6 +55,12 @@ with detached attestation manifests. The ignored archive is cached under
 
 Bootstrap retains a failed cluster and writes diagnostics under `.artifacts/diagnostics/`. Correct the cause and rerun bootstrap; the operation reconciles existing state.
 
+The `minimal` profile deliberately deploys only Argo CD, its configuration,
+the SteadyState operator, Gateway, and core CRDs. It omits tenant workloads,
+Rollouts/Prometheus, telemetry, Kyverno, and the data stack. Use `standard` for
+the complete non-database product experience and `full` for PostgreSQL and
+recovery.
+
 ## Operator deployment is unavailable
 
 ```powershell

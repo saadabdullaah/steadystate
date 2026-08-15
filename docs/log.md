@@ -1020,3 +1020,9 @@
 - Backup-store node discovery now treats an already-absent kind cluster as an
   idempotent stop condition under Windows PowerShell 5.1, so `platform down`
   still removes the exact SeaweedFS resources while retaining its named volume.
+- The same fresh-clone exercise found that `minimal` previously changed only
+  kind topology while still rendering every standard-profile Argo child. The
+  profile now has a truthful core-only contract: Argo configuration, operator,
+  Gateway, and CRDs remain; tenant workloads, Rollouts/Prometheus, telemetry,
+  Kyverno, and data add-ons are omitted. Standard and full renders are
+  unchanged.

@@ -4,6 +4,7 @@ bootstrapRoot: false
 rootTargetRevision: main
 enableTelemetryPipeline: true
 enableSecurity: true
+enableProgressiveDelivery: true
 enableDataFoundation: false
 enableTenantWorkloads: true
 tenantFilter: ""

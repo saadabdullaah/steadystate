@@ -18,6 +18,7 @@ spec:
     automated:
       prune: true
       selfHeal: true
+{{- if .Values.enableProgressiveDelivery }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -83,6 +84,7 @@ spec:
     automated:
       prune: true
       selfHeal: true
+{{- end }}
 {{- if .Values.enableTelemetryPipeline }}
 ---
 apiVersion: argoproj.io/v1alpha1
