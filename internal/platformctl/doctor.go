@@ -81,7 +81,7 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 		add("checkout", "Pass", selected.CheckoutPath, "")
 	}
 
-	tools := []string{"git", "gh", "docker"}
+	tools := []string{"git", "docker"}
 	if selected.Profile == "full" {
 		tools = append(tools, "sops", "age")
 	}
@@ -91,6 +91,12 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 		} else {
 			add("tool-"+tool, "Pass", path, "")
 		}
+	}
+	githubCLI := githubCLIExecutable()
+	if path, err := exec.LookPath(githubCLI); err != nil {
+		add("tool-gh", "Fail", "gh was not found", "Install GitHub CLI and ensure it is on PATH or in ~/.local/bin.")
+	} else {
+		add("tool-gh", "Pass", path, "")
 	}
 	if path, err := powerShellExecutable(); err != nil {
 		add("tool-pwsh", "Fail", ErrorMessage(err), "Install PowerShell 7, or use Windows PowerShell 5.1 on Windows, and ensure it is on PATH.")
@@ -355,6 +361,9 @@ func newClusterLifecycleCommand(options *Options, name, scriptCommand string) *c
 }
 
 func runExternal(ctx context.Context, directory, executable string, arguments ...string) (string, error) {
+	if base := strings.ToLower(filepath.Base(executable)); base == "gh" || base == "gh.exe" {
+		executable = githubCLIExecutable()
+	}
 	switch strings.ToLower(filepath.Base(executable)) {
 	case "git", "git.exe", "gh", "gh.exe", "docker", "docker.exe", "kubectl", "kubectl.exe", "pwsh", "pwsh.exe", "powershell", "powershell.exe":
 	default:
@@ -377,4 +386,34 @@ func runExternal(ctx context.Context, directory, executable string, arguments ..
 		return "", fmt.Errorf("%s", Redact(message))
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+func githubCLIExecutable() string {
+	home, _ := os.UserHomeDir()
+	localAppData := os.Getenv("LOCALAPPDATA")
+	return selectGitHubCLIExecutable(runtime.GOOS, home, localAppData, func(path string) bool {
+		info, err := os.Stat(path)
+		return err == nil && !info.IsDir()
+	}, exec.LookPath)
+}
+
+func selectGitHubCLIExecutable(goos, home, localAppData string, exists func(string) bool, lookPath func(string) (string, error)) string {
+	name := "gh"
+	candidates := []string{filepath.Join(home, ".local", "bin", name)}
+	if goos == "windows" {
+		name = "gh.exe"
+		candidates = []string{
+			filepath.Join(home, ".local", "bin", name),
+			filepath.Join(localAppData, "Programs", "GitHub CLI", name),
+		}
+	}
+	for _, candidate := range candidates {
+		if candidate != "" && exists(candidate) {
+			return candidate
+		}
+	}
+	if executable, err := lookPath(name); err == nil {
+		return executable
+	}
+	return name
 }

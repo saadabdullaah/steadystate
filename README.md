@@ -59,6 +59,8 @@ The repository is a monorepo. Operator APIs and controllers live alongside the C
   executable with a process-scoped execution-policy bypass for the fixed,
   repository-owned lifecycle scripts.
 - GitHub CLI `2.97.0` or newer, authenticated to the repository account.
+  SteadyState prefers a verified `~/.local/bin/gh` installation over an older
+  machine-wide binary when both exist.
 - Git for Windows.
 - Docker Desktop using Linux containers and its WSL2 backend.
 - Docker Engine 24 or newer with cgroup v2 enabled.

@@ -30,6 +30,9 @@
 - The checksum-verifying Windows installer now makes its resolved install
   directory available in the current process and persistent user PATH, with
   `-NoPathUpdate` available for isolated or portable installations.
+- GitHub operations prefer the user-owned `~/.local/bin/gh` binary before the
+  ambient PATH, preventing an older administrator-owned installation from
+  silently overriding the checksum-verified `2.97.0` security baseline.
 
 ## 2026-08-15 — GA fresh-install hardening
 

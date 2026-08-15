@@ -58,6 +58,26 @@ func TestWindowsPowerShellArgumentsBypassOnlyFixedScriptPolicy(t *testing.T) {
 	}
 }
 
+func TestSelectGitHubCLIPrefersVerifiedUserInstallation(t *testing.T) {
+	home := `C:\Users\developer`
+	localAppData := `C:\Users\developer\AppData\Local`
+	userCLI := `C:\Users\developer\.local\bin\gh.exe`
+	pathCLI := `C:\Program Files\GitHub CLI\gh.exe`
+	exists := func(path string) bool { return path == userCLI }
+	lookPath := func(string) (string, error) { return pathCLI, nil }
+	if got := selectGitHubCLIExecutable("windows", home, localAppData, exists, lookPath); got != userCLI {
+		t.Fatalf("executable=%q, want verified user installation %q", got, userCLI)
+	}
+}
+
+func TestSelectGitHubCLIFallsBackToPath(t *testing.T) {
+	want := "/usr/local/bin/gh"
+	lookPath := func(string) (string, error) { return want, nil }
+	if got := selectGitHubCLIExecutable("linux", "/home/developer", "", func(string) bool { return false }, lookPath); got != want {
+		t.Fatalf("executable=%q, want PATH installation %q", got, want)
+	}
+}
+
 func TestPlatformUpPreflightBlockingBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name     string
