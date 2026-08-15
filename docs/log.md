@@ -22,6 +22,14 @@
   consumer verification examples, and cross-platform released-installer
   smoke. Publication remains gated on the closeout PR and exact release-commit
   validation.
+- Fresh Windows lifecycle commands now prefer PowerShell 7 but fall back to
+  the built-in Windows PowerShell 5.1 executable. The fallback applies a
+  process-scoped execution-policy bypass only to the fixed repository-owned
+  lifecycle script, removing an undocumented `pwsh` prerequisite without
+  changing machine policy.
+- The checksum-verifying Windows installer now makes its resolved install
+  directory available in the current process and persistent user PATH, with
+  `-NoPathUpdate` available for isolated or portable installations.
 
 ## 2026-08-15 — GA fresh-install hardening
 

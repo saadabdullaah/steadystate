@@ -2,10 +2,61 @@ package platformctl
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 )
+
+func TestSelectPowerShellExecutable(t *testing.T) {
+	lookPath := func(available map[string]string) func(string) (string, error) {
+		return func(name string) (string, error) {
+			if path, ok := available[name]; ok {
+				return path, nil
+			}
+			return "", errors.New("not found")
+		}
+	}
+
+	for _, test := range []struct {
+		name      string
+		goos      string
+		available map[string]string
+		want      string
+		wantError bool
+	}{
+		{name: "prefers PowerShell 7", goos: "windows", available: map[string]string{"pwsh": `C:\\Program Files\\PowerShell\\7\\pwsh.exe`, "powershell.exe": `C:\\Windows\\powershell.exe`}, want: `C:\\Program Files\\PowerShell\\7\\pwsh.exe`},
+		{name: "uses Windows PowerShell fallback", goos: "windows", available: map[string]string{"powershell.exe": `C:\\Windows\\powershell.exe`}, want: `C:\\Windows\\powershell.exe`},
+		{name: "requires pwsh on Linux", goos: "linux", available: map[string]string{"powershell.exe": "/unsupported"}, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := selectPowerShellExecutable(test.goos, lookPath(test.available))
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("expected an error, got executable %q", got)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("executable=%q err=%v, want %q", got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestWindowsPowerShellArgumentsBypassOnlyFixedScriptPolicy(t *testing.T) {
+	arguments := []string{"-NoProfile", "-File", `D:\\SteadyState\\scripts\\dev.ps1`, "bootstrap"}
+	got := powerShellArguments(`C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, arguments)
+	want := []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", `D:\\SteadyState\\scripts\\dev.ps1`, "bootstrap"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("arguments=%q, want %q", got, want)
+	}
+
+	pwsh := powerShellArguments("pwsh", arguments)
+	if strings.Join(pwsh, "|") != strings.Join(arguments, "|") {
+		t.Fatalf("pwsh arguments changed: %q", pwsh)
+	}
+}
 
 func TestPlatformUpPreflightBlockingBoundary(t *testing.T) {
 	for _, test := range []struct {
@@ -17,7 +68,7 @@ func TestPlatformUpPreflightBlockingBoundary(t *testing.T) {
 		{name: "full-profile-steadystate.agekey", blocking: true},
 		{name: "tool-sops", blocking: false},
 		{name: "tool-age", blocking: false},
-		{name: "github-cli-version", blocking: false},
+		{name: "github-cli-version", blocking: true},
 		{name: "kubernetes", blocking: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {

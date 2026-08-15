@@ -41,7 +41,7 @@ func TestPlatformctlPatchReleaseContract(t *testing.T) {
 	version := "v1.0.1"
 	contracts := map[string][]string{
 		"internal/platformctl/portal.go":          {`const portalVersion = "` + version + `"`},
-		"scripts/install-platformctl.ps1":         {`$Version = '` + version + `'`},
+		"scripts/install-platformctl.ps1":         {`$Version = '` + version + `'`, "$NoPathUpdate", "SetEnvironmentVariable('Path'"},
 		"scripts/install-platformctl.sh":          {`PLATFORMCTL_VERSION:-` + version},
 		".github/workflows/phase9.yml":            {`main.version=` + version},
 		".github/workflows/platformctl-smoke.yml": {"workflow_dispatch:", "INSTALLER_RELEASE_VERSION", "github.event_name == 'pull_request'", "Verify released installer", version},

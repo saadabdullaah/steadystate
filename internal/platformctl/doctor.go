@@ -81,7 +81,7 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 		add("checkout", "Pass", selected.CheckoutPath, "")
 	}
 
-	tools := []string{"git", "gh", "docker", "pwsh"}
+	tools := []string{"git", "gh", "docker"}
 	if selected.Profile == "full" {
 		tools = append(tools, "sops", "age")
 	}
@@ -91,6 +91,11 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 		} else {
 			add("tool-"+tool, "Pass", path, "")
 		}
+	}
+	if path, err := powerShellExecutable(); err != nil {
+		add("tool-pwsh", "Fail", ErrorMessage(err), "Install PowerShell 7, or use Windows PowerShell 5.1 on Windows, and ensure it is on PATH.")
+	} else {
+		add("tool-pwsh", "Pass", path, "")
 	}
 	if _, err := runExternal(ctx, selected.CheckoutPath, "git", "rev-parse", "--show-toplevel"); err != nil {
 		add("git-repository", "Fail", err.Error(), "Restore or re-clone the configured checkout.")
@@ -329,7 +334,12 @@ func newClusterLifecycleCommand(options *Options, name, scriptCommand string) *c
 			ctx, cancel := options.commandContext(cmd.Context())
 			defer cancel()
 			arguments := []string{"-NoProfile", "-File", filepath.Join(selected.CheckoutPath, "scripts", "dev.ps1"), scriptCommand, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort)}
-			process := exec.Command("pwsh", arguments...)
+			powerShell, shellErr := powerShellExecutable()
+			if shellErr != nil {
+				return shellErr
+			}
+			// #nosec G204 -- executable is resolved only from the fixed pwsh/Windows PowerShell allowlist.
+			process := exec.Command(powerShell, powerShellArguments(powerShell, arguments)...)
 			process.Dir = selected.CheckoutPath
 			process.Stdout = options.Stdout
 			process.Stderr = options.Stderr
@@ -345,8 +355,8 @@ func newClusterLifecycleCommand(options *Options, name, scriptCommand string) *c
 }
 
 func runExternal(ctx context.Context, directory, executable string, arguments ...string) (string, error) {
-	switch executable {
-	case "git", "gh", "docker", "kubectl", "pwsh":
+	switch strings.ToLower(filepath.Base(executable)) {
+	case "git", "git.exe", "gh", "gh.exe", "docker", "docker.exe", "kubectl", "kubectl.exe", "pwsh", "pwsh.exe", "powershell", "powershell.exe":
 	default:
 		return "", fmt.Errorf("unsupported prerequisite executable %q", executable)
 	}

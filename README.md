@@ -54,7 +54,11 @@ The repository is a monorepo. Operator APIs and controllers live alongside the C
 
 ## Requirements
 
-- Windows 10/11 with PowerShell 5.1 or newer.
+- Windows 10/11 with Windows PowerShell 5.1 or PowerShell 7. The CLI prefers
+  `pwsh` when installed and otherwise uses the built-in Windows PowerShell
+  executable with a process-scoped execution-policy bypass for the fixed,
+  repository-owned lifecycle scripts.
+- GitHub CLI `2.97.0` or newer, authenticated to the repository account.
 - Git for Windows.
 - Docker Desktop using Linux containers and its WSL2 backend.
 - Docker Engine 24 or newer with cgroup v2 enabled.
@@ -76,16 +80,27 @@ Go, kind, kubectl, and Helm do not need global installation. SteadyState downloa
 ```powershell
 git clone https://github.com/saadabdullaah/steadystate.git
 cd steadystate
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-platformctl.ps1
+platformctl config init --checkout . --profile standard
+platformctl doctor
+platformctl platform up
+platformctl portal
+```
+
+The installer verifies the release checksum and adds `platformctl` to the
+current process and user PATH. Use `--profile full` only after restoring the
+owner-held `.artifacts/secrets/steadystate.agekey`; the encrypted backup-store
+manifest stays committed, while its private identity never enters Git.
+
+For foundation and operator contributors, the underlying commands remain
+available directly:
+
+```powershell
 .\scripts\dev.ps1 doctor
 .\scripts\dev.ps1 tools
 .\scripts\dev.ps1 check-versions
 .\scripts\dev.ps1 test
 .\scripts\dev.ps1 bootstrap -Profile minimal
-```
-
-After bootstrap:
-
-```powershell
 Invoke-WebRequest http://127.0.0.1:8080/healthz
 .\scripts\dev.ps1 smoke
 .\scripts\dev.ps1 test-network-policy

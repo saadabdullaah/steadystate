@@ -11,6 +11,11 @@ and ARM64. Windows archives use ZIP; Linux and macOS use `tar.gz`.
 platformctl version --output json
 ```
 
+The Windows installer adds its install directory to the current process and
+the user PATH, so `platformctl` works without an explicit executable path in
+the current and future terminals. Pass `-NoPathUpdate` only for isolated CI or
+portable installations.
+
 ## Linux and macOS
 
 ```sh

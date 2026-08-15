@@ -283,7 +283,13 @@ func newDevCommand(options *Options) *cobra.Command {
 		}
 		if bootstrap {
 			ctx, cancel := options.commandContext(cmd.Context())
-			_, err = runExternal(ctx, selected.CheckoutPath, "pwsh", "-NoProfile", "-File", filepath.Join(selected.CheckoutPath, "scripts", "dev.ps1"), "bootstrap", "-Profile", selected.Profile)
+			powerShell, shellErr := powerShellExecutable()
+			if shellErr != nil {
+				cancel()
+				return shellErr
+			}
+			arguments := powerShellArguments(powerShell, []string{"-NoProfile", "-File", filepath.Join(selected.CheckoutPath, "scripts", "dev.ps1"), "bootstrap", "-Profile", selected.Profile})
+			_, err = runExternal(ctx, selected.CheckoutPath, powerShell, arguments...)
 			cancel()
 			if err != nil {
 				return err

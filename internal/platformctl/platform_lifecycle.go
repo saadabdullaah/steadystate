@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -161,6 +162,7 @@ var platformUpBlockingChecks = map[string]bool{
 	"git-repository":      true,
 	"github-app-variable": true,
 	"github-auth":         true,
+	"github-cli-version":  true,
 	"github-secrets":      true,
 	"operating-system":    true,
 	"resource-budget":     true,
@@ -196,8 +198,12 @@ func runPlatformUpPreflight(parent context.Context, options *Options, selected C
 }
 
 func runPlatformStage(ctx context.Context, options *Options, checkoutPath string, stage platformStage, arguments []string) error {
+	powerShell, err := powerShellExecutable()
+	if err != nil {
+		return err
+	}
 	// #nosec G204 -- executable and arguments are fixed lifecycle contracts.
-	command := exec.Command("pwsh", arguments...)
+	command := exec.Command(powerShell, powerShellArguments(powerShell, arguments)...)
 	command.Dir = checkoutPath
 	destination := options.Stderr
 	if options.Quiet {
@@ -228,7 +234,7 @@ func runPlatformStage(ctx context.Context, options *Options, checkoutPath string
 		}()
 	}
 
-	err := runCommandInProcessTree(ctx, command)
+	err = runCommandInProcessTree(ctx, command)
 	close(done)
 	stdout.Flush()
 	stderr.Flush()
@@ -246,6 +252,34 @@ func runPlatformStage(ctx context.Context, options *Options, checkoutPath string
 		message = err.Error()
 	}
 	return fmt.Errorf("%s", Redact(message))
+}
+
+func powerShellExecutable() (string, error) {
+	return selectPowerShellExecutable(runtime.GOOS, exec.LookPath)
+}
+
+func selectPowerShellExecutable(goos string, lookPath func(string) (string, error)) (string, error) {
+	if executable, err := lookPath("pwsh"); err == nil {
+		return executable, nil
+	}
+	if goos == "windows" {
+		if executable, err := lookPath("powershell.exe"); err == nil {
+			return executable, nil
+		}
+		return "", exitError(ExitUnhealthy, "PowerShell 7 or Windows PowerShell 5.1 is required")
+	}
+	return "", exitError(ExitUnhealthy, "PowerShell 7 (pwsh) is required")
+}
+
+func powerShellArguments(executable string, arguments []string) []string {
+	if strings.EqualFold(filepath.Base(executable), "powershell.exe") {
+		result := []string{"-NoProfile", "-ExecutionPolicy", "Bypass"}
+		if len(arguments) > 0 && strings.EqualFold(arguments[0], "-NoProfile") {
+			arguments = arguments[1:]
+		}
+		return append(result, arguments...)
+	}
+	return arguments
 }
 
 func checkoutHeadRevision(ctx context.Context, checkoutPath string) (string, error) {
