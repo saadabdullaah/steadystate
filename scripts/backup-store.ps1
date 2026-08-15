@@ -48,6 +48,21 @@ function Get-ExactResource([string]$Kind, [string]$Name) {
     return [pscustomobject]@{ Exists = $exitCode -eq 0; Value = $value }
 }
 
+function Get-DockerInspectObject([string]$Name) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $raw = @(& docker inspect $Name 2>$null)
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previous
+    $global:LASTEXITCODE = 0
+    if ($exitCode -ne 0 -or $raw.Count -eq 0) { throw "Docker could not inspect '$Name'." }
+    try {
+        return @(($raw -join [Environment]::NewLine) | ConvertFrom-Json)[0]
+    } catch {
+        throw "Docker returned invalid inspect JSON for '${Name}': $($_.Exception.Message)"
+    }
+}
+
 function Assert-Docker {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Docker is required.' }
     & docker info *> $null
@@ -72,7 +87,8 @@ function Assert-SubnetAvailable {
     $networks = @(& docker network ls --format '{{.Name}}')
     foreach ($network in $networks) {
         if ($network -eq $NetworkName) { continue }
-        $subnets = @(& docker network inspect $network --format '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' 2>$null)
+        $details = Get-DockerInspectObject $network
+        $subnets = @($details.IPAM.Config | ForEach-Object { [string]$_.Subnet })
         if ($subnets -contains $Subnet) {
             throw "Requested backup subnet $Subnet is already used by Docker network '$network'. Pass a collision-free -Subnet."
         }
@@ -87,8 +103,9 @@ function Connect-ClusterNodes {
         if ($node -notmatch "^$([regex]::Escape($ClusterName))-(control-plane|worker[0-9]*)$") {
             throw "Refusing to connect unexpected container '$node' to the backup network."
         }
-        $attached = & docker inspect $node --format "{{json (index .NetworkSettings.Networks `"$NetworkName`")}}" 2>$null
-        if ($LASTEXITCODE -ne 0 -or $attached -eq 'null') {
+        $details = Get-DockerInspectObject $node
+        $attached = @($details.NetworkSettings.Networks.PSObject.Properties.Name) -contains $NetworkName
+        if (-not $attached) {
             Invoke-Docker network connect $NetworkName $node
         }
     }
@@ -102,8 +119,9 @@ function Disconnect-ClusterNodes {
         if ($node -notmatch "^$([regex]::Escape($ClusterName))-(control-plane|worker[0-9]*)$") {
             throw "Refusing to disconnect unexpected container '$node' from the backup network."
         }
-        $attached = & docker inspect $node --format "{{json (index .NetworkSettings.Networks `"$NetworkName`")}}" 2>$null
-        if ($LASTEXITCODE -eq 0 -and $attached -ne 'null') {
+        $details = Get-DockerInspectObject $node
+        $attached = @($details.NetworkSettings.Networks.PSObject.Properties.Name) -contains $NetworkName
+        if ($attached) {
             Invoke-Docker network disconnect --force $NetworkName $node
         }
     }
@@ -168,7 +186,9 @@ switch ($Action) {
             Assert-SubnetAvailable
             Invoke-Docker network create --driver bridge --subnet $Subnet $NetworkName
         } else {
-            $existingSubnet = (& docker network inspect $NetworkName --format '{{(index .IPAM.Config 0).Subnet}}').Trim()
+            $networkDetails = Get-DockerInspectObject $NetworkName
+            $firstIPAMConfig = @($networkDetails.IPAM.Config)[0]
+            $existingSubnet = [string]$firstIPAMConfig.Subnet
             if ($existingSubnet -ne $Subnet) {
                 throw "Existing exact network '$NetworkName' uses $existingSubnet instead of requested $Subnet."
             }
@@ -219,20 +239,22 @@ switch ($Action) {
         if (-not (Get-ExactResource network $NetworkName).Exists) { throw 'SeaweedFS network is absent.' }
         if (-not (Get-ExactResource volume $VolumeName).Exists) { throw 'SeaweedFS volume is absent.' }
         Wait-Healthy
-        $runningImage = (& docker inspect $ContainerName --format '{{.Config.Image}}').Trim()
+        $details = Get-DockerInspectObject $ContainerName
+        $runningImage = [string]$details.Config.Image
         if ($runningImage -ne $image) { throw 'SeaweedFS is not using the exact pinned image digest.' }
-        $runningIP = (& docker inspect $ContainerName --format "{{(index .NetworkSettings.Networks `"$NetworkName`").IPAddress}}").Trim()
+        $networkProperty = $details.NetworkSettings.Networks.PSObject.Properties[$NetworkName]
+        $runningIP = if ($networkProperty) { [string]$networkProperty.Value.IPAddress } else { '' }
         if ($runningIP -ne $ContainerIP) { throw "SeaweedFS has IP $runningIP instead of $ContainerIP." }
-        $mountedVolume = (& docker inspect $ContainerName --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}').Trim()
+        $dataMount = @($details.Mounts | Where-Object { $_.Destination -eq '/data' } | Select-Object -First 1)[0]
+        $mountedVolume = [string]$dataMount.Name
         if ($mountedVolume -ne $VolumeName) { throw 'SeaweedFS is not using the exact persistent backup volume.' }
         $expectedMemoryBytes = [int64]$MemoryLimitMiB * 1MB
-        $memoryLimitBytes = [int64]((& docker inspect $ContainerName --format '{{.HostConfig.Memory}}').Trim())
-        $memorySwapBytes = [int64]((& docker inspect $ContainerName --format '{{.HostConfig.MemorySwap}}').Trim())
+        $memoryLimitBytes = [int64]$details.HostConfig.Memory
+        $memorySwapBytes = [int64]$details.HostConfig.MemorySwap
         if ($memoryLimitBytes -ne $expectedMemoryBytes -or $memorySwapBytes -ne $expectedMemoryBytes) {
             throw "SeaweedFS memory is not capped at $MemoryLimitMiB MiB without swap growth."
         }
-        $environmentNames = @(& docker inspect $ContainerName --format '{{range .Config.Env}}{{println .}}{{end}}' |
-            ForEach-Object { ($_ -split '=', 2)[0] })
+        $environmentNames = @($details.Config.Env | ForEach-Object { ($_ -split '=', 2)[0] })
         foreach ($required in @('AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','S3_BUCKET')) {
             if ($environmentNames -notcontains $required) { throw "SeaweedFS is missing required environment setting $required." }
         }

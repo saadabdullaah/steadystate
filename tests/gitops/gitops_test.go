@@ -988,6 +988,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	for _, contract := range []string{
 		"'Inventory'",
 		"Get-BucketObjectInventory",
+		"Get-DockerInspectObject",
 		"http://127.0.0.1:8888$Path/?pretty=y",
 		"[uint64]2147483648",
 		"$fullPath.Substring($bucketRoot.Length + 1)",
@@ -1002,6 +1003,9 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		if !strings.Contains(backupStore, contract) {
 			t.Fatalf("SeaweedFS logical inventory is missing %q", contract)
 		}
+	}
+	if strings.Contains(backupStore, `{{"\n"}}`) || strings.Contains(backupStore, "index .NetworkSettings.Networks") {
+		t.Fatal("SeaweedFS lifecycle must parse docker inspect JSON instead of relying on PowerShell-sensitive quoted Go templates")
 	}
 	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))
 	if !strings.Contains(phase7Workflow, "deploy-gitops -Profile full -GitRevision $env:GITHUB_SHA -DisableTelemetryPipeline -DisableTenantWorkloads -DisableMonitoringStateMetrics") ||

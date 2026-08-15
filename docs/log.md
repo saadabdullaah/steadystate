@@ -36,6 +36,10 @@
 - Fresh full-profile diagnostics treat not-yet-installed repository-local
   `sops` and `age` binaries as bootstrap warnings while continuing to require
   the owner-held age identity before any environment mutation.
+- The retained SeaweedFS lifecycle parses Docker inspect JSON instead of using
+  quoted dynamic Go templates, keeping subnet, network attachment, volume,
+  memory, and environment verification identical under Windows PowerShell 5.1
+  and PowerShell 7.
 
 ## 2026-08-15 — GA fresh-install hardening
 
