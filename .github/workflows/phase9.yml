@@ -116,7 +116,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .artifacts/phase9/private | Out-Null
-          go build -trimpath -ldflags "-X main.version=v1.0.0 -X main.commit=$env:PHASE9_SOURCE_SHA -X main.buildDate=$((Get-Date).ToUniversalTime().ToString('o')) -X main.dirty=false" -o .artifacts/platformctl ./cmd/platformctl
+          go build -trimpath -ldflags "-X main.version=v1.0.1 -X main.commit=$env:PHASE9_SOURCE_SHA -X main.buildDate=$((Get-Date).ToUniversalTime().ToString('o')) -X main.dirty=false" -o .artifacts/platformctl ./cmd/platformctl
           if ($LASTEXITCODE -ne 0) { throw 'Exact-revision platformctl build failed.' }
           ./.artifacts/platformctl --output json config init --name acceptance --checkout $PWD --repository $env:GITHUB_REPOSITORY --branch main --profile full --cluster steadystate --kube-context kind-steadystate --http-port 8080 --https-port 8443
           ./.artifacts/platformctl --output json version | Out-File -Encoding utf8 .artifacts/phase9/acceptance-version.json

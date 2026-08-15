@@ -1,5 +1,46 @@
 # Engineering Log
 
+## 2026-08-15 - v1.0.1 release closeout
+
+- Squash-merged fresh-install hardening PR #111 as
+  `cf3d8d53d89c296a0311c04b8819327f52772c59`. Its branch Phase 9 run
+  `31888881140` retained artifact `9248286391`; the hosted GIF SHA-256 is
+  `d7d47a04d24181f0ad76e5489b08ca39eef84eb553593e5c646338dc11aa7797`.
+- Main-branch release runs `31891413953` and `31891413957` published signed,
+  SPDX-attested `xyz v0.1.2` and demo `v0.7.1` images. App-authored delivery
+  PR #118 merged as `ea6b41ed803372962abf8c0eb6d6b7bff9811a7d`; PR #119 merged as final
+  delivery commit `5651068c83328fac22f4e4c12d6ee05b7ed44328`.
+- Exact-main CI `31894424108`, parallel CodeQL `31894424105`, Nightly
+  `31894456291`, Phase 4 `31894459297`, Phase 5 `31894457290`, Phase 6
+  `31894457665`, Phase 7 `31894459604`, Phase 8 `31894459267`, Phase 9
+  `31894459919`, and platformctl smoke `31894457361` all passed.
+- Retained exact-main artifacts: Phase 1 `9249504549`, Phase 2 `9249518003`,
+  Phase 3 `9249593065`, Phase 4 `9249722844`, Phase 5 `9249570963`, Phase 6
+  `9249561710`, Phase 7 `9249802709`, Phase 8 `9249645903`, Phase 9
+  `9249663392`, and release snapshot `9249469874`.
+- The `v1.0.1` closeout updates installer defaults, portal version metadata,
+  consumer verification examples, and cross-platform released-installer
+  smoke. Publication remains gated on the closeout PR and exact release-commit
+  validation.
+- Fresh Windows lifecycle commands now prefer PowerShell 7 but fall back to
+  the built-in Windows PowerShell 5.1 executable. The fallback applies a
+  process-scoped execution-policy bypass only to the fixed repository-owned
+  lifecycle script, removing an undocumented `pwsh` prerequisite without
+  changing machine policy.
+- The checksum-verifying Windows installer now makes its resolved install
+  directory available in the current process and persistent user PATH, with
+  `-NoPathUpdate` available for isolated or portable installations.
+- GitHub operations prefer the user-owned `~/.local/bin/gh` binary before the
+  ambient PATH, preventing an older administrator-owned installation from
+  silently overriding the checksum-verified `2.97.0` security baseline.
+- Fresh full-profile diagnostics treat not-yet-installed repository-local
+  `sops` and `age` binaries as bootstrap warnings while continuing to require
+  the owner-held age identity before any environment mutation.
+- The retained SeaweedFS lifecycle parses Docker inspect JSON instead of using
+  quoted dynamic Go templates, keeping subnet, network attachment, volume,
+  memory, and environment verification identical under Windows PowerShell 5.1
+  and PowerShell 7.
+
 ## 2026-08-15 — GA fresh-install hardening
 
 - Reproduced the first external Windows installation path and corrected the
@@ -963,3 +1004,40 @@
   building any archive because GoReleaser's publishing step had not received
   `GITHUB_TOKEN`. The tag step now maps the job-scoped token explicitly, and
   the GitOps contract suite prevents removing that tag-only requirement.
+
+## v1.0.1 fresh-install hardening
+
+- A clean Windows minimal-profile run on 2026-08-15 proved the prerequisite,
+  pinned-tool, image-build, and Kubernetes 1.35.5/Calico path, then exposed an
+  Envoy Gateway cold-start failure: the kind node's direct Docker Hub pull
+  remained in `ContainerCreating` beyond Helm's five-minute hook timeout even
+  though the host Docker engine fetched the exact image in 25 seconds.
+- Bootstrap now pulls Envoy Gateway `v1.8.0` through the host engine, verifies
+  digest `sha256:a9b4c4d8a402e8c007b74f2796587a6fb33d8baba46094f17c8a6f233e46d609`,
+  and imports only the Linux AMD64 image into each exact kind node before Helm.
+  This also avoids kind 0.32's `--all-platforms` import failure for the image's
+  OCI attestation index. Helm retains a bounded ten-minute fallback.
+- Backup-store node discovery now treats an already-absent kind cluster as an
+  idempotent stop condition under Windows PowerShell 5.1, so `platform down`
+  still removes the exact SeaweedFS resources while retaining its named volume.
+- The same fresh-clone exercise found that `minimal` previously changed only
+  kind topology while still rendering every standard-profile Argo child. The
+  profile now has a truthful core-only contract: Argo configuration, operator,
+  Gateway, and CRDs remain; tenant workloads, Rollouts/Prometheus, telemetry,
+  Kyverno, and data add-ons are omitted. Standard and full renders are
+  unchanged.
+- Minimal downgrade now prepares every optional Argo child with the background
+  resource finalizer before root reconciliation. The live readiness gate
+  rejects both lingering child Applications and lingering optional Pods, which
+  prevents an apparently green minimal profile from retaining the resource
+  footprint of an earlier standard/full run.
+- A clean fresh-clone run at `7070c22` completed `platformctl platform up`
+  from an absent cluster in 10m40s. The nine-check minimal baseline reported
+  only `argocd-configuration`, `steadystate-operator`, and `steadystate-root`,
+  all Synced/Healthy; every optional add-on namespace contained zero Pods.
+  `platform status` returned Ready, `platform verify` passed, and the single
+  kind node used 3.441 GiB of its 9.713 GiB limit at inspection time. A real
+  loopback portal launch/session exchange returned HTTP 200 from
+  `portal.steadystate.dev/v1alpha1`, reported portal `v1.0.1` and profile
+  `minimal`, and exposed the expected SHA-256 asset digest without leaving the
+  portal process running.

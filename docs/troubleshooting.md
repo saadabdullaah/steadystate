@@ -43,9 +43,26 @@ kubectl get pods -n envoy-gateway-system
 kubectl get events -A --sort-by=.lastTimestamp
 ```
 
+On a cold Windows/Docker Desktop bootstrap, SteadyState pulls the frozen Envoy
+Gateway image through the host engine, verifies its repository digest, and
+imports only `linux/amd64` into each kind node before Helm runs. This avoids a
+known failure mode where an in-node registry pull remains in
+`ContainerCreating`, and avoids kind's all-platform import path for OCI indexes
+with detached attestation manifests. The ignored archive is cached under
+`.artifacts/images/`; rerunning `platform up` is safe.
+
 ## Partial bootstrap
 
 Bootstrap retains a failed cluster and writes diagnostics under `.artifacts/diagnostics/`. Correct the cause and rerun bootstrap; the operation reconciles existing state.
+
+The `minimal` profile deliberately deploys only Argo CD, its configuration,
+the SteadyState operator, Gateway, and core CRDs. It omits tenant workloads,
+Rollouts/Prometheus, telemetry, Kyverno, and the data stack. Use `standard` for
+the complete non-database product experience and `full` for PostgreSQL and
+recovery. When changing an existing standard/full cluster to `minimal`, the
+deploy contract adds Argo's background cascade finalizer to each optional child
+before the root prunes it, and readiness requires both the child Applications
+and their Pods to be gone.
 
 ## Operator deployment is unavailable
 

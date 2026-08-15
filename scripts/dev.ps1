@@ -465,6 +465,66 @@ function Get-ClusterNames {
     return @()
 }
 
+function Import-KindImageFromDocker {
+    param(
+        [Parameter(Mandatory)][string]$Image,
+        [Parameter(Mandatory)][string]$ExpectedDigest
+    )
+    Assert-Docker
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $nodes = @(& kind get nodes --name $ClusterName 2>$null)
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($exitCode -ne 0 -or $nodes.Count -eq 0) {
+        throw "Cannot preload $Image because kind cluster '$ClusterName' has no nodes."
+    }
+
+    $missingNodes = @()
+    foreach ($node in $nodes) {
+        if ($node -notmatch "^$([regex]::Escape($ClusterName))-(control-plane|worker[0-9]*)$") {
+            throw "Refusing to preload an image into unexpected container '$node'."
+        }
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $references = @(& docker exec $node ctr --namespace=k8s.io images list --quiet 2>$null)
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($exitCode -ne 0 -or $references -notcontains $Image) { $missingNodes += $node }
+    }
+    if ($missingNodes.Count -eq 0) {
+        Write-Host "Pinned image $Image is already present on every kind node."
+        return
+    }
+
+    Invoke-External docker pull --platform linux/amd64 $Image
+    $repoDigests = @(& docker image inspect $Image --format '{{range .RepoDigests}}{{println .}}{{end}}')
+    if ($LASTEXITCODE -ne 0 -or -not ($repoDigests | Where-Object { $_ -eq "docker.io/envoyproxy/gateway@$ExpectedDigest" -or $_ -eq "envoyproxy/gateway@$ExpectedDigest" })) {
+        throw "Image $Image did not resolve to the pinned digest $ExpectedDigest."
+    }
+
+    $archiveDirectory = Join-Path $Root '.artifacts/images'
+    New-Item -ItemType Directory -Force -Path $archiveDirectory | Out-Null
+    $archivePath = Join-Path $archiveDirectory 'envoy-gateway-linux-amd64.tar'
+    Invoke-External docker save --output $archivePath $Image
+    foreach ($node in $missingNodes) {
+        $containerArchive = '/steadystate-envoy-gateway-linux-amd64.tar'
+        Invoke-External docker cp $archivePath "${node}:$containerArchive"
+        try {
+            # kind 0.32 imports with --all-platforms, which fails for some
+            # Docker Desktop OCI indexes whose attestation manifest is not in
+            # `docker save`. Import only the node's linux/amd64 platform.
+            Invoke-External docker exec $node ctr --namespace=k8s.io images import --platform linux/amd64 --digests --snapshotter=overlayfs $containerArchive
+        } finally {
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            & docker exec $node rm --force $containerArchive *> $null
+            $ErrorActionPreference = $previousPreference
+        }
+    }
+    Write-Host "Loaded pinned image $Image into $($missingNodes.Count) kind node(s)."
+}
+
 function Invoke-Diagnostics {
     Assert-Tools
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -595,7 +655,9 @@ function Invoke-Bootstrap {
         Invoke-External kubectl rollout status daemonset/calico-node -n calico-system --timeout=600s
         Invoke-External kubectl wait nodes --all --for=condition=Ready --timeout=600s
 
-        Invoke-External helm upgrade --install envoy-gateway oci://docker.io/envoyproxy/gateway-helm --version "v$($v.ENVOY_GATEWAY_VERSION)" --namespace envoy-gateway-system --create-namespace --wait --timeout 5m
+        $envoyImage = "docker.io/envoyproxy/gateway:v$($v.ENVOY_GATEWAY_VERSION)"
+        Import-KindImageFromDocker -Image $envoyImage -ExpectedDigest "sha256:$($v.ENVOY_GATEWAY_IMAGE_SHA256)"
+        Invoke-External helm upgrade --install envoy-gateway oci://docker.io/envoyproxy/gateway-helm --version "v$($v.ENVOY_GATEWAY_VERSION)" --namespace envoy-gateway-system --create-namespace --wait --timeout 10m
         Invoke-External kubectl delete gateway steadystate -n steadystate-smoke --ignore-not-found=true --wait=true
         Invoke-External kubectl delete envoyproxy steadystate-proxy -n steadystate-smoke --ignore-not-found=true --wait=true
         Invoke-External kubectl apply -k (Join-Path $Root 'config/gateway')

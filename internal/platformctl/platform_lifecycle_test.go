@@ -2,10 +2,106 @@ package platformctl
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 )
+
+func TestSelectPowerShellExecutable(t *testing.T) {
+	lookPath := func(available map[string]string) func(string) (string, error) {
+		return func(name string) (string, error) {
+			if path, ok := available[name]; ok {
+				return path, nil
+			}
+			return "", errors.New("not found")
+		}
+	}
+
+	for _, test := range []struct {
+		name      string
+		goos      string
+		available map[string]string
+		want      string
+		wantError bool
+	}{
+		{name: "prefers PowerShell 7", goos: "windows", available: map[string]string{"pwsh": `C:\\Program Files\\PowerShell\\7\\pwsh.exe`, "powershell.exe": `C:\\Windows\\powershell.exe`}, want: `C:\\Program Files\\PowerShell\\7\\pwsh.exe`},
+		{name: "uses Windows PowerShell fallback", goos: "windows", available: map[string]string{"powershell.exe": `C:\\Windows\\powershell.exe`}, want: `C:\\Windows\\powershell.exe`},
+		{name: "requires pwsh on Linux", goos: "linux", available: map[string]string{"powershell.exe": "/unsupported"}, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := selectPowerShellExecutable(test.goos, lookPath(test.available))
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("expected an error, got executable %q", got)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("executable=%q err=%v, want %q", got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestWindowsPowerShellArgumentsBypassOnlyFixedScriptPolicy(t *testing.T) {
+	arguments := []string{"-NoProfile", "-File", `D:\\SteadyState\\scripts\\dev.ps1`, "bootstrap"}
+	got := powerShellArguments(`C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, arguments)
+	want := []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", `D:\\SteadyState\\scripts\\dev.ps1`, "bootstrap"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("arguments=%q, want %q", got, want)
+	}
+
+	pwsh := powerShellArguments("pwsh", arguments)
+	if strings.Join(pwsh, "|") != strings.Join(arguments, "|") {
+		t.Fatalf("pwsh arguments changed: %q", pwsh)
+	}
+}
+
+func TestSelectGitHubCLIPrefersVerifiedUserInstallation(t *testing.T) {
+	home := `C:\Users\developer`
+	localAppData := `C:\Users\developer\AppData\Local`
+	userCLI := `C:\Users\developer\.local\bin\gh.exe`
+	pathCLI := `C:\Program Files\GitHub CLI\gh.exe`
+	exists := func(path string) bool { return path == userCLI }
+	lookPath := func(string) (string, error) { return pathCLI, nil }
+	if got := selectGitHubCLIExecutable("windows", home, localAppData, exists, lookPath); got != userCLI {
+		t.Fatalf("executable=%q, want verified user installation %q", got, userCLI)
+	}
+}
+
+func TestSelectGitHubCLIFallsBackToPath(t *testing.T) {
+	want := "/usr/local/bin/gh"
+	lookPath := func(string) (string, error) { return want, nil }
+	if got := selectGitHubCLIExecutable("linux", "/home/developer", "", func(string) bool { return false }, lookPath); got != want {
+		t.Fatalf("executable=%q, want PATH installation %q", got, want)
+	}
+}
+
+func TestJoinPlatformPathUsesTargetOSSeparators(t *testing.T) {
+	if got, want := joinPlatformPath("windows", `C:\Users\developer`, ".local", "bin", "gh.exe"), `C:\Users\developer\.local\bin\gh.exe`; got != want {
+		t.Fatalf("Windows path=%q, want %q", got, want)
+	}
+	if got, want := joinPlatformPath("linux", "/home/developer", ".local", "bin", "gh"), "/home/developer/.local/bin/gh"; got != want {
+		t.Fatalf("Linux path=%q, want %q", got, want)
+	}
+	if got := joinPlatformPath("windows", "", "Programs", "GitHub CLI", "gh.exe"); got != "" {
+		t.Fatalf("empty trusted root produced relative candidate %q", got)
+	}
+}
+
+func TestMissingFullProfileSecurityToolsAreBootstrapWarnings(t *testing.T) {
+	for _, tool := range []string{"sops", "age"} {
+		status, _, remediation := missingToolCheck(tool, "full")
+		if status != "Warning" || !strings.Contains(remediation, "platformctl platform up") {
+			t.Fatalf("%s status=%q remediation=%q", tool, status, remediation)
+		}
+	}
+	status, _, _ := missingToolCheck("docker", "full")
+	if status != "Fail" {
+		t.Fatalf("Docker missing status=%q, want Fail", status)
+	}
+}
 
 func TestPlatformUpPreflightBlockingBoundary(t *testing.T) {
 	for _, test := range []struct {
@@ -17,7 +113,7 @@ func TestPlatformUpPreflightBlockingBoundary(t *testing.T) {
 		{name: "full-profile-steadystate.agekey", blocking: true},
 		{name: "tool-sops", blocking: false},
 		{name: "tool-age", blocking: false},
-		{name: "github-cli-version", blocking: false},
+		{name: "github-cli-version", blocking: true},
 		{name: "kubernetes", blocking: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-version="${PLATFORMCTL_VERSION:-v1.0.0}"
+version="${PLATFORMCTL_VERSION:-v1.0.1}"
 install_directory="${PLATFORMCTL_INSTALL_DIR:-$HOME/.local/bin}"
 printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
   echo "PLATFORMCTL_VERSION must be strict vMAJOR.MINOR.PATCH" >&2

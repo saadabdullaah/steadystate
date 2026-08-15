@@ -174,10 +174,12 @@ function Render-RootTemplate {
         [Parameter(Mandatory)][string]$Path,
         [switch]$BootstrapRoot
     )
-    $telemetryPipeline = if ($DisableTelemetryPipeline) { 'false' } else { 'true' }
-    $security = if ($DisableSecurity) { 'false' } else { 'true' }
-    $tenantWorkloads = if ($DisableTenantWorkloads) { 'false' } else { 'true' }
-    $monitoringStateMetrics = if ($DisableMonitoringStateMetrics) { 'false' } else { 'true' }
+    $isMinimal = $Profile -eq 'minimal'
+    $telemetryPipeline = if ($DisableTelemetryPipeline -or $isMinimal) { 'false' } else { 'true' }
+    $security = if ($DisableSecurity -or $isMinimal) { 'false' } else { 'true' }
+    $progressiveDelivery = if ($isMinimal) { 'false' } else { 'true' }
+    $tenantWorkloads = if ($DisableTenantWorkloads -or $isMinimal) { 'false' } else { 'true' }
+    $monitoringStateMetrics = if ($DisableMonitoringStateMetrics -or $isMinimal) { 'false' } else { 'true' }
     $dataFoundation = if ($Profile -eq 'full') { 'true' } else { 'false' }
     $arguments = @(
         'template', 'steadystate-root', $ChartPath,
@@ -185,6 +187,7 @@ function Render-RootTemplate {
         '--set-string', "gitRevision=$GitRevision",
         '--set', "enableTelemetryPipeline=$telemetryPipeline",
         '--set', "enableSecurity=$security",
+        '--set', "enableProgressiveDelivery=$progressiveDelivery",
         '--set', "enableDataFoundation=$dataFoundation",
         '--set', "enableTenantWorkloads=$tenantWorkloads",
         '--set-string', "tenantFilter=$TenantFilter",
@@ -362,6 +365,29 @@ function Remove-StaleRootApplication {
     Invoke-External kubectl delete application.argoproj.io steadystate-root -n argocd --wait=true --timeout=60s
 }
 
+function Protect-MinimalProfilePrune {
+    if ($Profile -ne 'minimal') { return }
+    $finalizer = 'resources-finalizer.argocd.argoproj.io/background'
+    $optionalApplications = @('monitoring','argo-rollouts','loki','tempo','otel-collector','alloy','kyverno','kyverno-policies','payments','data-namespaces','local-path-storage','cert-manager','cloudnative-pg','barman-cloud')
+    foreach ($name in $optionalApplications) {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $json = @(& kubectl --request-timeout=10s get application.argoproj.io $name -n argocd -o json 2>$null)
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($exitCode -ne 0 -or -not $json) { continue }
+
+        $application = (($json -join [Environment]::NewLine) | ConvertFrom-Json)
+        $finalizers = @($application.metadata.finalizers | Where-Object { $_ })
+        if ($finalizers -contains $finalizer) { continue }
+        $finalizers += $finalizer
+        $patchPath = Join-Path $ArtifactRoot "minimal-prune-$name.json"
+        $patch = [ordered]@{ metadata = [ordered]@{ finalizers = $finalizers } }
+        Write-Utf8 -Path $patchPath -Content (($patch | ConvertTo-Json -Depth 4) + [Environment]::NewLine)
+        Invoke-External kubectl patch application.argoproj.io $name -n argocd --type=merge --patch-file $patchPath
+    }
+}
+
 function Test-ArgoHttp {
     param([int]$TimeoutSeconds = 90)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -414,6 +440,7 @@ function Invoke-Deploy {
     Render-RootTemplate -Template 'templates/projects.yaml.tpl' -Path $projects
     Render-RootTemplate -Template 'templates/root-application.yaml.tpl' -Path $rootApplication -BootstrapRoot
     Invoke-External kubectl apply -f $projects
+    Protect-MinimalProfilePrune
     Remove-StaleRootApplication -Revision $GitRevision
     Invoke-External kubectl apply -f $rootApplication
     if ($Profile -eq 'full') {
@@ -456,28 +483,53 @@ function Invoke-Test {
     Assert-DexAbsent
     Add-PassedCheck $checks 'pinned-argocd-ready-dex-absent' $started "Pinned manifest $(Split-Path -Leaf $manifest) is running and all five Dex objects are absent."
 
-    $applicationNames = @('argocd-configuration','monitoring','argo-rollouts')
-    if (-not $DisableTelemetryPipeline) {
+    $isMinimal = $Profile -eq 'minimal'
+    $tenantWorkloadsEnabled = -not $DisableTenantWorkloads -and -not $isMinimal
+    $applicationNames = @('argocd-configuration')
+    if (-not $isMinimal) {
+        $applicationNames += @('monitoring','argo-rollouts')
+    }
+    if (-not $DisableTelemetryPipeline -and -not $isMinimal) {
         $applicationNames += @('loki','tempo','otel-collector','alloy')
     }
-    if (-not $DisableSecurity) {
+    if (-not $DisableSecurity -and -not $isMinimal) {
         $applicationNames += @('kyverno','kyverno-policies')
     }
     if ($Profile -eq 'full') {
         $applicationNames += @('data-namespaces','local-path-storage','cert-manager','cloudnative-pg','barman-cloud')
     }
-    $applicationNames += @('steadystate-operator','payments','steadystate-root')
+    $applicationNames += 'steadystate-operator'
+    if ($tenantWorkloadsEnabled) { $applicationNames += 'payments' }
+    $applicationNames += 'steadystate-root'
 
     $started = Get-Date
     $applications = Wait-ArgoApplications -Names $applicationNames -TimeoutSeconds 600
     foreach ($name in $applicationNames) {
         Add-PassedCheck $checks "argocd-application-$name-healthy" $started "$name is Synced and Healthy."
     }
-
-    $started = Get-Date
-    Wait-SteadyStateReady -Kind team -Name payments
-    Wait-SteadyStateReady -Kind application -Name demo -Namespace team-payments
-    Add-PassedCheck $checks 'gitops-team-and-application-ready' $started 'The Team became healthy before its namespaced Application.'
+    if ($isMinimal) {
+        $optionalApplications = @('monitoring','argo-rollouts','loki','tempo','otel-collector','alloy','kyverno','kyverno-policies','payments','data-namespaces','local-path-storage','cert-manager','cloudnative-pg','barman-cloud')
+        foreach ($name in $optionalApplications) {
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $found = & kubectl get application.argoproj.io $name -n argocd --ignore-not-found=true -o name 2>$null
+            $exitCode = $LASTEXITCODE
+            $ErrorActionPreference = $previousPreference
+            if ($exitCode -ne 0) { throw "Failed to verify that optional Argo Application $name is absent." }
+            if ($found) { throw "Minimal profile retained unexpected optional Argo Application $name." }
+        }
+        Add-PassedCheck $checks 'minimal-profile-optional-applications-absent' (Get-Date) 'Every standard/full optional Argo child is absent.'
+        foreach ($namespace in @('monitoring','argo-rollouts','kyverno','cnpg-system','cert-manager')) {
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $pods = @(& kubectl get pods -n $namespace --ignore-not-found=true -o name 2>$null)
+            $exitCode = $LASTEXITCODE
+            $ErrorActionPreference = $previousPreference
+            if ($exitCode -ne 0) { throw "Failed to verify optional Pod absence in namespace $namespace." }
+            if ($pods.Count -gt 0) { throw "Minimal profile retained optional Pods in namespace $namespace`: $($pods -join ', ')." }
+        }
+        Add-PassedCheck $checks 'minimal-profile-optional-pods-absent' (Get-Date) 'Every optional add-on namespace contains zero Pods.'
+    }
 
     $started = Get-Date
     Wait-ArgoRoute
@@ -489,15 +541,25 @@ function Invoke-Test {
     if ($resolvedRevision -notmatch '^([0-9a-f]{40}|[0-9a-f]{64})$') {
         throw "Root Application reported invalid resolved revision '$resolvedRevision'."
     }
-    $application = Get-KubernetesObject @('get','applications.platform.steadystate.dev','demo','-n','team-payments')
-    $annotatedRevision = [string]$application.metadata.annotations.'steadystate.dev/source-revision'
-    if ($annotatedRevision -ne $resolvedRevision -or $application.status.resolvedGitRevision -ne $resolvedRevision) {
-        throw 'The SteadyState Application annotation/status revision does not match the root resolved commit.'
+    $application = $null
+    if ($tenantWorkloadsEnabled) {
+        $started = Get-Date
+        Wait-SteadyStateReady -Kind team -Name payments
+        Wait-SteadyStateReady -Kind application -Name demo -Namespace team-payments
+        Add-PassedCheck $checks 'gitops-team-and-application-ready' $started 'The Team became healthy before its namespaced Application.'
+
+        $application = Get-KubernetesObject @('get','applications.platform.steadystate.dev','demo','-n','team-payments')
+        $annotatedRevision = [string]$application.metadata.annotations.'steadystate.dev/source-revision'
+        if ($annotatedRevision -ne $resolvedRevision -or $application.status.resolvedGitRevision -ne $resolvedRevision) {
+            throw 'The SteadyState Application annotation/status revision does not match the root resolved commit.'
+        }
+        if ([string]$application.status.resolvedImageDigest -notmatch '^sha256:[0-9a-f]{64}$') {
+            throw 'The SteadyState Application did not report a canonical runtime digest.'
+        }
+        Add-PassedCheck $checks 'runtime-provenance-matches-root-revision' (Get-Date) 'Runtime digest is canonical and resolvedGitRevision matches the root commit.'
+    } else {
+        Add-PassedCheck $checks 'minimal-profile-core-only' (Get-Date) 'Minimal profile omits tenant workloads, progressive delivery, telemetry, security, and data add-ons.'
     }
-    if ([string]$application.status.resolvedImageDigest -notmatch '^sha256:[0-9a-f]{64}$') {
-        throw 'The SteadyState Application did not report a canonical runtime digest.'
-    }
-    Add-PassedCheck $checks 'runtime-provenance-matches-root-revision' (Get-Date) 'Runtime digest is canonical and resolvedGitRevision matches the root commit.'
 
     $tracking = & kubectl get configmap argocd-cm -n argocd -o "jsonpath={.data.application\.resourceTrackingMethod}"
     if ($LASTEXITCODE -ne 0 -or $tracking -ne 'annotation') {
@@ -516,8 +578,8 @@ function Invoke-Test {
         argoManifestSha256 = $versions.ARGO_CD_MANIFEST_SHA256
         requestedGitRevision = $GitRevision
         resolvedGitRevision = $resolvedRevision
-        application = 'team-payments/demo'
-        resolvedImageDigest = [string]$application.status.resolvedImageDigest
+        application = $(if ($application) { 'team-payments/demo' } else { $null })
+        resolvedImageDigest = $(if ($application) { [string]$application.status.resolvedImageDigest } else { $null })
         checks = $checks
     }
     if (-not $EvidencePath) {

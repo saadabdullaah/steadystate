@@ -739,13 +739,14 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	assertString(t, rootApplication, "root", "spec", "project")
 	assertString(t, rootApplication, "checkpoint-branch", "spec", "source", "targetRevision")
 	parameters := nestedSlice(t, rootApplication, "spec", "source", "helm", "parameters")
-	if len(parameters) != 8 {
+	if len(parameters) != 9 {
 		t.Fatalf("root application has %d Helm parameters", len(parameters))
 	}
 	expected := map[string]string{
 		"gitRevision":                       "$ARGOCD_APP_REVISION",
 		"enableTelemetryPipeline":           "true",
 		"enableSecurity":                    "true",
+		"enableProgressiveDelivery":         "true",
 		"enableDataFoundation":              "false",
 		"enableTenantWorkloads":             "true",
 		"tenantFilter":                      "xyz",
@@ -776,6 +777,54 @@ func TestBootstrapRootResolvesRevisionOnce(t *testing.T) {
 	}
 	assertString(t, rootApplication, "5s", "spec", "syncPolicy", "retry", "backoff", "duration")
 	assertString(t, rootApplication, "30s", "spec", "syncPolicy", "retry", "backoff", "maxDuration")
+}
+
+func TestMinimalProfileRendersOnlyCoreApplications(t *testing.T) {
+	root := repositoryRoot(t)
+	rendered := run(t, root, "helm",
+		"template", "steadystate-root", filepath.Join(root, "gitops", "clusters", "local"),
+		"--set", "enableProgressiveDelivery=false",
+		"--set", "enableTelemetryPipeline=false",
+		"--set", "enableSecurity=false",
+		"--set", "enableTenantWorkloads=false",
+		"--show-only", "templates/applications.yaml.tpl",
+	)
+	applications := map[string]bool{}
+	for _, object := range decodeManifests(t, rendered) {
+		if objectString(object, "kind") == "Application" {
+			applications[objectString(object, "metadata", "name")] = true
+		}
+	}
+	for _, required := range []string{"argocd-configuration", "steadystate-operator"} {
+		if !applications[required] {
+			t.Errorf("minimal profile is missing core Application %q", required)
+		}
+	}
+	for _, forbidden := range []string{"monitoring", "argo-rollouts", "loki", "tempo", "otel-collector", "alloy", "kyverno", "kyverno-policies", "payments", "data-namespaces", "cloudnative-pg"} {
+		if applications[forbidden] {
+			t.Errorf("minimal profile rendered optional Application %q", forbidden)
+		}
+	}
+	if len(applications) != 2 {
+		t.Fatalf("minimal profile rendered unexpected Applications: %v", applications)
+	}
+
+	gitopsScript := string(readFile(t, filepath.Join(root, "scripts", "gitops.ps1")))
+	for _, contract := range []string{
+		"$isMinimal = $Profile -eq 'minimal'",
+		"$progressiveDelivery = if ($isMinimal) { 'false' } else { 'true' }",
+		"$tenantWorkloads = if ($DisableTenantWorkloads -or $isMinimal) { 'false' } else { 'true' }",
+		"minimal-profile-core-only",
+		"minimal-profile-optional-applications-absent",
+		"function Protect-MinimalProfilePrune",
+		"resources-finalizer.argocd.argoproj.io/background",
+		"minimal-profile-optional-pods-absent",
+		"Minimal profile retained unexpected optional Argo Application",
+	} {
+		if !strings.Contains(gitopsScript, contract) {
+			t.Errorf("minimal profile mapping is missing %q", contract)
+		}
+	}
 }
 
 func TestGitOpsCommandsAreMirrored(t *testing.T) {
@@ -944,6 +993,19 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		!strings.Contains(installTools, "Failed to install $Name $Version after 4 attempts") {
 		t.Fatal("PowerShell Go tool installation must tolerate transient module proxy failures with bounded retries")
 	}
+	devScript := string(readFile(t, filepath.Join(root, "scripts", "dev.ps1")))
+	for _, contract := range []string{
+		"function Import-KindImageFromDocker",
+		"docker pull --platform linux/amd64 $Image",
+		"docker image inspect $Image --format '{{range .RepoDigests}}{{println .}}{{end}}'",
+		"ctr --namespace=k8s.io images import --platform linux/amd64",
+		"Import-KindImageFromDocker -Image $envoyImage",
+		"--wait --timeout 10m",
+	} {
+		if !strings.Contains(devScript, contract) {
+			t.Fatalf("minimal bootstrap is missing the pinned Envoy preload contract %q", contract)
+		}
+	}
 	phase7Foundation := string(readFile(t, filepath.Join(root, "scripts", "phase7-foundation.ps1")))
 	if !strings.Contains(phase7Foundation, "Wait-ArgoApplicationsHealthy @('local-path-storage','cert-manager','cloudnative-pg','barman-cloud','steadystate-operator')") ||
 		strings.Contains(phase7Foundation, `Invoke-Kubectl wait -n argocd "--for=jsonpath={.status.health.status}=Healthy"`) {
@@ -988,6 +1050,7 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	for _, contract := range []string{
 		"'Inventory'",
 		"Get-BucketObjectInventory",
+		"Get-DockerInspectObject",
 		"http://127.0.0.1:8888$Path/?pretty=y",
 		"[uint64]2147483648",
 		"$fullPath.Substring($bucketRoot.Length + 1)",
@@ -1001,6 +1064,14 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 	} {
 		if !strings.Contains(backupStore, contract) {
 			t.Fatalf("SeaweedFS logical inventory is missing %q", contract)
+		}
+	}
+	if strings.Contains(backupStore, `{{"\n"}}`) || strings.Contains(backupStore, "index .NetworkSettings.Networks") {
+		t.Fatal("SeaweedFS lifecycle must parse docker inspect JSON instead of relying on PowerShell-sensitive quoted Go templates")
+	}
+	for _, contract := range []string{"$ErrorActionPreference = 'Continue'", "$exitCode = $LASTEXITCODE", "if ($exitCode -ne 0) { return }"} {
+		if strings.Count(backupStore, contract) < 2 {
+			t.Fatalf("SeaweedFS node discovery must tolerate an absent kind cluster using %q", contract)
 		}
 	}
 	phase7Workflow := string(readFile(t, filepath.Join(root, ".github", "workflows", "phase7-foundation.yml")))

@@ -7,14 +7,19 @@ and ARM64. Windows archives use ZIP; Linux and macOS use `tar.gz`.
 ## Windows
 
 ```powershell
-.\scripts\install-platformctl.ps1 -Version v0.8.0
+.\scripts\install-platformctl.ps1 -Version v1.0.1
 platformctl version --output json
 ```
+
+The Windows installer adds its install directory to the current process and
+the user PATH, so `platformctl` works without an explicit executable path in
+the current and future terminals. Pass `-NoPathUpdate` only for isolated CI or
+portable installations.
 
 ## Linux and macOS
 
 ```sh
-PLATFORMCTL_VERSION=v0.8.0 ./scripts/install-platformctl.sh
+PLATFORMCTL_VERSION=v1.0.1 ./scripts/install-platformctl.sh
 platformctl version --output json
 ```
 

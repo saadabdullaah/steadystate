@@ -32,6 +32,7 @@ jobs:
     env:
       GOTOOLCHAIN: go1.25.13
       CGO_ENABLED: "0"
+      INSTALLER_RELEASE_VERSION: ${{ github.event_name == 'pull_request' && 'v1.0.0' || 'v1.0.1' }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -65,14 +66,27 @@ jobs:
           & ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} --output json profile list
           & ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} docs --directory .artifacts/docs
           $portal = (& ./.artifacts/platformctl${{ runner.os == 'Windows' && '.exe' || '' }} --output json version | ConvertFrom-Json)
-          if ($portal.portalVersion -ne 'v1.0.0' -or $portal.portalAssetsDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'Embedded portal metadata is invalid.' }
+          if ($portal.portalVersion -ne 'v1.0.1' -or $portal.portalAssetsDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'Embedded portal metadata is invalid.' }
       - name: Verify released installer with Windows PowerShell
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          ./scripts/install-platformctl.ps1 -Version v1.0.0 -InstallDirectory .artifacts/installed
-          $installed = (& ./.artifacts/installed/platformctl.exe --output json version | ConvertFrom-Json)
-          if ($installed.version -ne '1.0.0') { throw "Expected installed version 1.0.0, got $($installed.version)" }
+          $expected = $env:INSTALLER_RELEASE_VERSION.TrimStart('v')
+          ./scripts/install-platformctl.ps1 -Version $env:INSTALLER_RELEASE_VERSION -InstallDirectory .artifacts/installed
+          $binary = Join-Path $PWD '.artifacts/installed/platformctl.exe'
+          $installed = (& $binary --output json version | ConvertFrom-Json)
+          if ($installed.version -ne $expected) { throw "Expected installed version $expected, got $($installed.version)" }
+      - name: Verify released installer with POSIX shell
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export PLATFORMCTL_VERSION="$INSTALLER_RELEASE_VERSION"
+          export PLATFORMCTL_INSTALL_DIR="$PWD/.artifacts/installed"
+          bash ./scripts/install-platformctl.sh
+          expected="${INSTALLER_RELEASE_VERSION#v}"
+          binary="${PLATFORMCTL_INSTALL_DIR}/platformctl"
+          output="$("$binary" --output json version)"
+          printf '%s' "$output" | grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"${expected}\""
       - name: Launch and verify native embedded portal
         shell: pwsh
         run: |

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -81,16 +82,28 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 		add("checkout", "Pass", selected.CheckoutPath, "")
 	}
 
-	tools := []string{"git", "gh", "docker", "pwsh"}
+	tools := []string{"git", "docker"}
 	if selected.Profile == "full" {
 		tools = append(tools, "sops", "age")
 	}
 	for _, tool := range tools {
 		if path, err := exec.LookPath(tool); err != nil {
-			add("tool-"+tool, "Fail", tool+" was not found", "Install "+tool+" and ensure it is on PATH.")
+			status, details, remediation := missingToolCheck(tool, selected.Profile)
+			add("tool-"+tool, status, details, remediation)
 		} else {
 			add("tool-"+tool, "Pass", path, "")
 		}
+	}
+	githubCLI := githubCLIExecutable()
+	if path, err := exec.LookPath(githubCLI); err != nil {
+		add("tool-gh", "Fail", "gh was not found", "Install GitHub CLI and ensure it is on PATH or in ~/.local/bin.")
+	} else {
+		add("tool-gh", "Pass", path, "")
+	}
+	if path, err := powerShellExecutable(); err != nil {
+		add("tool-pwsh", "Fail", ErrorMessage(err), "Install PowerShell 7, or use Windows PowerShell 5.1 on Windows, and ensure it is on PATH.")
+	} else {
+		add("tool-pwsh", "Pass", path, "")
 	}
 	if _, err := runExternal(ctx, selected.CheckoutPath, "git", "rev-parse", "--show-toplevel"); err != nil {
 		add("git-repository", "Fail", err.Error(), "Restore or re-clone the configured checkout.")
@@ -191,10 +204,24 @@ func runDoctor(ctx context.Context, selected Context) []DoctorCheck {
 	return checks
 }
 
+func missingToolCheck(tool, profile string) (string, string, string) {
+	if profile == "full" && (tool == "sops" || tool == "age") {
+		return "Warning", tool + " is not installed yet", "platformctl platform up installs the pinned repository-local " + tool + " tool before it is required."
+	}
+	return "Fail", tool + " was not found", "Install " + tool + " and ensure it is on PATH."
+}
+
 func fullProfileAgeIdentityAvailable(identityPath string) bool {
 	if strings.TrimSpace(os.Getenv("SOPS_AGE_KEY")) != "" {
 		return true
 	}
+	clean := filepath.Clean(identityPath)
+	if filepath.Base(clean) != "steadystate.agekey" || filepath.Base(filepath.Dir(clean)) != "secrets" || filepath.Base(filepath.Dir(filepath.Dir(clean))) != ".artifacts" {
+		return false
+	}
+	// #nosec G703 -- the caller supplies only the fixed
+	// .artifacts/secrets/steadystate.agekey path beneath the configured checkout,
+	// and the structure is revalidated immediately above. Only metadata is read.
 	info, err := os.Stat(identityPath)
 	return err == nil && !info.IsDir()
 }
@@ -329,7 +356,12 @@ func newClusterLifecycleCommand(options *Options, name, scriptCommand string) *c
 			ctx, cancel := options.commandContext(cmd.Context())
 			defer cancel()
 			arguments := []string{"-NoProfile", "-File", filepath.Join(selected.CheckoutPath, "scripts", "dev.ps1"), scriptCommand, "-Profile", selected.Profile, "-ClusterName", selected.ClusterName, "-HttpPort", fmt.Sprint(selected.HTTPPort), "-HttpsPort", fmt.Sprint(selected.HTTPSPort)}
-			process := exec.Command("pwsh", arguments...)
+			powerShell, shellErr := powerShellExecutable()
+			if shellErr != nil {
+				return shellErr
+			}
+			// #nosec G204 -- executable is resolved only from the fixed pwsh/Windows PowerShell allowlist.
+			process := exec.Command(powerShell, powerShellArguments(powerShell, arguments)...)
 			process.Dir = selected.CheckoutPath
 			process.Stdout = options.Stdout
 			process.Stderr = options.Stderr
@@ -345,8 +377,11 @@ func newClusterLifecycleCommand(options *Options, name, scriptCommand string) *c
 }
 
 func runExternal(ctx context.Context, directory, executable string, arguments ...string) (string, error) {
-	switch executable {
-	case "git", "gh", "docker", "kubectl", "pwsh":
+	if base := strings.ToLower(filepath.Base(executable)); base == "gh" || base == "gh.exe" {
+		executable = githubCLIExecutable()
+	}
+	switch strings.ToLower(filepath.Base(executable)) {
+	case "git", "git.exe", "gh", "gh.exe", "docker", "docker.exe", "kubectl", "kubectl.exe", "pwsh", "pwsh.exe", "powershell", "powershell.exe":
 	default:
 		return "", fmt.Errorf("unsupported prerequisite executable %q", executable)
 	}
@@ -367,4 +402,59 @@ func runExternal(ctx context.Context, directory, executable string, arguments ..
 		return "", fmt.Errorf("%s", Redact(message))
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+func githubCLIExecutable() string {
+	home, _ := os.UserHomeDir()
+	localAppData := os.Getenv("LOCALAPPDATA")
+	return selectGitHubCLIExecutable(runtime.GOOS, home, localAppData, func(path string) bool {
+		// #nosec G703 -- candidates are assembled exclusively from the OS home or
+		// LOCALAPPDATA root plus fixed GitHub CLI path segments below. Only file
+		// metadata is read before falling back to exec.LookPath.
+		info, err := os.Stat(path)
+		return err == nil && !info.IsDir()
+	}, exec.LookPath)
+}
+
+func selectGitHubCLIExecutable(goos, home, localAppData string, exists func(string) bool, lookPath func(string) (string, error)) string {
+	name := "gh"
+	candidates := []string{joinPlatformPath(goos, home, ".local", "bin", name)}
+	if goos == "windows" {
+		name = "gh.exe"
+		candidates = []string{
+			joinPlatformPath(goos, home, ".local", "bin", name),
+			joinPlatformPath(goos, localAppData, "Programs", "GitHub CLI", name),
+		}
+	}
+	for _, candidate := range candidates {
+		if candidate != "" && exists(candidate) {
+			return candidate
+		}
+	}
+	if executable, err := lookPath(name); err == nil {
+		return executable
+	}
+	return name
+}
+
+func joinPlatformPath(goos string, elements ...string) string {
+	if len(elements) == 0 || strings.TrimSpace(elements[0]) == "" {
+		return ""
+	}
+	if goos != "windows" {
+		return path.Join(elements...)
+	}
+	parts := make([]string, 0, len(elements))
+	for _, element := range elements {
+		element = strings.ReplaceAll(element, "/", `\`)
+		if len(parts) == 0 {
+			element = strings.TrimRight(element, `\`)
+		} else {
+			element = strings.Trim(element, `\`)
+		}
+		if element != "" {
+			parts = append(parts, element)
+		}
+	}
+	return strings.Join(parts, `\`)
 }

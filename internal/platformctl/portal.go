@@ -22,7 +22,7 @@ import (
 )
 
 const portalAPIVersion = "portal.steadystate.dev/v1alpha1"
-const portalVersion = "v1.0.0"
+const portalVersion = "v1.0.1"
 
 //go:embed portalassets/*
 var portalAssets embed.FS

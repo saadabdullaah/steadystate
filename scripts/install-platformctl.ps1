@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
-    [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version = 'v1.0.0',
-    [string]$InstallDirectory = (Join-Path $HOME '.local/bin')
+    [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version = 'v1.0.1',
+    [string]$InstallDirectory = (Join-Path $HOME '.local/bin'),
+    [switch]$NoPathUpdate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,9 +53,22 @@ try {
     if ($actual -ne $expected) { throw "Checksum verification failed for $archiveName" }
     $extract = Join-Path $temporaryRoot 'extract'
     Expand-Archive -LiteralPath $archive -DestinationPath $extract
-    New-Item -ItemType Directory -Force -Path $InstallDirectory | Out-Null
-    Copy-Item -LiteralPath (Join-Path $extract 'platformctl.exe') -Destination (Join-Path $InstallDirectory 'platformctl.exe') -Force
-    Write-Host "Installed verified platformctl $Version to $InstallDirectory"
+    $resolvedInstallDirectory = [IO.Path]::GetFullPath($InstallDirectory)
+    New-Item -ItemType Directory -Force -Path $resolvedInstallDirectory | Out-Null
+    Copy-Item -LiteralPath (Join-Path $extract 'platformctl.exe') -Destination (Join-Path $resolvedInstallDirectory 'platformctl.exe') -Force
+    if (-not $NoPathUpdate) {
+        $processEntries = @($env:PATH -split ';' | Where-Object { $_ })
+        if (-not ($processEntries | Where-Object { $_.TrimEnd('\') -ieq $resolvedInstallDirectory.TrimEnd('\') })) {
+            $env:PATH = "$resolvedInstallDirectory;$env:PATH"
+        }
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $userEntries = @($userPath -split ';' | Where-Object { $_ })
+        if (-not ($userEntries | Where-Object { $_.TrimEnd('\') -ieq $resolvedInstallDirectory.TrimEnd('\') })) {
+            [Environment]::SetEnvironmentVariable('Path', ((@($userEntries) + $resolvedInstallDirectory) -join ';'), 'User')
+            Write-Host "Added $resolvedInstallDirectory to the user PATH"
+        }
+    }
+    Write-Host "Installed verified platformctl $Version to $resolvedInstallDirectory"
 } finally {
     $resolvedTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
     $resolvedTarget = [IO.Path]::GetFullPath($temporaryRoot)

@@ -4,7 +4,7 @@ SteadyState is a self-hosted, laptop-scale internal developer platform built aro
 
 Phases 0–8 established the Windows-first kind foundation, the Application/Team/Database control plane, Argo GitOps, metric-gated canaries, correlated telemetry, signed-image policy, durable recovery, and the cross-platform golden-path CLI. Phase 9 added the refined portal and complete lifecycle commands while preserving every existing ownership boundary: the browser consumes typed summaries and reviewed proposals; it never becomes a second control plane.
 
-> Status: SteadyState GA is published as [`v1.0.0`](https://github.com/saadabdullaah/steadystate/releases/tag/v1.0.0) from exact-main commit `c25fc107b78ca3f6332f027de7a644cc24feccc0`. [PR #95](https://github.com/saadabdullaah/steadystate/pull/95), the complete regression suite, hosted Phase 9 evidence, and all six signed and attested CLI archives are verified.
+> Status: SteadyState GA is maintained on the [`v1.0.1`](https://github.com/saadabdullaah/steadystate/releases/tag/v1.0.1) patch line. It preserves the `v1.0.0` product contracts while hardening fresh Windows installation, constrained full-profile startup, lifecycle diagnostics, and the refined embedded portal. The complete regression suite and all six signed and attested CLI archives remain release gates.
 
 ![Phase 9 local developer portal golden path](docs/demonstrations/phase9-portal-golden-path.gif)
 
@@ -54,7 +54,13 @@ The repository is a monorepo. Operator APIs and controllers live alongside the C
 
 ## Requirements
 
-- Windows 10/11 with PowerShell 5.1 or newer.
+- Windows 10/11 with Windows PowerShell 5.1 or PowerShell 7. The CLI prefers
+  `pwsh` when installed and otherwise uses the built-in Windows PowerShell
+  executable with a process-scoped execution-policy bypass for the fixed,
+  repository-owned lifecycle scripts.
+- GitHub CLI `2.97.0` or newer, authenticated to the repository account.
+  SteadyState prefers a verified `~/.local/bin/gh` installation over an older
+  machine-wide binary when both exist.
 - Git for Windows.
 - Docker Desktop using Linux containers and its WSL2 backend.
 - Docker Engine 24 or newer with cgroup v2 enabled.
@@ -62,7 +68,7 @@ The repository is a monorepo. Operator APIs and controllers live alongside the C
 
   | Profile | Minimum | Use it for |
   |---|---:|---|
-  | `minimal` | 4 GiB | Foundation and focused controller development |
+  | `minimal` | 4 GiB | Core Argo/operator foundation and focused controller development; omits tenant workloads and all optional add-ons |
   | `standard` | 7 GiB | Recommended local product experience: portal, GitOps, delivery, policy, and observability |
   | `full` | 9 GiB | Standard plus PostgreSQL, external backups, and disaster recovery |
 
@@ -76,16 +82,30 @@ Go, kind, kubectl, and Helm do not need global installation. SteadyState downloa
 ```powershell
 git clone https://github.com/saadabdullaah/steadystate.git
 cd steadystate
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-platformctl.ps1
+platformctl config init --checkout . --profile standard
+platformctl doctor
+platformctl platform up
+platformctl portal
+```
+
+The installer verifies the release checksum and adds `platformctl` to the
+current process and user PATH. Use `--profile full` only after restoring the
+owner-held `.artifacts/secrets/steadystate.agekey`; the encrypted backup-store
+manifest stays committed, while its private identity never enters Git. On a
+fresh full-profile clone, `doctor` reports missing repository-local `sops` and
+`age` binaries as warnings because `platform up` installs their pinned copies
+before decrypting anything.
+
+For foundation and operator contributors, the underlying commands remain
+available directly:
+
+```powershell
 .\scripts\dev.ps1 doctor
 .\scripts\dev.ps1 tools
 .\scripts\dev.ps1 check-versions
 .\scripts\dev.ps1 test
 .\scripts\dev.ps1 bootstrap -Profile minimal
-```
-
-After bootstrap:
-
-```powershell
 Invoke-WebRequest http://127.0.0.1:8080/healthz
 .\scripts\dev.ps1 smoke
 .\scripts\dev.ps1 test-network-policy

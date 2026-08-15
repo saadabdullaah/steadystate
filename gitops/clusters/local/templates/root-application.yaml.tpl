@@ -18,6 +18,8 @@ spec:
           value: {{ .Values.enableTelemetryPipeline | quote }}
         - name: enableSecurity
           value: {{ .Values.enableSecurity | quote }}
+        - name: enableProgressiveDelivery
+          value: {{ .Values.enableProgressiveDelivery | quote }}
         - name: enableDataFoundation
           value: {{ .Values.enableDataFoundation | quote }}
         - name: enableTenantWorkloads

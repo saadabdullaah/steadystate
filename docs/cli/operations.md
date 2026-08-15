@@ -10,11 +10,11 @@ against the exact tagged release workflow and GitHub OIDC issuer:
 ```powershell
 cosign verify-blob `
   --bundle checksums.txt.sigstore.json `
-  --certificate-identity "https://github.com/saadabdullaah/steadystate/.github/workflows/platformctl-release.yml@refs/tags/v0.8.0" `
+  --certificate-identity "https://github.com/saadabdullaah/steadystate/.github/workflows/platformctl-release.yml@refs/tags/v1.0.1" `
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" `
   checksums.txt
 
-gh attestation verify .\platformctl_0.8.0_windows_amd64.zip `
+gh attestation verify .\platformctl_1.0.1_windows_amd64.zip `
   --repo saadabdullaah/steadystate
 ```
 

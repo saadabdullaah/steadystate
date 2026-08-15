@@ -140,11 +140,11 @@ flowchart TB
 
 | Profile | Nodes | Intended use |
 |---|---:|---|
-| `minimal` | 1 control plane | Pull-request smoke tests and constrained machines |
+| `minimal` | 1 control plane | Core Argo/operator foundation on constrained machines; optional tenant, delivery, telemetry, policy, and data children are not rendered |
 | `standard` | 1 control plane + 1 worker | Default development profile |
 | `full` | 1 control plane + 2 workers | Data/recovery and complete end-to-end demonstrations |
 
-Every profile disables kindnet and installs Calico, making NetworkPolicy behavior observable. Envoy Gateway provides the maintained Gateway API implementation for north-south traffic.
+Every profile disables kindnet and installs Calico, making NetworkPolicy behavior observable. Envoy Gateway provides the maintained Gateway API implementation for north-south traffic. `standard` adds tenant workloads, Rollouts/Prometheus, telemetry, and Kyverno; `full` additionally adds the PostgreSQL and backup/recovery foundation.
 
 Phase 0 owns cluster creation, networking, Gateway API installation, smoke resources, and diagnostics. Phase 1 adds a namespaced `Application` API and a watch-driven controller. Phase 2 adds a cluster-scoped `Team` API and one deterministic `team-<name>` boundary per Team. Phase 3 adds pinned Argo CD, immutable demo publication, repository-scoped delivery automation, runtime provenance, and hosted commit-to-cluster acceptance. Phase 4 adds pinned Argo Rollouts, the Gateway API traffic-router plugin, a trimmed Prometheus stack, operator-generated analysis/monitoring resources, reversible strategy migration, and automatic metric-gated promotion or rollback. Phase 5 extends that monitoring plane with logs, traces, SLO rules, dashboards, and truthful service health. Phase 6 adds OIDC-signed/SBOM-attested images, stable CEL admission policy, SOPS/age secret custody, security status, and network isolation. Phase 7 adds declarative PostgreSQL, external backup durability, database binding, and measured whole-cluster recovery. Phase 8 adds a local-owner CLI, deterministic catalog and proposal schemas, a GitHub App broker, generated service sources, generic signed delivery, ordered diagnosis, and protected retirement without adding an in-cluster CLI service or a second control plane.
 
