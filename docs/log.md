@@ -1031,3 +1031,13 @@
   rejects both lingering child Applications and lingering optional Pods, which
   prevents an apparently green minimal profile from retaining the resource
   footprint of an earlier standard/full run.
+- A clean fresh-clone run at `7070c22` completed `platformctl platform up`
+  from an absent cluster in 10m40s. The nine-check minimal baseline reported
+  only `argocd-configuration`, `steadystate-operator`, and `steadystate-root`,
+  all Synced/Healthy; every optional add-on namespace contained zero Pods.
+  `platform status` returned Ready, `platform verify` passed, and the single
+  kind node used 3.441 GiB of its 9.713 GiB limit at inspection time. A real
+  loopback portal launch/session exchange returned HTTP 200 from
+  `portal.steadystate.dev/v1alpha1`, reported portal `v1.0.1` and profile
+  `minimal`, and exposed the expected SHA-256 asset digest without leaving the
+  portal process running.
