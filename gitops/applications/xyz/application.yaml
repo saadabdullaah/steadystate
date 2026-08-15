@@ -21,7 +21,7 @@ spec:
     strategy: canary
   image:
     repository: ghcr.io/saadabdullaah/steadystate-services
-    tag: xyz-web-v0.1.1
+    tag: xyz-web-v0.1.2
   observability:
     logs: true
     metrics: true
