@@ -1,0 +1,15 @@
+apiVersion: platform.steadystate.dev/v1alpha1
+kind: Team
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "-1"
+  name: portal-smoke-31962791697-1
+spec:
+  allowedRepositories:
+  - ghcr.io/saadabdullaah/steadystate-services
+  owners:
+  - platform-team
+  quota:
+    cpu: "2"
+    memory: 4Gi
