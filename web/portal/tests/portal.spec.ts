@@ -102,8 +102,14 @@ test("primary product surfaces preserve the editorial system", async ({ page }) 
 
 test("application diagnosis is curated instead of exposing raw objects", async ({ page }) => {
   await page.goto("/applications/payments/demo");
+  await page.getByLabel("Color theme").selectOption("dark");
   await page.getByRole("tab", { name: "Doctor" }).click();
   await expect(page.getByRole("heading", { name: "Dependency path" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Doctor" })).toHaveCSS("background-color", "rgb(111, 143, 255)");
+  await expect(page.getByRole("tab", { name: "Doctor" })).toHaveCSS("color", "rgb(12, 16, 32)");
+  await page.addScriptTag({ content: axe.source });
+  const results = await page.evaluate(async () => await (window as any).axe.run());
+  expect(results.violations.filter(item => ["serious", "critical"].includes(item.impact ?? ""))).toEqual([]);
   await expect(page.locator("pre")).toHaveCount(0);
 });
 

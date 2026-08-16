@@ -2,6 +2,12 @@ name: Platformctl smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: Published platformctl release to verify with the installers
+        required: false
+        default: v1.0.0
+        type: string
   pull_request:
     paths:
       - .github/workflows/platformctl-smoke.yml
@@ -32,7 +38,10 @@ jobs:
     env:
       GOTOOLCHAIN: go1.25.13
       CGO_ENABLED: "0"
-      INSTALLER_RELEASE_VERSION: ${{ github.event_name == 'pull_request' && 'v1.0.0' || 'v1.0.1' }}
+      # Before the new patch is published, manual and PR smoke runs verify the
+      # last public release. After publication, dispatch with release_version
+      # set to the new tag to prove all three installers against that release.
+      INSTALLER_RELEASE_VERSION: ${{ inputs.release_version || 'v1.0.0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
