@@ -98,10 +98,11 @@ Launch material stays in a private ignored directory removed before upload.
 Success requires the unmerged smoke PR to be closed and its exact branch
 deleted.
 
-The verified Phase 9 branch artifact is `9177368072` from run `31689255906`.
-Its artifact digest is
-`sha256:05fc3a78031a28ce3b92f0fd6df7043cb9f2299c2aba589b60c2de2a2557f4c1`;
+The latest verified Phase 9 branch artifact is `9263060350` from run
+`31943997118`, against portal control-ledger commit
+`221fab1e2a40d31b2ec762f66455b6adbd4139b5`. Its artifact digest is
+`sha256:bd333c3b6c0786ba071cd8197125e6498281e20e6b3e831b26c2baa47ec9068a`;
 the evidence JSON, GIF, and WebM SHA-256 values are respectively
-`1a3d392f08c0e69c0176f69fcdff730c2edb5ae296d5a6293512f473b1d3e3bf`,
-`c58b8df32c97c3c38eb4c3a337467ec9bb179c96212a17ace2f77ed494690c75`, and
-`98ace3249e81f90e2c63e6df8abaca5cb94aa2435dfdc6e05908c93884e841b2`.
+`c2eb0ca81353a2247fa352606accd88801ac05f1bc4d62fc19475f342900e1c8`,
+`b4b9b3f6e81f87588b58cb7465afde69287c96e4301f9e06b0ee3a099203e0e8`, and
+`fd173d83484edfa64d5cc011e2746d2d2a36a62cdbdf68a40b83d7c47f453de4`.

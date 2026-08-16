@@ -1,5 +1,22 @@
 # Engineering Log
 
+## 2026-08-16 - Refined portal control ledger
+
+- Reworked the embedded local-owner portal into the SteadyState control ledger
+  while preserving the released typed API, broker, Kubernetes, telemetry,
+  policy, and backup boundaries.
+- Verified commit `221fab1e2a40d31b2ec762f66455b6adbd4139b5` in
+  [Phase 9 acceptance run 31943997118](https://github.com/saadabdullaah/steadystate/actions/runs/31943997118).
+  All five acceptance assertions passed, including the real GitHub App smoke
+  proposal and cleanup; artifact `9263060350` has digest
+  `sha256:bd333c3b6c0786ba071cd8197125e6498281e20e6b3e831b26c2baa47ec9068a`.
+- The refreshed hosted GIF, WebM, and evidence JSON SHA-256 values are
+  `b4b9b3f6e81f87588b58cb7465afde69287c96e4301f9e06b0ee3a099203e0e8`,
+  `fd173d83484edfa64d5cc011e2746d2d2a36a62cdbdf68a40b83d7c47f453de4`,
+  and `c2eb0ca81353a2247fa352606accd88801ac05f1bc4d62fc19475f342900e1c8`.
+- Hosted measurements recorded a 484 ms initial render, 33,628,160-byte
+  portal working set, and zero serious or critical accessibility violations.
+
 ## 2026-08-15 - v1.0.1 release closeout
 
 - Squash-merged fresh-install hardening PR #111 as
