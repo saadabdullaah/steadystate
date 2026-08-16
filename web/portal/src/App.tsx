@@ -46,7 +46,7 @@ export function App() {
         <button className="brand" onClick={()=>go("/overview")} aria-label="SteadyState overview"><Logo/><span><strong>SteadyState</strong><small>Control ledger</small></span></button>
         <p><span>Edition</span><b>Local / 01</b></p>
       </div>
-      <nav aria-label="Primary">{nav.map(([key,label],index)=><button key={key} className={section===key?"nav-active":""} onClick={()=>go(`/${key}`)}><span className="nav-number">{String(index+1).padStart(2,"0")}</span><Icon name={key}/><span>{label}</span><span className="nav-arrow">↗</span></button>)}</nav>
+      <nav aria-label="Primary">{nav.map(([key,label],index)=><button key={key} aria-label={label} className={section===key?"nav-active":""} onClick={()=>go(`/${key}`)}><span className="nav-number">{String(index+1).padStart(2,"0")}</span><Icon name={key}/><span>{label}</span><span className="nav-arrow">↗</span></button>)}</nav>
       <div className="sidebar-foot"><span className="mode">Local owner console</span><small><b>{meta.context}</b> / {meta.profile}</small><small className="live"><i className={stream==="Live"?"dot good":"dot"}/>{stream}</small><span className="rail-mark" aria-hidden="true">SS</span></div>
     </aside>
     <div className="workspace">

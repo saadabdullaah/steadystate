@@ -9,9 +9,9 @@
     },
     {
       "name": "app.js",
-      "bytes": 232791,
-      "gzipBytes": 70131,
-      "sha256": "0261900749a28ff552cfa511e8594dc68ba219e67ff4320ea71b6547ee189f40"
+      "bytes": 232806,
+      "gzipBytes": 70137,
+      "sha256": "abb56c2cf6025f0a50616ce8f49ad1d500958712a2641c33513f1d5981247181"
     },
     {
       "name": "index.html",
@@ -21,7 +21,7 @@
     }
   ],
   "budgets": {
-    "javascriptGzipBytes": 70131,
+    "javascriptGzipBytes": 70137,
     "javascriptLimitBytes": 256000,
     "cssGzipBytes": 7724,
     "cssLimitBytes": 81920
