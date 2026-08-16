@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -108,7 +109,7 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 			if err != nil {
 				return err
 			}
-			stages := platformUpStages(selected.Profile)
+			stages := platformUpStagesForEnvironment(selected.Profile, hostedLinuxLifecycle())
 			if action == "down" {
 				stages = platformDownStages(selected.Profile)
 			}
@@ -299,10 +300,24 @@ func checkoutHeadRevision(ctx context.Context, checkoutPath string) (string, err
 }
 
 func platformUpStages(profile string) []platformStage {
+	return platformUpStagesForEnvironment(profile, false)
+}
+
+func hostedLinuxLifecycle() bool {
+	return os.Getenv("GITHUB_ACTIONS") == "true" && os.Getenv("RUNNER_OS") == "Linux"
+}
+
+func platformUpStagesForEnvironment(profile string, hostedLinux bool) []platformStage {
 	// Build before starting kind so cold Go compilation gets the host's CPU and
 	// memory instead of competing with four Kubernetes nodes. The build script
 	// is content-addressed, so exact retries become a fast cache hit.
 	stages := []platformStage{{"Install pinned tools", "tools", 15 * time.Minute}, {"Verify pinned tools", "check-versions", 5 * time.Minute}, {"Build platform images", "build-images", 25 * time.Minute}, {"Bootstrap cluster", "bootstrap", 20 * time.Minute}}
+	if profile == "full" && hostedLinux {
+		// The full hosted stack can starve kube-apiserver while its add-ons start.
+		// Reuse Phase 8's proven relative scheduling contract before any GitOps
+		// workloads are admitted; local lifecycle runs remain untouched.
+		stages = append(stages, platformStage{"Stabilize hosted control plane", "stabilize-hosted-kind", 2 * time.Minute})
+	}
 	if profile == "full" {
 		stages = append(stages, platformStage{"Start retained backup store", "start-backup-store", 5 * time.Minute})
 	}

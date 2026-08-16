@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-templates','test-envtest','run','platformctl','portal','test-portal','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','start-backup-store','stop-backup-store','verify-data','test-data-recovery','phase7-foundation','phase7-acceptance','phase8-acceptance','phase9-acceptance','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
+    [ValidateSet('doctor','tools','check-versions','generate','manifests','verify-generated','lint','test','test-templates','test-envtest','run','platformctl','portal','test-portal','build-images','load-images','deploy-operator','test-operator','demo-self-heal','test-isolation','undeploy-operator','deploy-gitops','test-gitops','undeploy-gitops','verify-gitops','verify-progressive-delivery','test-progressive-delivery','phase4-acceptance','verify-observability','test-observability','phase5-acceptance','decrypt-secrets','verify-secrets','rotate-secrets','verify-security','test-security','phase6-acceptance','start-backup-store','stop-backup-store','verify-data','test-data-recovery','phase7-foundation','phase7-acceptance','phase8-acceptance','phase9-acceptance','stabilize-hosted-kind','bootstrap','smoke','test-network-policy','diagnostics','destroy')]
     [string]$Command = 'doctor',
     [ValidateSet('minimal','standard','full')]
     [string]$Profile = $(if ($env:PROFILE) { $env:PROFILE } else { 'minimal' }),
@@ -116,6 +116,43 @@ function Assert-Docker {
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previousPreference
     if ($exitCode -ne 0) { throw 'Docker engine is not running.' }
+}
+
+function Set-HostedKindPriority {
+    if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Linux') {
+        throw 'Hosted kind resource stabilization is restricted to GitHub-hosted Linux lifecycle runs.'
+    }
+
+    $expected = @("$ClusterName-control-plane", "$ClusterName-worker", "$ClusterName-worker2")
+    $actual = @(& docker ps --filter "label=io.x-k8s.kind.cluster=$ClusterName" --format '{{.Names}}' | Sort-Object)
+    if ($LASTEXITCODE -ne 0 -or ($actual -join "`n") -cne (($expected | Sort-Object) -join "`n")) {
+        throw "Refusing to tune unexpected kind containers for '$ClusterName': $($actual -join ', ')."
+    }
+
+    $controlPlane = "$ClusterName-control-plane"
+    & docker update --cpus 0 --cpu-shares 2048 --memory-reservation 2g $controlPlane | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not reserve hosted control-plane resources.' }
+    foreach ($worker in @("$ClusterName-worker", "$ClusterName-worker2")) {
+        & docker update --cpus 0 --cpu-shares 1024 $worker | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not set hosted worker scheduling weight for $worker." }
+    }
+
+    $configuration = @(& docker inspect @($expected))
+    if ($LASTEXITCODE -ne 0 -or -not $configuration) { throw 'Could not inspect hosted kind resource stabilization.' }
+    $containers = @((($configuration -join [Environment]::NewLine) | ConvertFrom-Json))
+    $controlPlaneState = @($containers | Where-Object { $_.Name -eq "/$controlPlane" }) | Select-Object -First 1
+    $workerNames = @("/$ClusterName-worker", "/$ClusterName-worker2")
+    $workers = @($containers | Where-Object { $_.Name -in $workerNames })
+    if (-not $controlPlaneState -or [int64]$controlPlaneState.HostConfig.NanoCpus -ne 0 -or
+        [int64]$controlPlaneState.HostConfig.CpuShares -ne 2048 -or
+        [int64]$controlPlaneState.HostConfig.MemoryReservation -ne 2147483648 -or
+        $workers.Count -ne 2 -or @($workers | Where-Object {
+            [int64]$_.HostConfig.NanoCpus -ne 0 -or [int64]$_.HostConfig.CpuShares -ne 1024
+        }).Count -ne 0) {
+        throw 'Hosted kind resource stabilization differs from the exact expected contract.'
+    }
+
+    Write-Host "Hosted kind scheduling stabilized for '$ClusterName' (control-plane shares=2048, reservation=2GiB; worker shares=1024)."
 }
 
 function Assert-Cluster {
@@ -826,6 +863,7 @@ try {
         'phase9-acceptance' {
             & (Join-Path $PSScriptRoot 'phase9-acceptance.ps1') -Stage $Phase9AcceptanceStage
         }
+        'stabilize-hosted-kind' { Assert-Docker; Set-HostedKindPriority }
         'smoke' { Invoke-Smoke }
         'test-network-policy' { Invoke-NetworkPolicyProof }
         'diagnostics' { Invoke-Diagnostics }

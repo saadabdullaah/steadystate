@@ -125,6 +125,42 @@ func TestPlatformUpPreflightBlockingBoundary(t *testing.T) {
 	}
 }
 
+func TestHostedFullLifecycleStabilizesBeforeGitOpsWorkloads(t *testing.T) {
+	stages := platformUpStagesForEnvironment("full", true)
+	want := []string{
+		"tools", "check-versions", "build-images", "bootstrap", "stabilize-hosted-kind",
+		"start-backup-store", "load-images", "deploy-gitops", "test-gitops", "verify-data",
+	}
+	if len(stages) != len(want) {
+		t.Fatalf("stage count=%d, want %d: %+v", len(stages), len(want), stages)
+	}
+	for index := range want {
+		if stages[index].Command != want[index] {
+			t.Fatalf("stage[%d]=%q, want %q", index, stages[index].Command, want[index])
+		}
+	}
+}
+
+func TestHostedStabilizationDoesNotChangeLocalOrSmallerProfiles(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		profile string
+		hosted  bool
+	}{
+		{name: "local full", profile: "full", hosted: false},
+		{name: "hosted standard", profile: "standard", hosted: true},
+		{name: "hosted minimal", profile: "minimal", hosted: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, stage := range platformUpStagesForEnvironment(test.profile, test.hosted) {
+				if stage.Command == "stabilize-hosted-kind" {
+					t.Fatalf("unexpected hosted stabilization in %s lifecycle", test.name)
+				}
+			}
+		})
+	}
+}
+
 func TestResourceBudgetSupportsStandardButRejectsFullAtEightGiB(t *testing.T) {
 	available := int64(78 * (1 << 30) / 10)
 	standard := resourceBudgetCheck("standard", available)

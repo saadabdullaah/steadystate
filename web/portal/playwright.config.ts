@@ -11,8 +11,9 @@ export default defineConfig({
   reporter: process.env.CI ? [["html", { outputFolder: "../../.artifacts/phase9/playwright-report", open: "never" }], ["list"]] : "list",
   use: {
     baseURL: "http://127.0.0.1:4173",
+    launchOptions: process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : undefined,
     trace: "retain-on-failure",
-    video: process.env.RECORD_VIDEO === "true" ? "on" : "retain-on-failure",
+    video: process.env.PLAYWRIGHT_DISABLE_VIDEO === "true" ? "off" : process.env.RECORD_VIDEO === "true" ? "on" : "retain-on-failure",
     screenshot: "only-on-failure"
   },
   projects: [

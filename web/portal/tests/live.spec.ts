@@ -23,7 +23,7 @@ test.describe("real Phase 9 portal", () => {
     const startedAt = Date.now();
     await page.goto(launchURL!);
     await expect(page).toHaveURL(/http:\/\/127\.0\.0\.1:\d+\/$/);
-    await expect(page.getByRole("heading", { name: "Everything steady, in one place" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "The platform is steady." })).toBeVisible({ timeout: 30_000 });
     const initialRenderMilliseconds = Date.now() - startedAt;
     expect(initialRenderMilliseconds).toBeLessThanOrEqual(2_000);
     await expect(page.locator(".live")).toContainText("Live", { timeout: 5_000 });
@@ -73,7 +73,7 @@ test.describe("real Phase 9 portal", () => {
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(new URL("/overview", launchURL!).toString());
-    await expect(page.getByRole("heading", { name: "Everything steady, in one place" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "The platform is steady." })).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: resolve(artifactRoot, "screenshots/06-overview-mobile.png") });
     writeFileSync(resolve(artifactRoot, "accessibility.json"), `${JSON.stringify(accessibility, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     writeFileSync(resolve(artifactRoot, "browser-performance.json"), `${JSON.stringify({ initialRenderMilliseconds, initialRenderBudgetMilliseconds: 2_000, sseState: "Live" }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
