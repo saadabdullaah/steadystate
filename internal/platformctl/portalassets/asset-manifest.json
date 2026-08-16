@@ -3,9 +3,9 @@
   "files": [
     {
       "name": "app.css",
-      "bytes": 34356,
+      "bytes": 34374,
       "gzipBytes": 7727,
-      "sha256": "903433c88e6c12cddfc982bcd66c55c96ef9044729fe9b1d103b7b8d476596a0"
+      "sha256": "57bd1396cfd0adf4b08625066d61bc2b3d72e5ddb3796ddef7ebad5f86b1050a"
     },
     {
       "name": "app.js",

@@ -518,7 +518,7 @@ tbody tr:hover { background: var(--accent-soft); }
 
 .tabs { border-bottom-color: var(--ink); }
 .tabs button { padding: 13px 18px; font: 700 10px ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; }
-.tabs button[aria-selected="true"] { color: #fff; background: var(--accent); border-color: var(--accent); }
+.tabs button[aria-selected="true"] { color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); }
 .detail-grid { gap: 0; border-top: 1px solid var(--ink); border-left: 1px solid var(--ink); }
 .section-title { background: var(--surface-2); border-bottom-color: var(--ink); }
 .check { border: 1px solid var(--line); border-left: 3px solid var(--ink); border-radius: 0; }
