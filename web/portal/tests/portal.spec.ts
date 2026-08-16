@@ -70,6 +70,10 @@ test("primary navigation stays usable on mobile and dark theme", async ({ page }
   await page.getByRole("button", { name: /payments/ }).click();
   await expect(page.getByRole("heading", { name: "payments" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "Requests" }).click();
+  await page.addScriptTag({ content: axe.source });
+  const results = await page.evaluate(async () => await (window as any).axe.run());
+  expect(results.violations.filter(item => ["serious", "critical"].includes(item.impact ?? ""))).toEqual([]);
   if (process.env.PORTAL_MOBILE_SCREENSHOT_PATH) await page.screenshot({ path: process.env.PORTAL_MOBILE_SCREENSHOT_PATH, fullPage: true });
 });
 
