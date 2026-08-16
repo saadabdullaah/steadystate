@@ -108,6 +108,11 @@ jobs:
         shell: pwsh
         run: ./scripts/dev.ps1 bootstrap -Profile full
 
+      - name: Stabilize hosted control plane
+        timeout-minutes: 2
+        shell: pwsh
+        run: ./scripts/dev.ps1 stabilize-hosted-kind -Profile full
+
       - name: Start retained external backup store
         timeout-minutes: 4
         shell: pwsh

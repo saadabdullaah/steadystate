@@ -27,4 +27,6 @@ cainjector:
       memory: 48Mi
     limits:
       cpu: 100m
-      memory: 128Mi
+      # Full-profile startup reconciles the complete SteadyState CRD set. The
+      # hosted GA proof measured the previous 128 MiB limit being exceeded.
+      memory: 256Mi

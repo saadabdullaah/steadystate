@@ -485,6 +485,10 @@ switch ($Stage) {
         Set-Stage $state 'recovery-bootstrap'
         & (Join-Path $PSScriptRoot 'dev.ps1') bootstrap -Profile full
         if ($LASTEXITCODE -ne 0) { throw 'Full-profile rebootstrap failed.' }
+        if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_OS -eq 'Linux') {
+            & (Join-Path $PSScriptRoot 'dev.ps1') stabilize-hosted-kind -Profile full
+            if ($LASTEXITCODE -ne 0) { throw 'Hosted recovery control-plane stabilization failed.' }
+        }
         & (Join-Path $PSScriptRoot 'backup-store.ps1') -Action Start
         if ($LASTEXITCODE -ne 0) { throw 'Reconnecting the retained backup store failed.' }
         & (Join-Path $PSScriptRoot 'dev.ps1') load-images

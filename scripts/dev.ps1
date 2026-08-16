@@ -130,10 +130,10 @@ function Set-HostedKindPriority {
     }
 
     $controlPlane = "$ClusterName-control-plane"
-    & docker update --cpus 0 --cpu-shares 2048 --memory-reservation 2g $controlPlane | Out-Null
+    & docker update --cpus 0 --cpu-shares 4096 --memory-reservation 3g $controlPlane | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not reserve hosted control-plane resources.' }
     foreach ($worker in @("$ClusterName-worker", "$ClusterName-worker2")) {
-        & docker update --cpus 0 --cpu-shares 1024 $worker | Out-Null
+        & docker update --cpus 0 --cpu-shares 512 $worker | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not set hosted worker scheduling weight for $worker." }
     }
 
@@ -144,15 +144,15 @@ function Set-HostedKindPriority {
     $workerNames = @("/$ClusterName-worker", "/$ClusterName-worker2")
     $workers = @($containers | Where-Object { $_.Name -in $workerNames })
     if (-not $controlPlaneState -or [int64]$controlPlaneState.HostConfig.NanoCpus -ne 0 -or
-        [int64]$controlPlaneState.HostConfig.CpuShares -ne 2048 -or
-        [int64]$controlPlaneState.HostConfig.MemoryReservation -ne 2147483648 -or
+        [int64]$controlPlaneState.HostConfig.CpuShares -ne 4096 -or
+        [int64]$controlPlaneState.HostConfig.MemoryReservation -ne 3221225472 -or
         $workers.Count -ne 2 -or @($workers | Where-Object {
-            [int64]$_.HostConfig.NanoCpus -ne 0 -or [int64]$_.HostConfig.CpuShares -ne 1024
+            [int64]$_.HostConfig.NanoCpus -ne 0 -or [int64]$_.HostConfig.CpuShares -ne 512
         }).Count -ne 0) {
         throw 'Hosted kind resource stabilization differs from the exact expected contract.'
     }
 
-    Write-Host "Hosted kind scheduling stabilized for '$ClusterName' (control-plane shares=2048, reservation=2GiB; worker shares=1024)."
+    Write-Host "Hosted kind scheduling stabilized for '$ClusterName' (control-plane shares=4096, reservation=3GiB; worker shares=512)."
 }
 
 function Assert-Cluster {

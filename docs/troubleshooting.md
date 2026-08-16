@@ -672,15 +672,20 @@ repository command. Never recursively delete Docker resources or repository
 directories. Normal `main` and automation PRs are outside this cleanup scope.
 
 The hosted full-profile job uses no hard CPU quota on its exact three kind
-containers. It gives the control plane twice each worker's Docker scheduling
-weight and reserves 2 GiB of soft control-plane memory before GitOps add-ons
-start. Under contention the API receives half the available container CPU,
+containers. It gives the control plane eight times each worker's Docker
+scheduling weight and reserves 3 GiB of soft control-plane memory before
+GitOps add-ons start. Under contention the API receives 80% of the available
+container CPU,
 while a busy worker can borrow capacity from an idle peer. This avoids both
 control-plane starvation and the stranded capacity caused by per-worker hard
 caps. The harness then waits for every
 required platform child Application to settle before beginning product
 readiness assertions. This is runner stabilization, not a different platform
-profile. If the API returns repeated EOFs, inspect the artifact's
+profile. The full data-foundation readiness bound is 15 minutes; minimal and
+standard remain at 10 minutes. Cert-manager's cainjector has a measured 256 MiB
+limit because the complete SteadyState CRD set exceeded its former 128 MiB
+limit during hosted cold start. If the API returns repeated EOFs, inspect the
+artifact's
 `failure-capture-host` Docker stats, inspect data, and kind logs first. A
 healthy API returning NotFound while a resource has not yet been created is
 normal convergence; `/readyz` is checked first. The acceptance wait fails only

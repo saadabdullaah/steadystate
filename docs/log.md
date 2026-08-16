@@ -1024,6 +1024,35 @@
 
 ## v1.0.1 fresh-install hardening
 
+- Phase 9 closeout PR #137 squash-merged at exact `main` commit
+  `7531e097f21e6b434d00728449cba67e6a6ed012`. CI run
+  [31967885468](https://github.com/saadabdullaah/steadystate/actions/runs/31967885468),
+  CodeQL run
+  [31967885482](https://github.com/saadabdullaah/steadystate/actions/runs/31967885482),
+  Nightly run
+  [31967932899](https://github.com/saadabdullaah/steadystate/actions/runs/31967932899),
+  Phase 4/5/6/8 runs
+  [31967935202](https://github.com/saadabdullaah/steadystate/actions/runs/31967935202),
+  [31967936869](https://github.com/saadabdullaah/steadystate/actions/runs/31967936869),
+  [31967939384](https://github.com/saadabdullaah/steadystate/actions/runs/31967939384), and
+  [31967943635](https://github.com/saadabdullaah/steadystate/actions/runs/31967943635),
+  Platformctl smoke run
+  [31967947950](https://github.com/saadabdullaah/steadystate/actions/runs/31967947950),
+  and release-snapshot run
+  [31967949945](https://github.com/saadabdullaah/steadystate/actions/runs/31967949945)
+  passed against that exact revision.
+- The same sweep exposed full-profile cold-start pressure rather than a portal
+  defect. Phase 7 run
+  [31967941659](https://github.com/saadabdullaah/steadystate/actions/runs/31967941659)
+  captured cert-manager cainjector exceeding its 128 MiB limit, while Phase 9
+  run [31967945539](https://github.com/saadabdullaah/steadystate/actions/runs/31967945539)
+  captured kube-apiserver/etcd restarts and an incomplete later Argo wave.
+  Hosted Phase 7 now applies the same bounded kind control-plane priority before
+  both initial and recovery GitOps, the control plane receives an 8:1 scheduling
+  weight over each worker with a 3 GiB soft reservation, cainjector receives a
+  measured 256 MiB limit, and only the full profile receives a 15-minute Argo
+  readiness window within the existing 20-minute lifecycle stage.
+
 - A clean Windows minimal-profile run on 2026-08-15 proved the prerequisite,
   pinned-tool, image-build, and Kubernetes 1.35.5/Calico path, then exposed an
   Envoy Gateway cold-start failure: the kind node's direct Docker Hub pull
