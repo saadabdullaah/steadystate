@@ -412,7 +412,7 @@ body {
   width: 100%; height: 56px; padding: 0 14px;
   display: grid; grid-template-columns: 30px 22px 1fr 16px; gap: 8px; align-items: center;
   color: var(--muted); border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
-  font-size: 13px; transition: background-color .15s, border-color .15s;
+  font-size: 13px; transition: none;
 }
 .sidebar nav button:hover { color: var(--ink); background: var(--surface-2); }
 .sidebar nav button.nav-active { color: var(--surface); background: var(--ink); border-color: var(--ink); box-shadow: none; }

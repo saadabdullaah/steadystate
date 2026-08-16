@@ -109,7 +109,7 @@ func newPlatformLifecycleCommand(options *Options, action string) *cobra.Command
 			if err != nil {
 				return err
 			}
-			stages := platformUpStages(selected.Profile)
+			stages := platformUpStagesForEnvironment(selected.Profile, hostedLinuxLifecycle())
 			if action == "down" {
 				stages = platformDownStages(selected.Profile)
 			}
@@ -300,7 +300,11 @@ func checkoutHeadRevision(ctx context.Context, checkoutPath string) (string, err
 }
 
 func platformUpStages(profile string) []platformStage {
-	return platformUpStagesForEnvironment(profile, os.Getenv("GITHUB_ACTIONS") == "true" && os.Getenv("RUNNER_OS") == "Linux")
+	return platformUpStagesForEnvironment(profile, false)
+}
+
+func hostedLinuxLifecycle() bool {
+	return os.Getenv("GITHUB_ACTIONS") == "true" && os.Getenv("RUNNER_OS") == "Linux"
 }
 
 func platformUpStagesForEnvironment(profile string, hostedLinux bool) []platformStage {

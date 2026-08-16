@@ -71,6 +71,8 @@ test("primary navigation stays usable on mobile and dark theme", async ({ page }
   await expect(page.getByRole("heading", { name: "payments" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.getByRole("button", { name: "Requests" }).click();
+  await expect(page.getByRole("button", { name: "Requests" })).toHaveCSS("background-color", "rgb(240, 239, 232)");
+  await expect(page.getByRole("button", { name: "Requests" })).toHaveCSS("color", "rgb(21, 23, 28)");
   await page.addScriptTag({ content: axe.source });
   const results = await page.evaluate(async () => await (window as any).axe.run());
   expect(results.violations.filter(item => ["serious", "critical"].includes(item.impact ?? ""))).toEqual([]);
