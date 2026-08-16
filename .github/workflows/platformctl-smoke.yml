@@ -1,13 +1,7 @@
 name: Platformctl smoke
 
 on:
-  workflow_dispatch:
-    inputs:
-      release_version:
-        description: Published platformctl release to verify with the installers
-        required: false
-        default: v1.0.0
-        type: string
+  workflow_dispatch: # Recovery and post-publication verification; no user-controlled inputs.
   pull_request:
     paths:
       - .github/workflows/platformctl-smoke.yml
@@ -38,13 +32,25 @@ jobs:
     env:
       GOTOOLCHAIN: go1.25.13
       CGO_ENABLED: "0"
-      # Before the new patch is published, manual and PR smoke runs verify the
-      # last public release. After publication, dispatch with release_version
-      # set to the new tag to prove all three installers against that release.
-      INSTALLER_RELEASE_VERSION: ${{ inputs.release_version || 'v1.0.0' }}
+      # Pull requests verify the last known release. A manual run resolves the
+      # latest published v1 release below, allowing post-publication proof.
+      INSTALLER_RELEASE_VERSION: ${{ github.event_name == 'pull_request' && 'v1.0.0' || 'v1.0.1' }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Resolve latest published installer release
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $result = & gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq '.tag_name'
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve the latest published platformctl release.' }
+          $tag = ($result | Select-Object -First 1).Trim()
+          if ($tag -cnotmatch '^v1\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw "Latest published release '$tag' is not a supported v1 semantic version."
+          }
+          "INSTALLER_RELEASE_VERSION=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install checksum-verified Go on macOS
         if: runner.os == 'macOS'
         shell: bash
