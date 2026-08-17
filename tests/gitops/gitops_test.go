@@ -962,6 +962,10 @@ func TestPhase7DataFoundationIsFullProfileOnlyAndPinned(t *testing.T) {
 	if !strings.Contains(certManagerValues, "leaderElection:") || !strings.Contains(certManagerValues, "namespace: cert-manager") {
 		t.Fatal("cert-manager leader election must remain inside the permitted cert-manager namespace")
 	}
+	if !strings.Contains(certManagerValues, "cainjector:\n  resources:\n    requests:\n      cpu: 10m\n      memory: 48Mi\n    limits:\n      cpu: 100m") ||
+		!strings.Contains(certManagerValues, "hosted GA proof measured the previous 128 MiB limit being exceeded.\n      memory: 256Mi") {
+		t.Fatal("cert-manager cainjector must retain the measured full-profile memory correction")
+	}
 }
 
 func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) {
@@ -1164,6 +1168,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"$Prefix-$component-previous.log",
 		"-Action Stop -PreserveNetwork",
 		"Could not create Backup ${Name}: $detail",
+		"stabilize-hosted-kind -Profile full",
+		"Hosted recovery control-plane stabilization failed.",
 	} {
 		if !strings.Contains(phase7Acceptance, contract) {
 			t.Fatalf("Phase 7 acceptance setup/cleanup is missing %q", contract)
@@ -1176,6 +1182,8 @@ func TestHostedFailureEvidenceAndSecurityExceptionsRemainExplicit(t *testing.T) 
 		"Cluster 'steadystate' is already absent; GitOps cleanup is complete.",
 		"timeout-minutes: 75",
 		"run: ./scripts/phase7-acceptance.ps1 -Stage Test",
+		"name: Stabilize hosted control plane",
+		"run: ./scripts/dev.ps1 stabilize-hosted-kind -Profile full",
 		"timeout --signal=TERM --kill-after=15s 4m vhs docs/demonstrations/phase7-disaster-recovery.tape",
 		"curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30",
 		"id: recovery-token",
@@ -1216,6 +1224,10 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 
 	if !strings.Contains(text, "[AllowEmptyCollection()]") {
 		t.Fatal("the acceptance evidence check list must accept its initially empty collection")
+	}
+	if !strings.Contains(text, "$readinessTimeoutSeconds = if ($Profile -eq 'full') { 900 } else { 600 }") ||
+		!strings.Contains(text, "Wait-ArgoApplications -Names $applicationNames -TimeoutSeconds $readinessTimeoutSeconds") {
+		t.Fatal("GitOps readiness must align the full data-foundation wait with the outer platform stage")
 	}
 
 	rootDelete := strings.Index(text, "delete application.argoproj.io steadystate-root")
@@ -1259,6 +1271,16 @@ func TestGitOpsAcceptanceAndTeardownRegressions(t *testing.T) {
 	} {
 		if !strings.Contains(string(devScript), command) {
 			t.Fatalf("operator teardown is missing bounded cleanup %q", command)
+		}
+	}
+	for _, contract := range []string{
+		"--cpus 0 --cpu-shares 4096 --memory-reservation 3g $controlPlane",
+		"--cpus 0 --cpu-shares 512 $worker",
+		"HostConfig.CpuShares -ne 4096",
+		"HostConfig.MemoryReservation -ne 3221225472",
+	} {
+		if !strings.Contains(string(devScript), contract) {
+			t.Fatalf("hosted kind stabilization is missing %q", contract)
 		}
 	}
 }

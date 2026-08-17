@@ -503,7 +503,11 @@ function Invoke-Test {
     $applicationNames += 'steadystate-root'
 
     $started = Get-Date
-    $applications = Wait-ArgoApplications -Names $applicationNames -TimeoutSeconds 600
+    # The full profile adds five ordered data-foundation waves. Keep the
+    # standard/minimal bound unchanged while allowing those children to recover
+    # from a transient hosted control-plane restart within the outer 20m stage.
+    $readinessTimeoutSeconds = if ($Profile -eq 'full') { 900 } else { 600 }
+    $applications = Wait-ArgoApplications -Names $applicationNames -TimeoutSeconds $readinessTimeoutSeconds
     foreach ($name in $applicationNames) {
         Add-PassedCheck $checks "argocd-application-$name-healthy" $started "$name is Synced and Healthy."
     }

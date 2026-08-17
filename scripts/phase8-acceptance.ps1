@@ -139,10 +139,10 @@ function Set-HostedControlPlanePriority {
     # Use relative scheduling weights without hard quotas. The control plane
     # receives half of contended CPU while a busy worker can borrow capacity
     # from an idle peer. Per-worker quotas previously stranded that capacity.
-    & docker update --cpus 0 --cpu-shares 2048 --memory-reservation 2g steadystate-control-plane | Out-Null
+    & docker update --cpus 0 --cpu-shares 4096 --memory-reservation 3g steadystate-control-plane | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not reserve hosted control-plane resources.' }
     foreach ($worker in @('steadystate-worker','steadystate-worker2')) {
-        & docker update --cpus 0 --cpu-shares 1024 $worker | Out-Null
+        & docker update --cpus 0 --cpu-shares 512 $worker | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not set hosted worker scheduling weight for $worker." }
     }
     $configuration = @(& docker inspect @($expected))
@@ -151,10 +151,10 @@ function Set-HostedControlPlanePriority {
     $controlPlane = @($containers | Where-Object { $_.Name -eq '/steadystate-control-plane' }) | Select-Object -First 1
     $workers = @($containers | Where-Object { $_.Name -in @('/steadystate-worker','/steadystate-worker2') })
     if (-not $controlPlane -or [int64]$controlPlane.HostConfig.NanoCpus -ne 0 -or
-        [int64]$controlPlane.HostConfig.CpuShares -ne 2048 -or
-        [int64]$controlPlane.HostConfig.MemoryReservation -ne 2147483648 -or
+        [int64]$controlPlane.HostConfig.CpuShares -ne 4096 -or
+        [int64]$controlPlane.HostConfig.MemoryReservation -ne 3221225472 -or
         $workers.Count -ne 2 -or @($workers | Where-Object {
-            [int64]$_.HostConfig.NanoCpus -ne 0 -or [int64]$_.HostConfig.CpuShares -ne 1024
+            [int64]$_.HostConfig.NanoCpus -ne 0 -or [int64]$_.HostConfig.CpuShares -ne 512
         }).Count -ne 0) {
         throw 'Hosted kind resource stabilization differs from the exact expected contract.'
     }
