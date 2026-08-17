@@ -17,18 +17,22 @@ tenants:
   services: []
   teamPath: gitops/teams/payments
 - applications:
-  - lifecycle: Active
+  - deletionRequest: af85ec3f-0bed-4d53-9d7e-5c4bf062c8cd
+    lifecycle: Retiring
     name: xyz
     path: gitops/applications/xyz
   - databaseRef: xyz
-    lifecycle: Active
+    deletionRequest: af85ec3f-0bed-4d53-9d7e-5c4bf062c8cd
+    lifecycle: Retiring
     name: xyz-api
     path: gitops/applications/xyz-api
   databases:
-  - lifecycle: Active
+  - deletionRequest: af85ec3f-0bed-4d53-9d7e-5c4bf062c8cd
+    lifecycle: Retiring
     name: xyz
     path: gitops/databases/xyz
-  lifecycle: Active
+  deletionRequest: af85ec3f-0bed-4d53-9d7e-5c4bf062c8cd
+  lifecycle: Retiring
   name: xyz
   owners:
   - xyz-owners
@@ -37,7 +41,8 @@ tenants:
     - xyz
     - xyz-api
     databaseRef: xyz
-    lifecycle: Active
+    deletionRequest: af85ec3f-0bed-4d53-9d7e-5c4bf062c8cd
+    lifecycle: Retiring
     name: xyz
     ownsDatabase: true
     ownsTeam: true
