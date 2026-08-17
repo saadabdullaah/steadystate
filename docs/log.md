@@ -1,5 +1,53 @@
 # Engineering Log
 
+## 2026-08-17 - v1.0.1 GA reliability release published
+
+- Phase 9 portal PR #132 merged as
+  `bf83e39ef46d2ef048d60be8d20bcfba89b979cd`, release-validation PR #137
+  merged as `7531e097f21e6b434d00728449cba67e6a6ed012`, and cold-start
+  reliability PR #142 produced the final release commit
+  `1c2fd186c3ae164fc198a402f8609cef628380f4`.
+- Exact-main CI
+  [32012436260](https://github.com/saadabdullaah/steadystate/actions/runs/32012436260),
+  parallel CodeQL
+  [32012436293](https://github.com/saadabdullaah/steadystate/actions/runs/32012436293),
+  Nightly
+  [32012477393](https://github.com/saadabdullaah/steadystate/actions/runs/32012477393),
+  Phase 4
+  [32012481722](https://github.com/saadabdullaah/steadystate/actions/runs/32012481722),
+  Phase 5
+  [32012485709](https://github.com/saadabdullaah/steadystate/actions/runs/32012485709),
+  Phase 6 attempt 2
+  [32012490514](https://github.com/saadabdullaah/steadystate/actions/runs/32012490514),
+  Phase 7
+  [32012495076](https://github.com/saadabdullaah/steadystate/actions/runs/32012495076),
+  Phase 8
+  [32012499361](https://github.com/saadabdullaah/steadystate/actions/runs/32012499361),
+  and Phase 9
+  [32012503596](https://github.com/saadabdullaah/steadystate/actions/runs/32012503596)
+  passed against that exact commit.
+- Retained final artifacts include Phase 7 artifact `9283302100`
+  (`sha256:b797c08ca96601157c3781ae5542e55950c46a7ef7ed85cea33f4eb3d0a07569`),
+  Phase 9 artifact `9282976474`
+  (`sha256:a0fccc70e63ad33b33e6a285fe44e69c0b7c0a6694d8de1daa39e461e659d301`),
+  its browser-contract artifact `9282320595`
+  (`sha256:f1e21570572aaea26d1799e76608914de0fc96e6befc4bd70a2a39d1ab082bde`),
+  and release artifact `9285875937`
+  (`sha256:494293860890438962e4c9329e0a2d6b5acbd029f9c416949087d2fa1c2a908d`).
+- Annotated tag `v1.0.1` points to the exact validated commit. Tag workflow
+  [32022035351](https://github.com/saadabdullaah/steadystate/actions/runs/32022035351)
+  produced six Windows/Linux/macOS AMD64/ARM64 archives, six SPDX SBOMs,
+  checksums, a Sigstore bundle, and GitHub build attestations. The native
+  Windows AMD64 archive checksum and embedded portal metadata were verified
+  before publishing the
+  [v1.0.1 release](https://github.com/saadabdullaah/steadystate/releases/tag/v1.0.1).
+- Public installer smoke
+  [32023439032](https://github.com/saadabdullaah/steadystate/actions/runs/32023439032)
+  then installed and launched `v1.0.1` on Windows, Linux, and macOS; its
+  six-target cross-compile and release snapshot also passed. No remote Phase 9,
+  acceptance, or automation branch remains. Dependabot PRs #146/#147 remain
+  separate because their grouped upgrades currently fail required gates.
+
 ## 2026-08-16 - Refined portal control ledger
 
 - Reworked the embedded local-owner portal into the SteadyState control ledger
@@ -37,8 +85,8 @@
   `9249663392`, and release snapshot `9249469874`.
 - The `v1.0.1` closeout updates installer defaults, portal version metadata,
   consumer verification examples, and cross-platform released-installer
-  smoke. Publication remains gated on the closeout PR and exact release-commit
-  validation.
+  smoke. At this checkpoint publication remained gated; the completed
+  2026-08-17 release record above supersedes that interim state.
 - Fresh Windows lifecycle commands now prefer PowerShell 7 but fall back to
   the built-in Windows PowerShell 5.1 executable. The fallback applies a
   process-scoped execution-policy bypass only to the fixed repository-owned
