@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install pinned Node.js
@@ -94,7 +94,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -127,7 +127,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Linux tools
         shell: bash
         run: ./scripts/install-tools.sh --skip-lint
@@ -144,7 +144,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Prepare security report directory
@@ -170,7 +170,7 @@ jobs:
           exit-code: "0"
       - name: Gosec machine-readable report
         continue-on-error: true
-        uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3
+        uses: securego/gosec@deb54465fea23d19a77f037e11e6589021f8501d
         with:
           args: "-no-fail -fmt sarif -out .artifacts/security/gosec.sarif ./..."
       - name: Go vulnerability machine-readable report
@@ -182,7 +182,7 @@ jobs:
           output-format: sarif
           output-file: .artifacts/security/govulncheck.sarif
       - name: Gosec blocking gate
-        uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3
+        uses: securego/gosec@deb54465fea23d19a77f037e11e6589021f8501d
         with:
           args: "-severity high -confidence medium ./..."
       - name: Go vulnerability gate
@@ -213,7 +213,7 @@ jobs:
         shell: pwsh
         run: ./scripts/security-static.ps1
       - name: Checkov IaC scan
-        uses: bridgecrewio/checkov-action@7b972723c44fb3d256283fac96fae5d7c1894bb7 # pinned snapshot
+        uses: bridgecrewio/checkov-action@5659ddea96102e16d8f221b3d8402453c0b1c150 # pinned snapshot
         with:
           directory: .
           framework: kubernetes,github_actions
@@ -238,7 +238,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned project tools
         shell: pwsh
         run: ./scripts/install-tools.ps1 -BaseOnly
