@@ -4,13 +4,12 @@ metadata:
   name: demo
   namespace: team-payments
   annotations:
-    argocd.argoproj.io/sync-wave: "1"
-    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   owner: platform-team
   image:
     repository: ghcr.io/saadabdullaah/steadystate-demo-app
-    tag: v0.7.1
+    tag: sha-0dfa31730974d3aa721ab31cda17d0f680c2acde
   runtime:
     port: 8080
     replicas:
@@ -24,26 +23,17 @@ spec:
       cpu: 200m
       memory: 128Mi
   deployment:
-    strategy: canary
-    steps:
-      - weight: 10
-        pause: 30s
-      - weight: 25
-        pause: 30s
-      - weight: 50
-        pause: 30s
-      - weight: 100
-        pause: 30s
+    strategy: rolling
     automaticRollback: true
   reliability:
     availabilityTarget: "99.9%"
     maximumP95Latency: 250ms
     maximumErrorRate: "1%"
   observability:
-    metrics: true
-    logs: true
-    traces: true
+    metrics: false
+    logs: false
+    traces: false
   security:
-    requireSignedImage: true
+    requireSignedImage: false
     runAsNonRoot: true
-    networkIsolation: true
+    networkIsolation: false
