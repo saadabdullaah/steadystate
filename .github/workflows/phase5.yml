@@ -1,8 +1,6 @@
 name: Phase 5 acceptance
 
 on:
-  schedule:
-    - cron: "31 3 * * *"
   workflow_dispatch:
 
 permissions:

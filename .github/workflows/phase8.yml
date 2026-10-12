@@ -1,8 +1,6 @@
 name: Phase 8 acceptance
 
 on:
-  schedule:
-    - cron: "13 8 * * *"
   workflow_dispatch:
   pull_request:
     paths:
