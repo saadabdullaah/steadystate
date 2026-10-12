@@ -1,8 +1,6 @@
 name: Phase 7 acceptance
 
 on:
-  schedule:
-    - cron: "29 6 * * *"
   workflow_dispatch:
 
 permissions:

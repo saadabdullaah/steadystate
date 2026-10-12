@@ -1,8 +1,6 @@
 name: Nightly integration
 
 on:
-  schedule:
-    - cron: "41 20 * * 1-5"
   workflow_dispatch:
 
 permissions:
