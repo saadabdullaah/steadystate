@@ -37,7 +37,7 @@ jobs:
       INSTALLER_RELEASE_VERSION: ${{ github.event_name == 'pull_request' && 'v1.0.0' || 'v1.0.1' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Resolve latest published installer release
         if: github.event_name != 'pull_request'
         shell: pwsh
@@ -159,7 +159,7 @@ jobs:
           -run 'TestApplicationDoctorFailureFixtures|TestBreakGlass'
           -count=1
       - name: Upload smoke snapshot
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: platformctl-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
           path: .artifacts/
@@ -176,7 +176,7 @@ jobs:
       CGO_ENABLED: "0"
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build all supported targets
         shell: pwsh
         run: |
@@ -191,7 +191,7 @@ jobs:
             }
           }
       - name: Upload cross-compiled binaries
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: platformctl-six-targets-${{ github.sha }}
           path: .artifacts/
@@ -208,7 +208,7 @@ jobs:
       CGO_ENABLED: "0"
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install checksum-verified Syft
@@ -225,13 +225,13 @@ jobs:
           chmod +x .artifacts/syft/syft
           echo "$GITHUB_WORKSPACE/.artifacts/syft" >> "$GITHUB_PATH"
       - name: Build six archives, checksums, and SPDX SBOMs
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de
         with:
           distribution: goreleaser
           version: v2.17.1
           args: release --snapshot --clean
       - name: Upload release snapshot
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: platformctl-release-snapshot-${{ github.sha }}
           path: dist/
