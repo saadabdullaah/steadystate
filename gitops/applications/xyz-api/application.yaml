@@ -2,8 +2,8 @@ apiVersion: platform.steadystate.dev/v1alpha1
 kind: Application
 metadata:
   annotations:
-    argocd.argoproj.io/sync-options: Prune=false
     argocd.argoproj.io/sync-wave: "1"
+    steadystate.dev/deletion-request: a0a94a8c-421f-4d1c-8d46-28a92b190a96
   name: xyz-api
   namespace: team-xyz
 spec:
